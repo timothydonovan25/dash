@@ -1,0 +1,5 @@
+# name,     type, subtype,  offset,   size
+nvs,        data, nvs,      0x9000,   0x10000
+phy_init,   data, phy,      0x19000,  0x1000
+coredump,   data, coredump, 0x1a000,  0x10000
+factory,    app,  factory,  0x30000,  0x600000
