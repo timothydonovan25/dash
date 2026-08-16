@@ -488,6 +488,91 @@ void MapView::render(Canvas& c) {
     }
 }
 
+// --- TachSegment --------------------------------------------------------
+
+void TachSegment::configure(Fill dir, float from, float to, bool cut_diagonal) {
+    const bool a = assign_t(dir_, dir);
+    const bool b = assign(from_, from);
+    const bool d = assign(to_, to);
+    const bool e = assign_t(cut_, cut_diagonal);
+    if (a || b || d || e) touch();
+}
+
+void TachSegment::set(float fraction) {
+    if (fraction < 0.0f) fraction = 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+    // Quantised to the pixel this leg can actually show. Without this the
+    // bar marks itself dirty on every tick of a floating point rpm and
+    // repaints a region that has not visibly changed.
+    const int16_t span = dir_ == Fill::Up ? bounds.h : bounds.w;
+    const float q = span > 0 ? std::round(fraction * span) / span : fraction;
+    if (assign(fraction_, q)) touch();
+}
+
+void TachSegment::render(Canvas& c) {
+    // The unlit track, tapered where the diagonal cuts it.
+    c.fill_rect(bounds, color::kTachTrack);
+    if (cut_) {
+        c.fill_triangle(135, 0, 234, bounds.bottom(), 27, bounds.bottom(),
+                        color::kBg);
+    }
+
+    // This leg's share of the travel, as a fraction of its own length.
+    float local = 0.0f;
+    if (to_ > from_) local = (fraction_ - from_) / (to_ - from_);
+    if (local <= 0.0f) return;
+    if (local > 1.0f) local = 1.0f;
+
+    // The lit part is not cut by the diagonal: it climbs into the corner the
+    // taper takes away, so the bar squares off as it reaches full.
+    if (dir_ == Fill::Up) {
+        const int16_t lit = static_cast<int16_t>(bounds.h * local);
+        c.fill_rect(Rect{bounds.x, static_cast<int16_t>(bounds.bottom() - lit),
+                         bounds.w, lit}, color::kTach);
+    } else {
+        const int16_t lit = static_cast<int16_t>(bounds.w * local);
+        c.fill_rect(Rect{bounds.x, bounds.y, lit, bounds.h}, color::kTach);
+    }
+}
+
+// --- LeanGauge ----------------------------------------------------------
+
+void LeanGauge::set(float lean_deg, bool valid) {
+    // Half a degree is finer than the arc can draw at this radius.
+    const float q = std::round(lean_deg * 2.0f) / 2.0f;
+    const bool a = assign(lean_deg_, q);
+    const bool b = assign_t(valid_, valid);
+    if (a || b) touch();
+}
+
+void LeanGauge::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+
+    const int16_t cx = bounds.cx();
+    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h * 2 / 5);
+    const int16_t r  = static_cast<int16_t>(bounds.w / 2 - 6);
+    const int16_t ri = static_cast<int16_t>(r - 12);
+
+    c.fill_arc(cx, cy, r, ri, 270.0f, 360.0f, color::kGrid);
+    c.fill_arc(cx, cy, r, ri, 0.0f, 90.0f, color::kGrid);
+
+    if (valid_) {
+        float a = lean_deg_;
+        if (a < -85.0f) a = -85.0f;
+        if (a > 85.0f) a = 85.0f;
+        // Leaning right puts the marker right, which is where the rider is
+        // going. Zero is straight up.
+        const float mark = a < 0.0f ? 360.0f + a : a;
+        c.fill_arc(cx, cy, r, ri, mark - 4.0f, mark + 4.0f, color::kTach);
+    }
+
+    char buf[16];
+    core::units::fmt_value(buf, sizeof buf,
+                           lean_deg_ < 0 ? -lean_deg_ : lean_deg_, 0, valid_);
+    c.draw_text(cx, static_cast<int16_t>(cy + 6), buf,
+                valid_ ? color::kText : color::kDim, 3, Align::Center);
+}
+
 // --- AlertOverlay -------------------------------------------------------
 
 void AlertOverlay::show(const char* text, Color c) {

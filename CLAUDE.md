@@ -138,6 +138,14 @@ Core 1 absorbs what can be late: `render` (30 Hz), `logger`, `ble`,
 Tach edge to shift lamp must stay under 3 ms. If you add anything to
 core 0 above priority 18, you have broken that.
 
+The panel is the other budget. A whole 480x320 frame is 460 kB at the
+ILI9488's 18-bit colour — 92 ms on the wire at 40 MHz, which is 11 fps no
+matter how fast the drawing is. `render` therefore sends only the widgets
+that changed, and **anything that moves must be a widget**: background
+chrome is redrawn on a full repaint and never in between, so live data
+painted there stops moving. `test_ui` checks that a partial update lands the
+same pixels as a full repaint, which is the property that catches it.
+
 ## Conventions
 
 - C++17. `snake_case` for functions and variables, `PascalCase` for types.

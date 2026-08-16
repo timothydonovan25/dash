@@ -22,35 +22,30 @@ public:
     const char* name() const override { return "SPEED"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
-    void draw_background(Canvas& c) override { draw_chrome(c); }
+    void draw_background(Canvas& c) override;
     // No title bar: this screen is read at speed and wants every pixel.
     bool wants_title() const override { return false; }
     WidgetList widgets() override;
 
 private:
-    void draw_chrome(Canvas& c);
-
-    BigNumber  speed_;
-    BigNumber  rpm_;
-    ShiftStrip shift_;
-    Label      gear_;
-    Label      clock_;
-    Widget*    list_[5] = {};
-
-    // Read by draw_chrome, set by update. The screen is still a pure
-    // function of one Frame; this is just where the frame's numbers wait
-    // between the two halves of a repaint.
-    float    lean_deg_ = 0.0f;
-    bool     lean_ok_ = false;
-    uint8_t  sats_ = 0;
-    float    hdop_ft_ = 0.0f;
-    bool     fix_ = false;
-    float    rpm_frac_ = 0.0f;
-    uint32_t lap_ms_ = 0;
-    bool     lap_timing_ = false;
-    float    trip_mi_ = 0.0f;
-    float    odo_mi_ = 0.0f;
-    bool     chrome_dirty_ = true;
+    // Everything on this screen that moves is a widget, including the tach
+    // bar and the lean gauge. Only widgets are tracked for redraw, so live
+    // data painted as background would be refreshed on a full repaint and
+    // never in between — on a partially updated panel it simply stops.
+    BigNumber   speed_;
+    BigNumber   rpm_;
+    ShiftStrip  shift_;
+    Label       gear_;
+    Label       clock_;
+    TachSegment bar_up_;
+    TachSegment bar_across_;
+    LeanGauge   lean_;
+    Label       sats_;
+    Label       hdop_;
+    Label       lap_;
+    Label       odo_;
+    Label       trip_;
+    Widget*     list_[13] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

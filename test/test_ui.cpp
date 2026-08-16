@@ -407,6 +407,69 @@ int main() {
         CHECK(s.ink() > 0);
     }
 
+    CASE("a partial update lands the same pixels as a full repaint");
+    {
+        // The property the render task depends on: after a frame where only
+        // some widgets changed, repainting just those widgets must leave the
+        // panel identical to a full redraw. It fails the moment a screen
+        // paints live data as background — background is only refreshed on a
+        // full repaint, so on a partially updated panel it stops moving and
+        // the two diverge.
+        Frame a = busy_frame();
+        Frame b = busy_frame();
+        b.motion.best_mph = 61.0f;
+        b.engine.rpm = 4100.0f;
+        b.engine.shift_mask = 0x07;
+        b.engine.gear = 3;
+        b.att.lean_deg = 18.0f;
+        b.lap.current_ms = 47310;
+        b.gnss.sats = 9;
+        b.gnss.utc_ms += 61u * 1000u;
+        b.trip.trip_a_mi = 33.9f;
+
+        const core::nav::Layout counts;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
+                Fixture fx;
+                Screen320x480 partial, whole;
+                fx.app.begin(partial.canvas);
+                go_to(fx.app, partial.canvas, static_cast<Mode>(m), n);
+
+                // Both start from a full repaint of the first frame.
+                fx.app.update(a);
+                fx.app.render(partial.canvas, true);
+                whole.px = partial.px;
+
+                // One side updates only what changed...
+                fx.app.update(b);
+                for (Widget* w : fx.app.current().widgets()) {
+                    if (!w || !w->dirty) continue;
+                    w->render(partial.canvas);
+                    w->clear_dirty();
+                }
+
+                // ...the other redraws everything from the same state. No
+                // second update(): a screen that accumulates, like the rpm
+                // sparkline, would take an extra sample and the two sides
+                // would differ for a reason that has nothing to do with
+                // partial drawing.
+                FrameBufferCanvas wc(whole.px.data(), kScreenW, kScreenH);
+                fx.app.render(wc, true);
+
+                size_t differing = 0;
+                for (size_t i = 0; i < partial.px.size(); ++i) {
+                    if (partial.px[i] != whole.px[i]) ++differing;
+                }
+                if (differing != 0) {
+                    std::printf("       %s/%s: %zu px differ\n",
+                                fx.app.mode_name(), fx.app.current().name(),
+                                differing);
+                }
+                CHECK(differing == 0);
+            }
+        }
+    }
+
     CASE("mode and screen names are all present");
     {
         Fixture fx;

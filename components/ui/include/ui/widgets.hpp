@@ -199,6 +199,42 @@ private:
     bool  valid_ = false;
 };
 
+// One leg of the tach bar: the L that runs up the left edge of the speed
+// screen and along the top.
+//
+// It is a widget rather than something the screen paints because it changes
+// with rpm, and only widgets are tracked for redraw — chrome painted by a
+// screen is refreshed on a full repaint and never in between, which on a
+// partial-update display means it would simply stop moving.
+class TachSegment : public Widget {
+public:
+    enum class Fill : uint8_t { Up = 0, Right };
+
+    // `from` and `to` are this leg's share of the whole bar's travel, so the
+    // two legs together cover 0..1 and the fill crosses the corner smoothly.
+    void configure(Fill dir, float from, float to, bool cut_diagonal);
+    void set(float fraction);      // 0..1 of the whole bar
+    void render(Canvas& c) override;
+
+private:
+    Fill  dir_ = Fill::Up;
+    float from_ = 0.0f, to_ = 1.0f;
+    bool  cut_ = false;
+    float fraction_ = 0.0f;
+};
+
+// The lean gauge on the speed screen: a half annulus with a marker on it and
+// the angle in the middle.
+class LeanGauge : public Widget {
+public:
+    void set(float lean_deg, bool valid);
+    void render(Canvas& c) override;
+
+private:
+    float lean_deg_ = 0.0f;
+    bool  valid_ = false;
+};
+
 // The one widget allowed to draw over whatever screen is up. A tyre losing
 // air is worth interrupting the trip map for (§7.4).
 class AlertOverlay : public Widget {

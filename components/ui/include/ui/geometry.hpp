@@ -28,6 +28,8 @@ constexpr Color kWarn     = rgb(255, 176, 32);
 constexpr Color kAlarm    = rgb(255, 64, 56);
 // The tach bar red, matched to the reference layout: RGB565 0xE945.
 constexpr Color kTach     = rgb(239, 40, 41);
+// The unlit part of the tach bar: dark enough to read as empty, not invisible.
+constexpr Color kTachTrack= rgb(72, 14, 14);
 constexpr Color kWhite    = rgb(255, 255, 255);
 }  // namespace color
 

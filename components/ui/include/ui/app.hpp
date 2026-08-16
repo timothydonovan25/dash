@@ -27,6 +27,12 @@ public:
     // what a screen change and a panel reset both need.
     void render(Canvas& c, bool full = false);
 
+    // True while a whole-screen repaint is outstanding: the first frame, a
+    // screen change, or an alert being dismissed. The render task asks, and
+    // clears it once it has actually pushed a full frame.
+    bool needs_full_repaint() const { return needs_full_; }
+    void clear_full_repaint() { needs_full_ = false; }
+
     Screen& current();
     const core::nav::State& nav_state() const { return nav_; }
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }

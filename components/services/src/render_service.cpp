@@ -4,9 +4,18 @@
 // whatever went dirty. The screen never reads a slot itself (rule 4), which
 // is what makes the same App run in a host test against a literal Frame.
 //
-// Drawing happens in bands. A full 320x480 frame at the ILI9488's 18-bit
-// colour is 460 kB, which does not fit in DRAM and would be a long DMA even
-// if it did (§7.6).
+// Drawing happens in bands, and — this is the part that decides the frame
+// rate — only the parts of the screen that changed are sent to the panel.
+//
+// A full 480x320 frame at the ILI9488's 18-bit colour is 460 kB. At 40 MHz
+// that is 92 ms on the wire, so a dashboard that pushed every frame whole
+// would run at about eleven frames a second no matter how fast the drawing
+// was. The widget dirty flags exist for this: the speed tile alone is 38 kB
+// and 7.6 ms, so refreshing what moved instead of everything is the
+// difference between 11 fps and comfortably over 30.
+//
+// A whole frame still goes out on a screen change, when an alert is
+// dismissed, and at boot — anything where the panel's contents are unknown.
 #include "services/services.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
@@ -43,6 +52,38 @@ private:
     Buffer* buf_;
 };
 
+// Push one widget's rectangle, in horizontal strips that fit the one band
+// buffer. A tall widget becomes a few transfers rather than needing a
+// framebuffer the size of the screen.
+hal::Status blit_widget(Deps& d, ui::FrameBufferCanvas& canvas, ui::Color* buf,
+                        ui::Widget& w) {
+    ui::Rect r = w.bounds;
+    if (r.x < 0) { r.w = static_cast<int16_t>(r.w + r.x); r.x = 0; }
+    if (r.y < 0) { r.h = static_cast<int16_t>(r.h + r.y); r.y = 0; }
+    if (r.right() > ui::kScreenW) r.w = static_cast<int16_t>(ui::kScreenW - r.x);
+    if (r.bottom() > ui::kScreenH) r.h = static_cast<int16_t>(ui::kScreenH - r.y);
+    if (r.empty()) return hal::Status::Ok;
+
+    const int16_t rows = canvas.rows_for(r.w);
+    if (rows <= 0) return hal::Status::Unsupported;
+
+    hal::Status s = hal::Status::Ok;
+    for (int16_t y = r.y; y < r.bottom(); y = static_cast<int16_t>(y + rows)) {
+        const int16_t h = static_cast<int16_t>(
+            y + rows > r.bottom() ? r.bottom() - y : rows);
+        if (!canvas.set_window(r.x, y, r.w, h)) return hal::Status::Unsupported;
+        w.render(canvas);
+        if (d.panel) {
+            s = d.panel->blit(static_cast<uint16_t>(r.x),
+                              static_cast<uint16_t>(y),
+                              static_cast<uint16_t>(r.w),
+                              static_cast<uint16_t>(h), buf);
+            if (!hal::ok(s)) return s;
+        }
+    }
+    return s;
+}
+
 void render_task(void* arg) {
     auto* pair = static_cast<std::pair<Deps*, CommandQueue*>*>(arg);
     Deps& d = *pair->first;
@@ -77,6 +118,11 @@ void render_task(void* arg) {
     ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
     app.begin(canvas);
 
+    // Delay-until, not delay-after: a full frame takes tens of milliseconds
+    // on the wire, and delaying afterwards would add that to the period
+    // instead of absorbing it.
+    TickType_t next = xTaskGetTickCount();
+
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
 
     uint32_t frames = 0;
@@ -99,20 +145,42 @@ void render_task(void* arg) {
         const core::state::Frame frame = core::state::snapshot(*d.slots, now);
         app.update(frame);
 
-        // Each band is a full repaint of its own strip: the buffer has no
-        // memory of what was on the panel a frame ago, so the dirty flags
-        // save the widget's work, not the pixels.
-        for (int16_t y = 0; y < ui::kScreenH; y += kBandLines) {
-            canvas.set_origin(0, y);
-            app.render(canvas, true);
-            if (d.panel) {
-                const hal::Status s = d.panel->blit(0, static_cast<uint16_t>(y),
-                                                    ui::kScreenW, kBandLines,
-                                                    band);
-                if (hal::ok(s)) d.health->report_ok(core::state::Dev::Display, now);
-                else d.health->report_error(core::state::Dev::Display,
-                                            static_cast<int32_t>(s), now);
+        hal::Status blit_status = hal::Status::Ok;
+
+        if (app.needs_full_repaint()) {
+            // The panel's contents are unknown, so everything goes out: the
+            // background chrome as well as every widget, band by band.
+            for (int16_t y = 0; y < ui::kScreenH; y += kBandLines) {
+                canvas.set_window(0, y, ui::kScreenW, kBandLines);
+                app.render(canvas, true);
+                if (d.panel) {
+                    blit_status = d.panel->blit(0, static_cast<uint16_t>(y),
+                                                ui::kScreenW, kBandLines, band);
+                }
             }
+            app.clear_full_repaint();
+        } else {
+            // Only what moved. Each widget clears its own bounds before
+            // drawing, and the background chrome sits outside those bounds,
+            // so what is already on the panel underneath stays correct.
+            for (ui::Widget* w : app.current().widgets()) {
+                if (!w || !w->dirty) continue;
+                blit_status = blit_widget(d, canvas, band, *w);
+                w->clear_dirty();
+            }
+            // The alert sits over everything, so anything repainted under it
+            // has to be covered again.
+            if (app.alert().active()) {
+                blit_status = blit_widget(d, canvas, band, app.alert());
+                app.alert().clear_dirty();
+            }
+        }
+
+        if (hal::ok(blit_status)) {
+            d.health->report_ok(core::state::Dev::Display, now);
+        } else {
+            d.health->report_error(core::state::Dev::Display,
+                                   static_cast<int32_t>(blit_status), now);
         }
 
         ++frames;
@@ -125,7 +193,7 @@ void render_task(void* arg) {
             last_hz_ms = now;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(33));      // 30 Hz
+        vTaskDelayUntil(&next, pdMS_TO_TICKS(33));      // 30 Hz
     }
 }
 

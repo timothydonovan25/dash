@@ -11,43 +11,41 @@ namespace u = core::units;
 
 // --- SpeedScreen --------------------------------------------------------
 //
-// Landscape, 480x320. Laid out the way a rider actually scans it: the two
-// numbers that matter — speed and rpm — get the biggest tiles and the top
-// half; everything else is reference material along the bottom.
+// Landscape, 480x320. The two numbers that matter — speed and rpm — get the
+// biggest tiles and the top half; everything else is reference material
+// around the edges.
 //
 // The tach bar is an L down the left edge and across the top, cut on a
-// diagonal, which is what gives the panel a direction to be read in. It
-// fills with rpm rather than being decoration.
+// diagonal. It fills over 0 to the first shift lamp's rpm, so it is full at
+// the moment lamp one lights: the shift lights say nothing below their own
+// threshold, and this covers exactly that gap and then hands over.
 namespace {
 constexpr Color kFrame = color::kText;
-// The unlit part of the tach bar. Dark enough to read as "empty" without
-// being invisible at night.
-constexpr Color kTachTrack = rgb(72, 14, 14);
 
-// Tach bar: the L, and the diagonal that cuts its corner off.
 constexpr int16_t kBarTop    = 25;    // thickness of the top run
 constexpr int16_t kBarLeft   = 25;    // thickness of the left run
-constexpr int16_t kBarTopEnd = 135;   // where the top run stops being full
-constexpr int16_t kBarCut    = 234;   // where the diagonal meets the top edge
+constexpr int16_t kBarTopEnd = 135;   // length of the top run
+
+constexpr Rect kBarUp     {  0,  25,  25, 295};
+constexpr Rect kBarAcross {  0,   0, 135,  25};
 
 constexpr Rect kRpmTile   { 31,  28, 169, 43};
 constexpr Rect kGearTile  {216,   2,  78, 84};
 constexpr Rect kSpeedTile {310,  12, 162, 78};
-
-constexpr int16_t kLeanCx  = 86;
-constexpr int16_t kLeanCy  = 155;
-constexpr int16_t kLeanR   = 52;
-constexpr int16_t kLeanRi  = 40;
-
-constexpr Rect kLeanText  { 46, 140,  80,  30};
-constexpr Rect kSats      { 28, 268, 110,  14};
-constexpr Rect kHdop      { 28, 288, 110,  14};
-constexpr Rect kClock     {297, 140, 175,  20};
-constexpr Rect kLapTile   {297, 175, 175,  34};
 // scale 10 is 70 px of glyph in an 84 px tile.
 constexpr Rect kGearText  {216,  10,  78,  70};
-constexpr Rect kTripTile  {216, 250, 250,  20};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
+
+constexpr Rect kLean      { 30,  96, 112, 104};
+constexpr Rect kSats      { 28, 266, 120,  10};
+constexpr Rect kHdop      { 28, 286, 120,  10};
+constexpr Rect kClock     {297, 140, 175,  16};
+constexpr Rect kLapVal    {297, 176, 175,  16};
+constexpr Rect kOdo       {216, 250, 120,  10};
+constexpr Rect kTrip      {346, 250, 120,  10};
+
+// The two legs share one travel: up the left edge, then along the top.
+constexpr float kUpShare = 295.0f / (295.0f + 135.0f);
 }  // namespace
 
 void SpeedScreen::enter(Canvas&) {
@@ -61,20 +59,32 @@ void SpeedScreen::enter(Canvas&) {
 
     shift_.set_bounds(kShiftStrip);
 
-    // The reference puts a gear number here. This bike has no gear sensor,
-    // and a gear guessed from rpm over speed is wrong on every clutch pull,
-    // so the tile shows the one thing the bike does report: neutral.
+    // The reference layout puts a gear number here. This bike has no gear
+    // sensor, so it is inferred from rpm against road speed, and neutral —
+    // which really is sensed — wins over the inference.
     gear_.set_bounds(kGearText);
     gear_.configure("-", color::kDim, 10, Align::Center);
 
     clock_.set_bounds(kClock);
     clock_.configure("--:--", color::kText, 2, Align::Right);
 
-    list_[0] = &speed_;
-    list_[1] = &rpm_;
-    list_[2] = &shift_;
-    list_[3] = &gear_;
-    list_[4] = &clock_;
+    bar_up_.set_bounds(kBarUp);
+    bar_up_.configure(TachSegment::Fill::Up, 0.0f, kUpShare, false);
+    bar_across_.set_bounds(kBarAcross);
+    bar_across_.configure(TachSegment::Fill::Right, kUpShare, 1.0f, true);
+
+    lean_.set_bounds(kLean);
+    sats_.set_bounds(kSats);  sats_.configure("", color::kText, 1, Align::Left);
+    hdop_.set_bounds(kHdop);  hdop_.configure("", color::kDim, 1, Align::Left);
+    lap_.set_bounds(kLapVal); lap_.configure("", color::kDim, 2, Align::Right);
+    odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
+    trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
+
+    list_[0]  = &bar_up_;   list_[1]  = &bar_across_; list_[2]  = &speed_;
+    list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
+    list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
+    list_[9]  = &hdop_;     list_[10] = &lap_;        list_[11] = &odo_;
+    list_[12] = &trip_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -87,9 +97,8 @@ void SpeedScreen::update(const Frame& f) {
     rpm_.set(f.engine.rpm, f.engine.rpm > 0.0f || f.engine.neutral);
     shift_.set(f.engine.shift_mask, f.engine.shift_flash);
 
-    // Neutral is sensed; the gear is inferred. A dash that shows a confident
-    // digit through every clutch pull is worse than one that admits it does
-    // not know, so an unknown gear is a dash rather than a stale number.
+    // Neutral is sensed; the gear is inferred. An unknown gear is a dash
+    // rather than a stale digit.
     char g[2] = {'-', '\0'};
     Color gc = color::kDim;
     if (f.engine.neutral) {
@@ -101,77 +110,69 @@ void SpeedScreen::update(const Frame& f) {
     }
     gear_.configure(g, gc, 10, Align::Center);
 
-    char clock[12];
-    u::fmt_clock(clock, sizeof clock, f.gnss.utc_ms,
+    char buf[24];
+    u::fmt_clock(buf, sizeof buf, f.gnss.utc_ms,
                  has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0,
                  f.gnss.fix);
-    clock_.set_text(clock);
+    clock_.set_text(buf);
 
-    lean_deg_ = f.att.lean_deg;
-    lean_ok_ = f.health.ok(Dev::Imu);
-    sats_ = f.gnss.sats;
-    hdop_ft_ = f.gnss.hdop * 16.0f;      // rough DOP-to-feet, for a glance
-    fix_ = f.gnss.fix;
     // Full scale is the first shift lamp, not the redline: above that the
     // lamps are the instrument and the bar just stays full.
     const uint16_t base = has_ctx() && ctx().settings
                               ? ctx().settings->shift_base_rpm : 6000;
-    rpm_frac_ = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
-    if (rpm_frac_ < 0.0f) rpm_frac_ = 0.0f;
-    if (rpm_frac_ > 1.0f) rpm_frac_ = 1.0f;
-    lap_ms_ = f.lap.current_ms;
-    lap_timing_ = f.lap.phase == core::lap::Phase::Timing;
-    trip_mi_ = f.trip.trip_a_mi;
-    odo_mi_ = f.trip.odo_mi;
-    chrome_dirty_ = true;
+    const float frac = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
+    bar_up_.set(frac);
+    bar_across_.set(frac);
+
+    lean_.set(f.att.lean_deg, f.health.ok(Dev::Imu));
+
+    size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
+                            f.gnss.fix);
+    if (k + 6 < sizeof buf) {
+        buf[k++] = ' '; buf[k++] = 'S'; buf[k++] = 'a'; buf[k++] = 't';
+        buf[k++] = 's'; buf[k] = '\0';
+    }
+    sats_.configure(buf, f.gnss.fix ? color::kText : color::kDim, 1, Align::Left);
+
+    k = u::fmt_value(buf, sizeof buf, f.gnss.hdop * 16.0f, 0, f.gnss.fix);
+    if (k + 4 < sizeof buf) {
+        buf[k++] = ' '; buf[k++] = 'f'; buf[k++] = 't'; buf[k] = '\0';
+    }
+    hdop_.set_text(buf);
+
+    u::fmt_duration(buf, sizeof buf, f.lap.current_ms,
+                    f.lap.phase == core::lap::Phase::Timing);
+    lap_.configure(buf, f.lap.phase == core::lap::Phase::Timing ? color::kAccent
+                                                                : color::kDim,
+                   2, Align::Right);
+
+    const char* dunit = "mi";
+    k = u::fmt_float(buf, sizeof buf,
+                     u::distance_for_display(f.trip.odo_mi, units(), &dunit), 0);
+    if (k + 8 < sizeof buf) {
+        buf[k++] = ' ';
+        for (const char* q = dunit; *q; ++q) buf[k++] = *q;
+        buf[k] = '\0';
+    }
+    odo_.set_text(buf);
+
+    k = u::fmt_float(buf, sizeof buf,
+                     u::distance_for_display(f.trip.trip_a_mi, units(), &dunit), 1);
+    if (k + 10 < sizeof buf) {
+        buf[k++] = ' ';
+        for (const char* q = dunit; *q; ++q) buf[k++] = *q;
+        buf[k++] = ' '; buf[k++] = 'A'; buf[k] = '\0';
+    }
+    trip_.set_text(buf);
 }
 
-// The parts of the screen that are not a widget: the bar, the tiles, the
-// lean gauge and the small print. Drawn by the screen itself because they
-// are the screen's identity rather than reusable furniture.
-void SpeedScreen::draw_chrome(Canvas& c) {
-    // The tach bar is a gauge, not a border. It is one continuous track that
-    // starts at the bottom left corner, runs up the left edge, turns, and
-    // runs right along the top until the diagonal cuts it off.
-    //
-    // It fills over 0 to the first shift lamp's rpm, so it is full at the
-    // moment lamp one lights. That is the whole point of it: the shift
-    // lights say nothing below their own threshold, and a rider pulling away
-    // or lugging it in third has nothing else to look at. The bar covers
-    // exactly that gap and then hands over.
-    const int16_t up_len = static_cast<int16_t>(kScreenH - kBarTop);
-    const int16_t across_len = kBarTopEnd;
-    const int total_len = up_len + across_len;
-    const int filled = static_cast<int>(total_len * rpm_frac_);
-
-    // Track first, tapered: the diagonal is cut out of the *empty* bar, so
-    // at rest the panel keeps the swept shape of the reference layout.
-    c.fill_rect(Rect{0, kBarTop, kBarLeft, up_len}, kTachTrack);
-    c.fill_rect(Rect{0, 0, across_len, kBarTop}, kTachTrack);
-    c.fill_triangle(kBarTopEnd, 0, kBarCut, kBarTop, 27, kBarTop, color::kBg);
-
-    // Then the lit part, over the top of it, following the same path — and
-    // *not* cut by the diagonal. The fill climbs into the corner the taper
-    // takes away, so the bar squares itself off as it reaches full. That is
-    // what makes the top of the travel visible: tapered, the last third of
-    // the sweep would be a few pixels wide and read as nothing at all.
-    const int16_t up_lit = static_cast<int16_t>(filled < up_len ? filled : up_len);
-    if (up_lit > 0) {
-        c.fill_rect(Rect{0, static_cast<int16_t>(kScreenH - up_lit),
-                         kBarLeft, up_lit}, color::kTach);
-    }
-    if (filled > up_len) {
-        const int16_t across_lit =
-            static_cast<int16_t>(filled - up_len > across_len ? across_len
-                                                             : filled - up_len);
-        c.fill_rect(Rect{0, 0, across_lit, kBarTop}, color::kTach);
-    }
-
+// Only what never changes: the tile frames, the unit labels and the caption
+// over the lap clock. Everything with data in it is a widget above.
+void SpeedScreen::draw_background(Canvas& c) {
     c.draw_round_rect(kRpmTile, 6, kFrame);
     c.draw_round_rect(kGearTile, 8, kFrame);
     c.draw_round_rect(kSpeedTile, 8, kFrame);
 
-    // Units live on the frame, not in the number, so the digits get the room.
     const char* sunit = units() == core::units::System::Metric ? "km/h" : "mph";
     c.draw_text(static_cast<int16_t>(kSpeedTile.right() - 6),
                 static_cast<int16_t>(kSpeedTile.bottom() + 4), sunit,
@@ -179,77 +180,12 @@ void SpeedScreen::draw_chrome(Canvas& c) {
     c.draw_text(static_cast<int16_t>(kRpmTile.right() - 6),
                 static_cast<int16_t>(kRpmTile.bottom() + 4), "rpm",
                 color::kDim, 1, Align::Right);
-
-    // --- lean gauge -----------------------------------------------------
-    // A half-annulus from nine o'clock round the top to three o'clock, with
-    // the rider's angle marked on it. Peak marks are deliberately absent:
-    // the number below is the reading, the arc is the feel.
-    c.fill_arc(kLeanCx, kLeanCy, kLeanR, kLeanRi, 270.0f, 360.0f, color::kGrid);
-    c.fill_arc(kLeanCx, kLeanCy, kLeanR, kLeanRi, 0.0f, 90.0f, color::kGrid);
-
-    if (lean_ok_) {
-        float a = lean_deg_;
-        if (a < -85.0f) a = -85.0f;
-        if (a > 85.0f) a = 85.0f;
-        // Lean right tips the marker right, which is the direction the rider
-        // is going. Zero is straight up.
-        const float mark = a < 0.0f ? 360.0f + a : a;
-        c.fill_arc(kLeanCx, kLeanCy, kLeanR, kLeanRi,
-                   mark - 4.0f, mark + 4.0f, color::kTach);
-    }
-
-    char buf[16];
-    u::fmt_value(buf, sizeof buf, lean_deg_ < 0 ? -lean_deg_ : lean_deg_, 0,
-                 lean_ok_);
-    c.draw_text(kLeanText.cx(), kLeanText.y, buf,
-                lean_ok_ ? color::kText : color::kDim, 3, Align::Center);
-
-    // --- GPS quality ----------------------------------------------------
-    size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(sats_), 0, fix_);
-    if (k + 6 < sizeof buf) {
-        buf[k++] = ' '; buf[k++] = 'S'; buf[k++] = 'a'; buf[k++] = 't';
-        buf[k++] = 's'; buf[k] = '\0';
-    }
-    c.draw_text(kSats.x, kSats.y, buf, fix_ ? color::kText : color::kDim, 1,
-                Align::Left);
-
-    k = u::fmt_value(buf, sizeof buf, hdop_ft_, 0, fix_);
-    if (k + 4 < sizeof buf) {
-        buf[k++] = ' '; buf[k++] = 'f'; buf[k++] = 't'; buf[k] = '\0';
-    }
-    c.draw_text(kHdop.x, kHdop.y, buf, color::kDim, 1, Align::Left);
-
-    // --- lap clock, where the media strip sits in the reference ---------
-    u::fmt_duration(buf, sizeof buf, lap_ms_, lap_timing_);
-    c.draw_text(kLapTile.right(), kLapTile.y, buf,
-                lap_timing_ ? color::kAccent : color::kDim, 2, Align::Right);
-    c.draw_text(kLapTile.right(), static_cast<int16_t>(kLapTile.y - 12), "LAP",
+    c.draw_text(kLapVal.right(), static_cast<int16_t>(kLapVal.y - 12), "LAP",
                 color::kDim, 1, Align::Right);
-
-    // --- odometer and trip ----------------------------------------------
-    const char* dunit = "mi";
-    char line[32];
-    k = u::fmt_float(line, sizeof line,
-                     u::distance_for_display(odo_mi_, units(), &dunit), 0);
-    if (k + 8 < sizeof line) {
-        line[k++] = ' ';
-        for (const char* q = dunit; *q; ++q) line[k++] = *q;
-        line[k] = '\0';
-    }
-    c.draw_text(kTripTile.x, kTripTile.y, line, color::kDim, 1, Align::Left);
-
-    k = u::fmt_float(line, sizeof line,
-                     u::distance_for_display(trip_mi_, units(), &dunit), 1);
-    if (k + 10 < sizeof line) {
-        line[k++] = ' ';
-        for (const char* q = dunit; *q; ++q) line[k++] = *q;
-        line[k++] = ' '; line[k++] = 'A'; line[k] = '\0';
-    }
-    c.draw_text(kTripTile.right(), kTripTile.y, line, color::kDim, 1,
-                Align::Right);
+    (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 5}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 13}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //
