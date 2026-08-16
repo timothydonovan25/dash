@@ -179,7 +179,7 @@ Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 12 widgets, all 15 screens, the render loop, laid out
+**`ui/`** — canvas, 12 widgets, all 16 screens, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each

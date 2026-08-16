@@ -1,6 +1,6 @@
 // Every screen in the firmware (§7.1).
 //
-//   Cruise  big speed · trip stats · trip map
+//   Cruise  big speed · trip stats · trip map · minimal
 //   Track   lap timer · lap history · track map
 //   Stat    all data · engine · attitude
 //   Diag    sensors · gps · system · bus and I/O · radio
@@ -51,6 +51,24 @@ private:
     float    trip_mi_ = 0.0f;
     float    odo_mi_ = 0.0f;
     bool     chrome_dirty_ = true;
+};
+
+// Speed and the time, and nothing else. For a long road section where the
+// rest of the dash is noise — no tach bar, no lean gauge, no tiles, and no
+// title bar either, because a screen showing one number does not need to be
+// told apart from anything.
+class MinimalScreen final : public Screen {
+public:
+    const char* name() const override { return "MINIM"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    bool wants_title() const override { return false; }
+    WidgetList widgets() override;
+
+private:
+    BigNumber speed_;
+    Label     clock_;
+    Widget*   list_[2] = {};
 };
 
 class TripScreen final : public Screen {

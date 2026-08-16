@@ -197,9 +197,9 @@ int main() {
         fx.app.begin(s.canvas);
         const Frame f = busy_frame();
 
-        const uint8_t counts[] = {3, 3, 3, 5, 1};
+        const core::nav::Layout counts;
         for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
-            for (uint8_t n = 0; n < counts[m]; ++n) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
                 go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
                 CHECK(fx.app.nav_state().screen == n);
                 s.wipe();
@@ -221,9 +221,9 @@ int main() {
         Screen320x480 s;
         fx.app.begin(s.canvas);
         const Frame f = dead_frame();
-        const uint8_t counts[] = {3, 3, 3, 5, 1};
+        const core::nav::Layout counts;
         for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
-            for (uint8_t n = 0; n < counts[m]; ++n) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
                 go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
                 fx.app.update(f);
                 fx.app.render(s.canvas, true);
@@ -412,9 +412,9 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        const uint8_t counts[] = {3, 3, 3, 5, 1};
+        const core::nav::Layout counts;
         for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
-            for (uint8_t n = 0; n < counts[m]; ++n) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
                 go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
                 CHECK(fx.app.current().name()[0] != '\0');
                 CHECK(fx.app.mode_name()[0] != '\0');

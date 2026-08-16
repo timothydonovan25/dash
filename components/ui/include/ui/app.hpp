@@ -53,6 +53,7 @@ private:
     core::nav::Layout layout_{};
 
     SpeedScreen      speed_;
+    MinimalScreen    minimal_;
     TripScreen       trip_;
     TripMapScreen    trip_map_;
     LapScreen        lap_;

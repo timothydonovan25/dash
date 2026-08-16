@@ -251,6 +251,44 @@ void SpeedScreen::draw_chrome(Canvas& c) {
 
 WidgetList SpeedScreen::widgets() { return WidgetList{list_, 5}; }
 
+// --- MinimalScreen ------------------------------------------------------
+//
+// One number, as large as 480x320 allows, and the clock along the bottom.
+// Scale 22 is 154 px of digit — three figures still fit, which matters
+// exactly once, going down something steep.
+namespace {
+constexpr Rect kMinSpeed { 0,  40, 480, 210};
+constexpr Rect kMinClock { 0, 288, 480,  18};
+}  // namespace
+
+void MinimalScreen::enter(Canvas&) {
+    speed_.set_bounds(kMinSpeed);
+    speed_.configure("mph", 0, 22);
+
+    clock_.set_bounds(kMinClock);
+    clock_.configure("--:--", color::kDim, 2, Align::Center);
+
+    list_[0] = &speed_;
+    list_[1] = &clock_;
+}
+
+void MinimalScreen::update(const Frame& f) {
+    const char* unit = "mph";
+    const float shown = u::speed_for_display(f.motion.best_mph, units(), &unit);
+    speed_.configure(unit, 0, 22);
+    const bool speed_ok = f.health.ok(Dev::Gnss) || f.motion.front_mph > 0.0f ||
+                          f.motion.rear_mph > 0.0f;
+    speed_.set(shown, speed_ok);
+
+    char clock[12];
+    u::fmt_clock(clock, sizeof clock, f.gnss.utc_ms,
+                 has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0,
+                 f.gnss.fix);
+    clock_.set_text(clock);
+}
+
+WidgetList MinimalScreen::widgets() { return WidgetList{list_, 2}; }
+
 // --- TripScreen ---------------------------------------------------------
 namespace {
 // 480x320: the odometer across the top, then two rows of three.

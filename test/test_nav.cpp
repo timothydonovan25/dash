@@ -7,7 +7,7 @@ static State press(State s, Button b, Press p, const Layout& l, uint8_t focus = 
 }
 
 int main() {
-    Layout l;                       // {3, 3, 3, 5, 1}
+    Layout l;                       // whatever nav.hpp says today
     State s;
 
     CASE("A cycles through all five modes and wraps");
@@ -42,9 +42,12 @@ int main() {
     CHECK(s.mode == Mode::Diag);                 // B never changes mode
 
     CASE("long B walks screens backward and wraps");
-    s = State{Mode::Cruise, 0, 0, false};        // cruise has 3
+    // Backwards from the first screen is the last one, whatever the layout
+    // says that is today — adding a screen to a mode must not need an edit
+    // here.
+    s = State{Mode::Cruise, 0, 0, false};
     s = press(s, Button::B, Press::Long, l);
-    CHECK(s.screen == 2);
+    CHECK(s.screen == l.screens[static_cast<uint8_t>(Mode::Cruise)] - 1);
 
     CASE("config mode has one screen, so B is a no-op");
     s = State{Mode::Config, 0, 0, false};
