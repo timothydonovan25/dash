@@ -19,7 +19,16 @@ inline constexpr uint8_t kButtonCount = 5;   // A B C D E
 struct Config {
     // A press must read the same for this long before it counts. Bar-mounted
     // switches on a vibrating dirt bike bounce for a few milliseconds.
-    uint16_t debounce_ms = 25;
+    //
+    // Two polls at 100 Hz. It stays a stability window rather than becoming
+    // a leading-edge lockout, which would be about 20 ms quicker: this is
+    // half a metre of unshielded I2C running past an ignition coil, and a
+    // pin pulled low by noise at the instant of a read is a real failure
+    // here, not a theoretical one. Requiring the reading twice costs one
+    // poll and removes that whole class.
+    //
+    // 25 ms was simply more conservative than a switch needs.
+    uint16_t debounce_ms = 12;
 
     // Held for this long is a long press, and it fires there rather than on
     // release: a rider holding E to set the finish line wants to know it

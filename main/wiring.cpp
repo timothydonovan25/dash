@@ -13,6 +13,7 @@
 #include "bsp/buses.hpp"
 #include "drivers/drivers.hpp"
 #include "bsp/pins.hpp"
+#include "esp_attr.h"
 #include "esp_log.h"
 
 namespace wiring {
@@ -27,10 +28,15 @@ core::config::Settings g_settings;
 core::health::Tracker  g_health;
 ui::SystemInfo         g_system;
 
-core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
-core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
-core::log::Ring<core::log::Record, 512>                 g_blackbox;
-core::delta::Tracker                                    g_delta;
+// The bulk buffers go in PSRAM. Together they are about 190 kB, which is a
+// large share of the 512 kB of internal SRAM, and none of them is on a path
+// that cares: the traces are walked by a map screen, the blackbox is drained
+// by the logger, and the delta reference is searched ten times a second.
+// Internal RAM is better spent on the panel's DMA buffer and the stacks.
+EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
+EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
+EXT_RAM_BSS_ATTR core::log::Ring<core::log::Record, 512>                 g_blackbox;
+EXT_RAM_BSS_ATTR core::delta::Tracker                                    g_delta;
 services::LapHistory                                    g_lap_history;
 
 drivers::EspClock    g_clock;
@@ -40,6 +46,7 @@ drivers::Ili9488     g_panel{&g_board};
 drivers::Icm42688p   g_imu;
 drivers::Pa1616d     g_gnss;
 drivers::EngineSense g_sense{&g_board};
+drivers::ShiftLamps  g_lamps{&g_board};
 drivers::NvsStorage  g_storage;
 drivers::SdCard      g_card;
 hal::NullEngine      g_engine;   // the ECU is unreachable on this board (§10.1)
@@ -95,7 +102,10 @@ services::Deps& build() {
     bring_up(core::state::Dev::McpBoard, g_board.init());
     bring_up(core::state::Dev::Display, g_panel.init());
     g_panel.set_backlight(20);
-    g_board.write_shift_lamps(0);
+
+    // The lamps stay dark until ctrl opens the master gate. Bringing this up
+    // after the panel means the backlight's LEDC timer already exists.
+    bring_up(core::state::Dev::McpBoard, g_lamps.init());
 
     // 4. The sensors. Any of these may be absent; none of them stop the boot.
     bring_up(core::state::Dev::Imu, g_imu.init());
@@ -121,6 +131,7 @@ services::Deps& build() {
     g_deps.pod        = &g_pod;
     g_deps.panel      = &g_panel;
     g_deps.sense      = &g_sense;
+    g_deps.lamps      = &g_lamps;
     g_deps.engine     = &g_engine;
     g_deps.storage    = &g_storage;
     g_deps.card       = &g_card;

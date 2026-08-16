@@ -8,6 +8,7 @@ idf_component_register(
          "src/ili9488.cpp"
          "src/nvs_storage.cpp"
          "src/sdcard.cpp"
+         "src/shift_lamps.cpp"
     INCLUDE_DIRS "include"
     REQUIRES dash_hal bsp core
              esp_driver_spi esp_driver_i2c esp_driver_uart

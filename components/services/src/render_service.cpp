@@ -29,6 +29,14 @@
 namespace services {
 namespace {
 
+// How long the loop will sit waiting before looking at the state again. A
+// button press cuts the wait short, so this only bounds how stale a *number*
+// can be, and it is cheap: a pass that finds nothing dirty sends nothing.
+//
+// It is not the frame rate. Frames go out when something changes, and a
+// screen where nothing has changed costs one walk of thirteen dirty flags.
+constexpr uint32_t kPollMs = 10;
+
 constexpr int16_t kBandLines = 40;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
 
@@ -102,11 +110,13 @@ void render_task(void* arg) {
     app.set_trip_source(&trip_src);
     app.set_track_source(&lap_src);
 
-    // Two band buffers in PSRAM, DMA-capable. One is drawn into while the
-    // other is in flight.
+    // Internal SRAM, not PSRAM. This is 38 kB that the SPI DMA reads on
+    // every transfer, and DMA out of PSRAM on the S3 goes through the cache
+    // rather than straight off the bus. The big buffers that can afford to
+    // live in PSRAM are the traces, and they do — see wiring.cpp.
     auto* band = static_cast<ui::Color*>(
         heap_caps_malloc(kBandPixels * sizeof(ui::Color),
-                         MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+                         MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!band) {
         // Nothing to draw into. Fail visibly rather than silently: the dash
         // is useless without a screen and the rider needs to know why.
@@ -118,10 +128,7 @@ void render_task(void* arg) {
     ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
     app.begin(canvas);
 
-    // Delay-until, not delay-after: a full frame takes tens of milliseconds
-    // on the wire, and delaying afterwards would add that to the period
-    // instead of absorbing it.
-    TickType_t next = xTaskGetTickCount();
+
 
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
 
@@ -131,8 +138,15 @@ void render_task(void* arg) {
     for (;;) {
         const uint32_t now = d.clock->now_ms();
 
+        // Wait here rather than at the bottom of the loop, so a button press
+        // is acted on the moment it arrives instead of after the rest of the
+        // period has run out. That is the difference between a menu that
+        // feels immediate and one that feels like it is thinking about it.
         core::nav::InputEvent ev;
-        while (take_input_event(ev)) app.on_input(ev, canvas);
+        if (wait_input_event(ev, kPollMs)) {
+            app.on_input(ev, canvas);
+            while (take_input_event(ev)) app.on_input(ev, canvas);
+        }
 
         // The history grows as laps are scored, so the view is handed over
         // every frame rather than once at startup.
@@ -193,7 +207,6 @@ void render_task(void* arg) {
             last_hz_ms = now;
         }
 
-        vTaskDelayUntil(&next, pdMS_TO_TICKS(33));      // 30 Hz
     }
 }
 

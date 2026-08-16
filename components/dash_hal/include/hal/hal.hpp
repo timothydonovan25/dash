@@ -8,4 +8,5 @@
 #include "hal/i_gpio_expander.hpp"
 #include "hal/i_engine.hpp"
 #include "hal/i_display.hpp"
+#include "hal/i_shift_lamps.hpp"
 #include "hal/i_storage.hpp"

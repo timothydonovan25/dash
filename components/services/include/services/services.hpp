@@ -55,6 +55,7 @@ struct Deps {
     hal::IButtonPod*   pod     = nullptr;
     hal::IPanel*       panel   = nullptr;
     hal::IEngineSense* sense   = nullptr;
+    hal::IShiftLamps*  lamps   = nullptr;
     hal::IEngine*      engine  = nullptr;      // NullEngine today
     hal::IStorage*     storage = nullptr;
     hal::ICard*        card    = nullptr;
@@ -118,5 +119,10 @@ void start_storage(Deps& d);
 // merging them would put UI navigation on the logic task's critical path.
 bool post_input_event(const core::nav::InputEvent& e);
 bool take_input_event(core::nav::InputEvent& out);
+
+// Blocks until a button event arrives or `timeout_ms` passes. This is what
+// the render task waits on instead of a plain periodic delay: a press wakes
+// the frame immediately rather than waiting out the rest of the period.
+bool wait_input_event(core::nav::InputEvent& out, uint32_t timeout_ms);
 
 }  // namespace services

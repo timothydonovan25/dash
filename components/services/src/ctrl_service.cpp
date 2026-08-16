@@ -12,7 +12,6 @@
 #include "core/gear/gear.hpp"
 #include "core/tach/tach.hpp"
 #include "bsp/pins.hpp"
-#include "drivers/mcp23s17.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -30,6 +29,7 @@ void ctrl_task(void* arg) {
     core::tach::WheelMeter front;
     core::tach::WheelMeter rear;
     uint8_t last_mask = 0;
+    uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -66,11 +66,23 @@ void ctrl_task(void* arg) {
 
         const uint16_t rpm = static_cast<uint16_t>(tach.raw_rpm());
         const uint8_t mask = core::shift::pattern(rpm, sc, last_mask);
-        if (mask != last_mask) {
-            if (auto* mcp = static_cast<drivers::Mcp23s17*>(d.board)) {
-                mcp->write_shift_lamps(mask);
-            }
+        if (mask != last_mask && d.lamps) {
+            d.lamps->set_mask(mask);
             last_mask = mask;
+        }
+
+        // The master gate is what actually lights them, and it doubles as
+        // the brightness control. With no engine turning, the board is
+        // probably on a USB port: eight lamps plus the backlight plus the
+        // 3V3 rail is about 610 mA against a 500 mA supply, and browning out
+        // the expander takes the panel's reset line with it. So the duty is
+        // clamped until the engine is running.
+        const uint8_t master =
+            tach.running() ? 100u
+                           : static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255);
+        if (master != last_master && d.lamps) {
+            d.lamps->set_master(master);
+            last_master = master;
         }
 
         const uint32_t now_ms_early = d.clock->now_ms();

@@ -23,3 +23,4 @@
 #include "drivers/engine_sense.hpp"
 #include "drivers/nvs_storage.hpp"
 #include "drivers/sdcard.hpp"
+#include "drivers/shift_lamps.hpp"

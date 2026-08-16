@@ -55,4 +55,9 @@ bool take_input_event(core::nav::InputEvent& out) {
     return xQueueReceive(g_input_q, &out, 0) == pdTRUE;
 }
 
+bool wait_input_event(core::nav::InputEvent& out, uint32_t timeout_ms) {
+    if (!g_input_q) return false;
+    return xQueueReceive(g_input_q, &out, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
 }  // namespace services
