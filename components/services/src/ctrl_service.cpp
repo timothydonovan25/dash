@@ -30,7 +30,6 @@ void ctrl_task(void* arg) {
     core::tach::WheelMeter front;
     core::tach::WheelMeter rear;
     uint8_t last_mask = 0;
-    core::gear::Estimator gear;
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -96,8 +95,8 @@ void ctrl_task(void* arg) {
         const float road_mph = core::tach::best_speed_mph(
             front.mph(), true, rear.mph(), true,
             d.slots->gnss.get().speed_mph, d.slots->gnss.get().fix);
-        e.gear = gear.update(tach.rpm(), road_mph, c.neutral, now_ms_early,
-                             core::config::gear_view(*d.settings));
+        e.gear = core::gear::estimate(tach.rpm(), road_mph, c.neutral,
+                                      core::config::gear_view(*d.settings));
 
         core::state::Motion m;
         m.front_mph = front.mph();

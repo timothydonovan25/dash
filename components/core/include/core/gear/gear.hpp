@@ -1,28 +1,24 @@
-// Which gear the bike is in, worked out from rpm against speed.
+// Which gear the bike is in, worked out from rpm against road speed.
 //
-// There is no gear position sensor on a CRF250F, so this is an inference,
-// and the honest version of an inference says when it does not know. The
-// ratio of engine speed to road speed is fixed per gear by the gearbox, the
-// final drive and the rolling radius — so `rpm / mph` identifies the gear,
-// as long as the clutch is engaged and the bike is actually moving.
+// There is no gear position sensor on a CRF250F. The ratio of engine speed
+// to road speed is fixed per gear by the gearbox, the final drive and the
+// rolling radius, so `rpm / mph` identifies the gear: take the ratio and
+// show whichever gear it is closest to.
 //
-// Three cases where it cannot know, and must say so rather than guess:
+// That is the whole of it. There is deliberately no clutch detection, no
+// slip rejection and no hold through a shift — the reading follows the
+// ratio, and during a clutch pull it will move about, because that is what
+// the ratio does. A rider reads this tile as a reminder of roughly where
+// they are in the box, not as an instrument.
 //
-//   - **The clutch is in.** rpm and speed are decoupled, so the ratio is
-//     whatever the rider's left hand says it is. This is exactly the moment
-//     a gear indicator is being looked at, which is why it holds its last
-//     reading briefly rather than flickering to nothing mid-shift.
-//   - **Stopped, or nearly.** Dividing by a speed near zero gives a ratio
-//     near infinity, and one that swings wildly for a tenth of a mile an
-//     hour of GPS noise.
-//   - **Between ratios.** A reading that matches no gear within tolerance is
-//     a slipping clutch, a wheelspin, or a mis-calibrated table. None of
-//     those is a gear.
+// The one thing it cannot do is divide by a road speed of zero, so there is
+// a floor below which it reports nothing. Neutral comes from the switch on
+// the gearbox and is reported separately, because that gear really is sensed.
 //
-// The ratios themselves depend on the sprockets and the rolling radius, so
-// they are configuration, not constants. The defaults are a starting point
-// for a stock CRF250F and want calibrating: ride at a steady speed in each
-// gear and read `rpm / mph` off the DIAG screens.
+// The ratios depend on the sprockets and the rolling radius, so they are
+// configuration rather than constants. The defaults are a starting point for
+// a stock bike and want calibrating: ride at a steady speed in each gear and
+// read the ratio off the DIAG screens.
 #pragma once
 #include <cstdint>
 
@@ -30,58 +26,31 @@ namespace core::gear {
 
 inline constexpr uint8_t kMaxGears = 6;
 
-// 0 means "not known". Neutral is reported separately, by the switch on the
-// gearbox, which is the one gear this bike does sense directly.
+// 0 means "no answer" — stopped, or the engine not turning. Neutral is
+// reported by the gearbox switch, not by this.
 inline constexpr uint8_t kUnknown = 0;
 
 struct Config {
     uint8_t count = 5;                  // the CRF250F is a five-speed
 
-    // Engine rpm per mph of road speed, per gear. Starting estimates for a
-    // stock bike; 5th at 130 puts 8500 rpm at about 65 mph, which is about
-    // right for what this thing will do.
+    // Engine rpm per mph of road speed, per gear, tallest gear last. 5th at
+    // 130 puts 8500 rpm at about 65 mph, which is about what this will do.
     float rpm_per_mph[kMaxGears] = {420.0f, 290.0f, 215.0f, 165.0f, 130.0f, 0.0f};
 
-    // How far off a gear's ratio a reading may be and still count as that
-    // gear.
-    //
-    // The ceiling is set by the closest pair in the table. Fourth and fifth
-    // are 27% apart, and two bands of +/-t percent stop overlapping only
-    // below about 11.9% — so 10 leaves a clean gap everywhere and still
-    // tolerates a table that was calibrated roughly. Widen it and a single
-    // ratio starts matching two gears at once, which makes the reading
-    // depend on the order of the table rather than on the bike.
-    // test_gear checks this against whatever the table says.
-    float tolerance_pct = 10.0f;
-
-    // Below either of these the ratio is noise.
-    float min_speed_mph = 5.0f;
-    float min_rpm       = 900.0f;
-
-    // How long to keep showing the last gear when the reading stops making
-    // sense. One clutch pull and shift is a few hundred milliseconds.
-    uint32_t hold_ms = 600;
+    // Below either of these there is no ratio to speak of: one divides by
+    // zero, the other means the engine is not turning and the number would
+    // be a tall gear by arithmetic rather than by fact.
+    float min_speed_mph = 3.0f;
+    float min_rpm       = 500.0f;
 };
 
-class Estimator {
-public:
-    // Call at whatever rate the caller has; time is only used for the hold.
-    // Returns the gear, or kUnknown.
-    uint8_t update(float rpm, float speed_mph, bool neutral, uint32_t t_ms,
-                   const Config& c);
+// The measured ratio, or 0 when there is nothing to measure. Exposed so the
+// DIAG screen can show it while the table is being calibrated.
+float ratio(float rpm, float speed_mph, const Config& c);
 
-    uint8_t gear() const { return gear_; }
-    void reset();
-
-    // The measured ratio, for calibrating the table on the DIAG screen.
-    // Zero when there is nothing sensible to measure.
-    float last_ratio() const { return ratio_; }
-
-private:
-    uint8_t  gear_ = kUnknown;
-    float    ratio_ = 0.0f;
-    uint32_t last_good_ms_ = 0;
-    bool     started_ = false;
-};
+// The gear whose ratio is closest to the measured one, or kUnknown when
+// there is no ratio. Neutral short-circuits to kUnknown so the caller can
+// show the sensed N instead.
+uint8_t estimate(float rpm, float speed_mph, bool neutral, const Config& c);
 
 }  // namespace core::gear
