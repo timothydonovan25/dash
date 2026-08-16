@@ -1,4 +1,5 @@
 #include "ui/screens.hpp"
+#include "ui/chrome.hpp"
 
 namespace ui {
 
@@ -9,8 +10,8 @@ namespace cfg = core::config;
 // Adding a setting is a line in `kItems` — no screen changes, no field
 // arrays, no switch statement here.
 namespace {
-constexpr Rect kCfgTable {16,  30, 288, 400};
-constexpr Rect kCfgHint  {16, 445, 288,  16};
+constexpr Rect kCfgTable {14,  40, 452, 250};
+constexpr Rect kCfgHint  {14, 298, 452,  14};
 }  // namespace
 
 void ConfigScreen::enter(Canvas&) {
@@ -105,6 +106,12 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
         return true;
     }
     return false;
+}
+
+void ConfigScreen::draw_background(Canvas& c) {
+    chrome::title(c, "CONFIG");
+    c.draw_text(static_cast<int16_t>(kScreenW - 14), chrome::kTitleY,
+                "saved automatically", theme::secondary, 1, Align::Right);
 }
 
 WidgetList ConfigScreen::widgets() { return WidgetList{list_, 2}; }

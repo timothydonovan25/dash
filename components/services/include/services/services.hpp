@@ -36,6 +36,15 @@
 
 namespace services {
 
+// Every lap scored this session. Fixed size: more laps than this on one
+// tank is not a thing a CRF250F does.
+struct LapHistory {
+    static constexpr size_t kMax = 64;
+    uint32_t ms[kMax] = {};
+    size_t   count = 0;
+    uint32_t best_ms = 0;
+};
+
 // Everything every task needs, wired once in main and passed by reference.
 // This struct is why there is no `globals.h` in this repo.
 struct Deps {
@@ -68,6 +77,12 @@ struct Deps {
     // Lap delta against the session best. Two point traces, so it is far too
     // big for a task stack and lives here like the others.
     core::delta::Tracker* delta = nullptr;
+
+    // Lap times for the Track history screen. The logic task scores them and
+    // the render task draws them, so they live here rather than inside
+    // either — there was no path between the two before, and the screen
+    // showed "no laps yet" for the whole session.
+    LapHistory* lap_history = nullptr;
 };
 
 // The one command queue (§4.5). Screens post, `logic` drains, and every

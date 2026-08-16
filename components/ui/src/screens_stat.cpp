@@ -1,6 +1,8 @@
 #include "ui/screens.hpp"
 #include "core/units/units.hpp"
+#include "ui/chrome.hpp"
 #include <cmath>
+#include <initializer_list>
 
 namespace ui {
 
@@ -25,7 +27,7 @@ void row_value(char* buf, size_t n, float v, int decimals, const char* unit,
 
 // --- AllDataScreen ------------------------------------------------------
 namespace {
-constexpr Rect kAllTable {16, 30, 288, 430};
+constexpr Rect kAllTable {14, 40, 452, 264};
 }  // namespace
 
 void AllDataScreen::enter(Canvas&) {
@@ -83,31 +85,34 @@ void AllDataScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
+void AllDataScreen::draw_background(Canvas& c) { chrome::title(c, "ALL DATA"); }
+
 WidgetList AllDataScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- EngineScreen -------------------------------------------------------
 namespace {
-constexpr Rect kEngEcu     { 16,  24, 288,  16};
-constexpr Rect kEngRpm     { 16,  50, 288,  60};
-constexpr Rect kEngTrace   { 16, 120, 288,  80};
-constexpr Rect kEngCoolant { 16, 215, 140,  60};
-constexpr Rect kEngCoolBar { 16, 275, 140,  14};
-constexpr Rect kEngTps     {166, 215, 140,  60};
-constexpr Rect kEngTpsBar  {166, 275, 140,  14};
-constexpr Rect kEngVolts   { 16, 320, 140,  60};
+// rpm and its trace across the top, the three secondary readings below.
+constexpr Rect kEngEcu     { 14,   6, 452,  14};
+constexpr Rect kEngRpm     { 14,  32, 190,  80};
+constexpr Rect kEngTrace   {216,  32, 250,  80};
+constexpr Rect kEngCoolant { 14, 138, 144,  76};
+constexpr Rect kEngCoolBar { 14, 226, 144,  14};
+constexpr Rect kEngTps     {168, 138, 144,  76};
+constexpr Rect kEngTpsBar  {168, 226, 144,  14};
+constexpr Rect kEngVolts   {322, 138, 144,  76};
 }  // namespace
 
 void EngineScreen::enter(Canvas&) {
     ecu_.set_bounds(kEngEcu);
-    rpm_.set_bounds(kEngRpm);        rpm_.configure("RPM", "", 0, 5);
+    rpm_.set_bounds(kEngRpm.inset(8));   rpm_.configure("RPM", "", 0, 5);
     rpm_trace_.set_bounds(kEngTrace); rpm_trace_.configure(0.0f, 11000.0f);
-    coolant_.set_bounds(kEngCoolant); coolant_.configure("COOLANT", "C", 0, 3);
+    coolant_.set_bounds(kEngCoolant.inset(7)); coolant_.configure("COOLANT", "C", 0, 3);
     coolant_bar_.set_bounds(kEngCoolBar);
     coolant_bar_.configure(color::kAccent, color::kAlarm, 0.85f);
-    tps_.set_bounds(kEngTps);         tps_.configure("THROTTLE", "%", 0, 3);
+    tps_.set_bounds(kEngTps.inset(7)); tps_.configure("THROTTLE", "%", 0, 3);
     tps_bar_.set_bounds(kEngTpsBar);
     tps_bar_.configure(color::kGood, color::kGood, 2.0f);
-    volts_.set_bounds(kEngVolts);     volts_.configure("BATTERY", "V", 1, 3);
+    volts_.set_bounds(kEngVolts.inset(7)); volts_.configure("BATTERY", "V", 1, 3);
 
     list_[0] = &ecu_;     list_[1] = &rpm_;      list_[2] = &rpm_trace_;
     list_[3] = &coolant_; list_[4] = &coolant_bar_;
@@ -140,29 +145,38 @@ void EngineScreen::update(const Frame& f) {
     volts_.set(f.elec.vbat, f.elec.vbat > 0.0f);
 }
 
+void EngineScreen::draw_background(Canvas& c) {
+    chrome::title(c, "ENGINE");
+    for (const Rect& r : {kEngRpm, kEngCoolant, kEngTps, kEngVolts}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+}
+
 WidgetList EngineScreen::widgets() { return WidgetList{list_, 8}; }
 
 // --- AttitudeScreen -----------------------------------------------------
 namespace {
-constexpr Rect kAttLean  { 60,  30, 200, 200};
-constexpr Rect kAttPitch { 16, 245, 140,  55};
-constexpr Rect kAttYaw   {166, 245, 140,  55};
-constexpr Rect kAttGlat  { 16, 305, 140,  55};
-constexpr Rect kAttGvert {166, 305, 140,  55};
-constexpr Rect kAttAir   { 16, 365, 140,  55};
-constexpr Rect kAttBest  {166, 365, 140,  55};
-constexpr Rect kAttLand  { 16, 425, 140,  55};
+// The lean gauge is the point of this screen, so it gets a square of its
+// own on the left and the numbers go in a grid beside it.
+constexpr Rect kAttLean  { 14,  34, 230, 230};
+constexpr Rect kAttPitch {258,  34, 100,  64};
+constexpr Rect kAttYaw   {366,  34, 100,  64};
+constexpr Rect kAttGlat  {258, 110, 100,  64};
+constexpr Rect kAttGvert {366, 110, 100,  64};
+constexpr Rect kAttAir   {258, 186, 100,  64};
+constexpr Rect kAttBest  {366, 186, 100,  64};
+constexpr Rect kAttLand  {258, 262, 100,  46};
 }  // namespace
 
 void AttitudeScreen::enter(Canvas&) {
-    lean_.set_bounds(kAttLean);
-    pitch_.set_bounds(kAttPitch);    pitch_.configure("PITCH", "deg", 0, 3);
-    yaw_.set_bounds(kAttYaw);        yaw_.configure("YAW RATE", "d/s", 0, 3);
-    g_lat_.set_bounds(kAttGlat);     g_lat_.configure("LAT G", "g", 2, 3);
-    g_vert_.set_bounds(kAttGvert);   g_vert_.configure("VERT G", "g", 2, 3);
-    airtime_.set_bounds(kAttAir);    airtime_.configure("AIRTIME", "s", 2, 3);
-    best_air_.set_bounds(kAttBest);  best_air_.configure("BEST AIR", "s", 2, 3);
-    land_g_.set_bounds(kAttLand);    land_g_.configure("LANDING", "g", 1, 3);
+    lean_.set_bounds(kAttLean.inset(6));
+    pitch_.set_bounds(kAttPitch.inset(6));  pitch_.configure("PITCH", "deg", 0, 2);
+    yaw_.set_bounds(kAttYaw.inset(6));      yaw_.configure("YAW", "d/s", 0, 2);
+    g_lat_.set_bounds(kAttGlat.inset(6));   g_lat_.configure("LAT G", "g", 2, 2);
+    g_vert_.set_bounds(kAttGvert.inset(6)); g_vert_.configure("VERT G", "g", 2, 2);
+    airtime_.set_bounds(kAttAir.inset(6));  airtime_.configure("AIRTIME", "s", 2, 2);
+    best_air_.set_bounds(kAttBest.inset(6));best_air_.configure("BEST AIR", "s", 2, 2);
+    land_g_.set_bounds(kAttLand.inset(6));  land_g_.configure("LANDING", "g", 1, 2);
 
     list_[0] = &lean_;    list_[1] = &pitch_;   list_[2] = &yaw_;
     list_[3] = &g_lat_;   list_[4] = &g_vert_;  list_[5] = &airtime_;
@@ -195,6 +209,17 @@ bool AttitudeScreen::handle(const core::nav::InputEvent& e) {
         return true;
     }
     return false;
+}
+
+void AttitudeScreen::draw_background(Canvas& c) {
+    chrome::title(c, "ATTITUDE");
+    c.draw_round_rect(kAttLean, chrome::kRadius, theme::rule);
+    for (const Rect& r : {kAttPitch, kAttYaw, kAttGlat, kAttGvert, kAttAir,
+                          kAttBest, kAttLand}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+    c.draw_text(366, 274, "hold E to", theme::secondary, 1, Align::Left);
+    c.draw_text(366, 286, "level the IMU", theme::secondary, 1, Align::Left);
 }
 
 WidgetList AttitudeScreen::widgets() { return WidgetList{list_, 8}; }

@@ -31,6 +31,7 @@ core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
 core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
 core::log::Ring<core::log::Record, 512>                 g_blackbox;
 core::delta::Tracker                                    g_delta;
+services::LapHistory                                    g_lap_history;
 
 drivers::EspClock    g_clock;
 drivers::Mcp23s17    g_board;
@@ -131,6 +132,7 @@ services::Deps& build() {
     g_deps.lap_trace  = &g_lap_trace;
     g_deps.blackbox   = &g_blackbox;
     g_deps.delta      = &g_delta;
+    g_deps.lap_history= &g_lap_history;
 
     g_slots.health.publish(g_health.publish());
     g_commands.begin();

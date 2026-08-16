@@ -56,6 +56,7 @@ public:
     const char* name() const override { return "TRIP"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
 
@@ -70,6 +71,7 @@ public:
     const char* name() const override { return "MAP"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
     void set_source(const IPointSource* src) { map_.set_source(src); }
 
@@ -77,7 +79,8 @@ private:
     MapView  map_;
     ValueBox distance_;
     ValueBox heading_;
-    Widget*  list_[3] = {};
+    ValueBox speed_;
+    Widget*  list_[4] = {};
 };
 
 // --- Track --------------------------------------------------------------
@@ -87,6 +90,7 @@ public:
     const char* name() const override { return "LAP"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
 
@@ -106,6 +110,7 @@ public:
     const char* name() const override { return "LAPS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
 
     // The logic task owns lap history; the screen is handed a view of it.
@@ -125,6 +130,7 @@ public:
     const char* name() const override { return "TRACK"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
     void set_source(const IPointSource* src) { map_.set_source(src); }
 
@@ -132,7 +138,8 @@ private:
     MapView  map_;
     Label    lap_;
     ValueBox to_line_;
-    Widget*  list_[3] = {};
+    DeltaBar delta_;
+    Widget*  list_[4] = {};
 };
 
 // --- Stat ---------------------------------------------------------------
@@ -142,6 +149,7 @@ public:
     const char* name() const override { return "ALL"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
 
 private:
@@ -154,6 +162,7 @@ public:
     const char* name() const override { return "ENGINE"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
 
 private:
@@ -169,6 +178,7 @@ public:
     const char* name() const override { return "IMU"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
 
@@ -183,6 +193,7 @@ private:
 
 class SensorsScreen final : public Screen {
 public:
+    void draw_background(Canvas& c) override;
     const char* name() const override { return "SENSORS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -195,6 +206,7 @@ private:
 
 class GpsScreen final : public Screen {
 public:
+    void draw_background(Canvas& c) override;
     const char* name() const override { return "GPS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -207,6 +219,7 @@ private:
 
 class SystemScreen final : public Screen {
 public:
+    void draw_background(Canvas& c) override;
     const char* name() const override { return "SYSTEM"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -219,6 +232,7 @@ private:
 
 class BusScreen final : public Screen {
 public:
+    void draw_background(Canvas& c) override;
     const char* name() const override { return "BUS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -231,6 +245,7 @@ private:
 
 class RadioScreen final : public Screen {
 public:
+    void draw_background(Canvas& c) override;
     const char* name() const override { return "RADIO"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -249,6 +264,7 @@ public:
     const char* name() const override { return "CONFIG"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
     uint8_t focus_count() const override;

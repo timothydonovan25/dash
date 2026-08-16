@@ -88,6 +88,13 @@ void render_task(void* arg) {
         core::nav::InputEvent ev;
         while (take_input_event(ev)) app.on_input(ev, canvas);
 
+        // The history grows as laps are scored, so the view is handed over
+        // every frame rather than once at startup.
+        if (d.lap_history) {
+            app.set_lap_history(d.lap_history->ms, d.lap_history->count,
+                                d.lap_history->best_ms);
+        }
+
         // One coherent read of every slot, once per frame.
         const core::state::Frame frame = core::state::snapshot(*d.slots, now);
         app.update(frame);

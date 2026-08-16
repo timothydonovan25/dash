@@ -1,5 +1,7 @@
 #include "ui/screens.hpp"
 #include "core/units/units.hpp"
+#include "ui/chrome.hpp"
+#include <initializer_list>
 
 namespace ui {
 
@@ -241,24 +243,25 @@ WidgetList SpeedScreen::widgets() { return WidgetList{list_, 5}; }
 
 // --- TripScreen ---------------------------------------------------------
 namespace {
-constexpr Rect kTripOdo  { 16,  40, 288, 60};
-constexpr Rect kTripA    { 16, 120, 140, 60};
-constexpr Rect kTripB    {166, 120, 140, 60};
-constexpr Rect kTripFuel { 16, 200, 140, 60};
-constexpr Rect kTripHours{166, 200, 140, 60};
-constexpr Rect kTripTop  { 16, 280, 140, 60};
-constexpr Rect kTripHint { 16, 440, 288, 16};
+// 480x320: the odometer across the top, then two rows of three.
+constexpr Rect kTripOdo  { 14,  44, 452, 66};
+constexpr Rect kTripA    { 14, 132, 144, 72};
+constexpr Rect kTripB    {168, 132, 144, 72};
+constexpr Rect kTripFuel {322, 132, 144, 72};
+constexpr Rect kTripHours{ 14, 222, 144, 72};
+constexpr Rect kTripTop  {168, 222, 144, 72};
+constexpr Rect kTripHint {322, 252, 144, 16};
 }  // namespace
 
 void TripScreen::enter(Canvas&) {
-    odo_.set_bounds(kTripOdo);     odo_.configure("ODOMETER", "mi", 1, 4);
-    trip_a_.set_bounds(kTripA);    trip_a_.configure("TRIP A", "mi", 1, 3);
-    trip_b_.set_bounds(kTripB);    trip_b_.configure("TRIP B", "mi", 1, 3);
-    fuel_.set_bounds(kTripFuel);   fuel_.configure("FUEL EST", "gal", 2, 3);
-    hours_.set_bounds(kTripHours); hours_.configure("ENGINE", "h", 1, 3);
-    top_.set_bounds(kTripTop);     top_.configure("TOP", "mph", 0, 3);
+    odo_.set_bounds(kTripOdo.inset(8));    odo_.configure("ODOMETER", "mi", 1, 5);
+    trip_a_.set_bounds(kTripA.inset(7));   trip_a_.configure("TRIP A", "mi", 1, 3);
+    trip_b_.set_bounds(kTripB.inset(7));   trip_b_.configure("TRIP B", "mi", 1, 3);
+    fuel_.set_bounds(kTripFuel.inset(7));  fuel_.configure("FUEL EST", "gal", 2, 3);
+    hours_.set_bounds(kTripHours.inset(7));hours_.configure("ENGINE", "h", 1, 3);
+    top_.set_bounds(kTripTop.inset(7));    top_.configure("TOP", "mph", 0, 3);
     hint_.set_bounds(kTripHint);
-    hint_.configure("E: reset trip A", color::kDim, 1, Align::Left);
+    hint_.configure("hold E to reset trip A", color::kDim, 1, Align::Left);
 
     list_[0] = &odo_;  list_[1] = &trip_a_; list_[2] = &trip_b_;
     list_[3] = &fuel_; list_[4] = &hours_;  list_[5] = &top_;
@@ -299,25 +302,51 @@ bool TripScreen::handle(const core::nav::InputEvent& e) {
     return false;
 }
 
+void TripScreen::draw_background(Canvas& c) {
+    chrome::title(c, "TRIP");
+    for (const Rect& r : {kTripOdo, kTripA, kTripB, kTripFuel, kTripHours,
+                          kTripTop}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+    // The fuel figure is a model, not a measurement — there is no flow
+    // sensor and no ECU on this bike — so it says so rather than sitting
+    // next to five measured numbers pretending to be one of them.
+    c.draw_text(kTripFuel.x, static_cast<int16_t>(kTripFuel.bottom() + 4),
+                "estimate", theme::secondary, 1, Align::Left);
+}
+
 WidgetList TripScreen::widgets() { return WidgetList{list_, 7}; }
 
 // --- TripMapScreen ------------------------------------------------------
 namespace {
-constexpr Rect kTMapView { 10,  40, 300, 300};
-constexpr Rect kTMapDist { 16, 360, 140,  60};
-constexpr Rect kTMapHead {166, 360, 140,  60};
+// Landscape suits a map: it goes on the left, square, with the numbers
+// stacked beside it instead of squashed underneath.
+constexpr Rect kTMapView { 14,  32, 286, 276};
+constexpr Rect kTMapDist {314,  44, 152,  72};
+constexpr Rect kTMapHead {314, 138, 152,  72};
+constexpr Rect kTMapSpeed{314, 232, 152,  72};
 }  // namespace
 
 void TripMapScreen::enter(Canvas&) {
     map_.set_bounds(kTMapView);
-    distance_.set_bounds(kTMapDist);
+    distance_.set_bounds(kTMapDist.inset(7));
     distance_.configure("TRIP A", "mi", 1, 3);
-    heading_.set_bounds(kTMapHead);
+    heading_.set_bounds(kTMapHead.inset(7));
     heading_.configure("COURSE", "deg", 0, 3);
+    speed_.set_bounds(kTMapSpeed.inset(7));
+    speed_.configure("SPEED", "mph", 0, 3);
 
     list_[0] = &map_;
     list_[1] = &distance_;
     list_[2] = &heading_;
+    list_[3] = &speed_;
+}
+
+void TripMapScreen::draw_background(Canvas& c) {
+    chrome::title(c, "TRIP MAP");
+    for (const Rect& r : {kTMapDist, kTMapHead, kTMapSpeed}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
 }
 
 void TripMapScreen::update(const Frame& f) {
@@ -332,9 +361,14 @@ void TripMapScreen::update(const Frame& f) {
     const bool moving = f.gnss.fix && f.gnss.speed_mph > 3.0f;
     heading_.set(f.gnss.course_deg, moving);
 
+    const char* sunit = "mph";
+    speed_.set(u::speed_for_display(f.motion.best_mph, units(), &sunit),
+               f.gnss.fix);
+    speed_.set_unit(sunit);
+
     map_.set_position(0.0f, 0.0f, f.gnss.course_deg, f.gnss.fix);
 }
 
-WidgetList TripMapScreen::widgets() { return WidgetList{list_, 3}; }
+WidgetList TripMapScreen::widgets() { return WidgetList{list_, 4}; }
 
 }  // namespace ui

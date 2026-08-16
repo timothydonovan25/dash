@@ -117,6 +117,7 @@ int main() {
     static core::log::Ring<core::log::Record, 512> blackbox;
     static core::delta::Tracker delta;
     static services::LogicState logic;
+    static services::LapHistory lap_history;
 
     services::Deps deps;
     deps.slots = &slots;
@@ -127,6 +128,7 @@ int main() {
     deps.lap_trace = &lap_trace;
     deps.blackbox = &blackbox;
     deps.delta = &delta;
+    deps.lap_history = &lap_history;
 
     // Everything reports healthy except the things that genuinely are not
     // on this board, so the screens show what they will show on the bike.
@@ -262,6 +264,8 @@ int main() {
         if (now - last_frame < kFrameMs) continue;
         last_frame = now;
 
+        app.set_lap_history(lap_history.ms, lap_history.count,
+                            lap_history.best_ms);
         app.update(core::state::snapshot(slots, now));
         app.render(canvas, true);
 

@@ -49,6 +49,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::LapClear:
                 s.lap.clear();
                 s.lap_count = 0;
+                if (d.lap_history) *d.lap_history = LapHistory{};
                 if (d.lap_trace) d.lap_trace->clear();
                 if (d.delta) d.delta->clear();
                 break;
@@ -100,6 +101,10 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         if (d.delta) d.delta->start_lap();
     } else if (lu.event == core::lap::Event::Completed) {
         if (s.lap_count < LogicState::kMaxLaps) s.laps_ms[s.lap_count++] = lu.lap_ms;
+        if (d.lap_history && d.lap_history->count < LapHistory::kMax) {
+            d.lap_history->ms[d.lap_history->count++] = lu.lap_ms;
+            d.lap_history->best_ms = s.lap.state().best_ms;
+        }
         if (d.lap_trace) d.lap_trace->clear();      // trace the new lap
         if (d.delta) {
             // The reference is the session best. The lap timer has already

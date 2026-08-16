@@ -1,5 +1,7 @@
 #include "ui/screens.hpp"
 #include "core/units/units.hpp"
+#include "ui/chrome.hpp"
+#include <initializer_list>
 
 namespace ui {
 
@@ -12,35 +14,40 @@ namespace u = core::units;
 // on it, the delta is a colour before it is a number, and the best lap sits
 // where a glance finds it without hunting.
 namespace {
-constexpr Rect kLapPhase   { 16,  24, 288,  16};
-constexpr Rect kLapCurrent {  0,  56, 320,  60};
-constexpr Rect kLapDelta   { 16, 130, 288,  70};
-constexpr Rect kLapLast    {  0, 220, 320,  30};
-constexpr Rect kLapBest    {  0, 260, 320,  30};
-constexpr Rect kLapCount   { 16, 320, 140,  60};
-constexpr Rect kLapSpeed   {166, 320, 140,  60};
+// 480x320. The running lap owns the top half at a size readable mid-corner;
+// the delta sits directly under it, because those two are read together and
+// anything between them is a distraction. Reference times go down the right.
+constexpr Rect kLapPhase   { 14,   6, 300,  14};
+constexpr Rect kLapCurrent { 10,  34, 300,  74};
+constexpr Rect kLapDelta   { 14, 122, 292,  76};
+constexpr Rect kLapLast    {322,  40, 144,  56};
+constexpr Rect kLapBest    {322, 112, 144,  56};
+constexpr Rect kLapCount   {322, 190, 144,  56};
+constexpr Rect kLapSpeed   { 14, 218, 292,  86};
 }  // namespace
 
 void LapScreen::enter(Canvas&) {
     phase_.set_bounds(kLapPhase);
     phase_.configure("NO LINE", color::kDim, 1, Align::Left);
 
-    current_.set_bounds(kLapCurrent);
-    current_.configure("--:--.--", color::kText, 5, Align::Center);
+    // Inset: a widget clears its own bounds, so bounds matching the
+    // tile would wipe the frame drawn under it.
+    current_.set_bounds(kLapCurrent.inset(6));
+    current_.configure("--:--.--", color::kText, 7, Align::Center);
 
     delta_.set_bounds(kLapDelta);
 
-    last_.set_bounds(kLapLast);
-    last_.configure("LAST --:--.--", color::kDim, 2, Align::Center);
+    last_.set_bounds(Rect{330, 60, 128, 20});
+    last_.configure("--:--.--", color::kText, 2, Align::Left);
 
-    best_.set_bounds(kLapBest);
-    best_.configure("BEST --:--.--", color::kAccent, 2, Align::Center);
+    best_.set_bounds(Rect{330, 132, 128, 20});
+    best_.configure("--:--.--", color::kAccent, 2, Align::Left);
 
-    lap_count_.set_bounds(kLapCount);
+    lap_count_.set_bounds(kLapCount.inset(7));
     lap_count_.configure("LAPS", "", 0, 3);
 
-    speed_.set_bounds(kLapSpeed);
-    speed_.configure("SPEED", "mph", 0, 3);
+    speed_.set_bounds(kLapSpeed.inset(8));
+    speed_.configure("SPEED", "mph", 0, 5);
 
     list_[0] = &phase_;   list_[1] = &current_; list_[2] = &delta_;
     list_[3] = &last_;    list_[4] = &best_;    list_[5] = &lap_count_;
@@ -64,19 +71,11 @@ void LapScreen::update(const Frame& f) {
                     f.lap.phase == Phase::Timing);
     current_.set_text(buf);
 
-    char line[32];
-    size_t k = 0;
-    const char* tag = "LAST ";
-    for (const char* p = tag; *p; ++p) line[k++] = *p;
-    k += u::fmt_duration(line + k, sizeof line - k, f.lap.last_ms, f.lap.count > 0);
-    line[k] = '\0';
+    char line[24];
+    u::fmt_duration(line, sizeof line, f.lap.last_ms, f.lap.count > 0);
     last_.set_text(line);
 
-    k = 0;
-    tag = "BEST ";
-    for (const char* p = tag; *p; ++p) line[k++] = *p;
-    k += u::fmt_duration(line + k, sizeof line - k, f.lap.best_ms, f.lap.best_ms > 0);
-    line[k] = '\0';
+    u::fmt_duration(line, sizeof line, f.lap.best_ms, f.lap.best_ms > 0);
     best_.set_text(line);
 
     // No reference trace yet, so there is no honest delta to draw. The
@@ -114,17 +113,30 @@ bool LapScreen::handle(const core::nav::InputEvent& e) {
     return post(Command(CommandId::LapArm));
 }
 
+void LapScreen::draw_background(Canvas& c) {
+    c.draw_round_rect(kLapCurrent, chrome::kRadius, theme::rule);
+    for (const Rect& r : {kLapLast, kLapBest, kLapCount, kLapSpeed}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+    c.draw_text(kLapLast.x + 8, kLapLast.y + 8, "LAST", theme::secondary, 1,
+                Align::Left);
+    c.draw_text(kLapBest.x + 8, kLapBest.y + 8, "BEST", theme::secondary, 1,
+                Align::Left);
+    // The delta has no frame on purpose: it is the one thing on this screen
+    // read by colour and position rather than by reading a box.
+}
+
 WidgetList LapScreen::widgets() { return WidgetList{list_, 7}; }
 
 // --- LapHistoryScreen ---------------------------------------------------
 namespace {
-constexpr Rect kHistTitle { 16,  24, 288,  16};
-constexpr Rect kHistTable { 16,  56, 288, 380};
+constexpr Rect kHistTitle { 14,  30, 452,  14};
+constexpr Rect kHistTable { 14,  52, 452, 256};
 }  // namespace
 
 void LapHistoryScreen::enter(Canvas&) {
     title_.set_bounds(kHistTitle);
-    title_.configure("LAP      TIME        DELTA", color::kDim, 1, Align::Left);
+    title_.configure("LAP AND TIME", color::kDim, 1, Align::Left);
     table_.set_bounds(kHistTable);
     table_.configure(10, 2);
     list_[0] = &title_;
@@ -176,24 +188,42 @@ void LapHistoryScreen::update(const Frame& f) {
     table_.set_row_count(rows);
 }
 
+void LapHistoryScreen::draw_background(Canvas& c) {
+    chrome::title(c, "LAP HISTORY");
+    c.draw_text(static_cast<int16_t>(kHistTitle.right()), kHistTitle.y,
+                "VS BEST", theme::secondary, 1, Align::Right);
+}
+
 WidgetList LapHistoryScreen::widgets() { return WidgetList{list_, 2}; }
 
 // --- TrackMapScreen -----------------------------------------------------
 namespace {
-constexpr Rect kTrkMap  { 10,  40, 300, 300};
-constexpr Rect kTrkLap  {  0, 350, 320,  40};
-constexpr Rect kTrkLine { 16, 400, 288,  60};
+constexpr Rect kTrkMap  { 14,  32, 286, 276};
+constexpr Rect kTrkLap  {314,  44, 152,  72};
+constexpr Rect kTrkLine {314, 138, 152,  72};
+constexpr Rect kTrkDelta{314, 232, 152,  72};
 }  // namespace
 
 void TrackMapScreen::enter(Canvas&) {
     map_.set_bounds(kTrkMap);
-    lap_.set_bounds(kTrkLap);
-    lap_.configure("--:--.--", color::kText, 3, Align::Center);
-    to_line_.set_bounds(kTrkLine);
+    lap_.set_bounds(Rect{322, 70, 136, 24});
+    lap_.configure("--:--.--", color::kText, 3, Align::Left);
+    to_line_.set_bounds(kTrkLine.inset(7));
     to_line_.configure("TO LINE", "ft", 0, 3);
+    delta_.set_bounds(kTrkDelta.inset(6));
     list_[0] = &map_;
     list_[1] = &lap_;
     list_[2] = &to_line_;
+    list_[3] = &delta_;
+}
+
+void TrackMapScreen::draw_background(Canvas& c) {
+    chrome::title(c, "TRACK MAP");
+    for (const Rect& r : {kTrkLap, kTrkLine, kTrkDelta}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+    c.draw_text(kTrkLap.x + 8, kTrkLap.y + 8, "LAP", theme::secondary, 1,
+                Align::Left);
 }
 
 void TrackMapScreen::update(const Frame& f) {
@@ -204,9 +234,10 @@ void TrackMapScreen::update(const Frame& f) {
 
     to_line_.set(f.lap.dist_to_line_ft,
                  f.gnss.fix && f.lap.phase != core::lap::Phase::NoLine);
+    delta_.set(f.lap.delta_ms, f.lap.delta_valid);
     map_.set_position(0.0f, 0.0f, f.gnss.course_deg, f.gnss.fix);
 }
 
-WidgetList TrackMapScreen::widgets() { return WidgetList{list_, 3}; }
+WidgetList TrackMapScreen::widgets() { return WidgetList{list_, 4}; }
 
 }  // namespace ui

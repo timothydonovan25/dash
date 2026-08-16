@@ -1,5 +1,6 @@
 #include "ui/screens.hpp"
 #include "core/units/units.hpp"
+#include "ui/chrome.hpp"
 
 namespace ui {
 
@@ -29,14 +30,22 @@ void fmt_bytes(char* buf, size_t n, uint32_t bytes) {
 // here as a device flicking between Ok and Fault rather than as a screen
 // that mysteriously stops updating.
 namespace {
-constexpr int16_t kSensorTop  = 40;
-constexpr int16_t kSensorStep = 34;
+// Eleven devices will not fit down one side of a 320 px screen at a
+// readable pitch, so they go in two columns. Six then five, reading down
+// the left first, because that is where the eye starts.
+constexpr int16_t kSensorTop   = 42;
+constexpr int16_t kSensorStep  = 40;
+constexpr int16_t kSensorRows  = 6;
+constexpr int16_t kSensorColW  = 206;
 }  // namespace
 
 void SensorsScreen::enter(Canvas&) {
     for (uint8_t i = 0; i < kDevCount; ++i) {
-        dots_[i].set_bounds(Rect{16, static_cast<int16_t>(kSensorTop + i * kSensorStep),
-                                 288, 24});
+        const int16_t col = i / kSensorRows;
+        const int16_t row = i % kSensorRows;
+        dots_[i].set_bounds(Rect{static_cast<int16_t>(14 + col * (kSensorColW + 26)),
+                                 static_cast<int16_t>(kSensorTop + row * kSensorStep),
+                                 kSensorColW, 24});
         dots_[i].configure(core::state::dev_name(static_cast<Dev>(i)));
         list_[i] = &dots_[i];
     }
@@ -48,11 +57,19 @@ void SensorsScreen::update(const Frame& f) {
     }
 }
 
+void SensorsScreen::draw_background(Canvas& c) {
+    chrome::title(c, "SENSORS");
+    // This screen is the bring-up tool. It says so, because on the day the
+    // board arrives it is the only screen anybody should be looking at.
+    c.draw_text(static_cast<int16_t>(kScreenW - 14), chrome::kTitleY,
+                "absent is not a fault", theme::secondary, 1, Align::Right);
+}
+
 WidgetList SensorsScreen::widgets() { return WidgetList{list_, kDevCount}; }
 
 // --- GpsScreen ----------------------------------------------------------
 namespace {
-constexpr Rect kGpsTable {16, 30, 288, 430};
+constexpr Rect kGpsTable {14, 40, 452, 264};
 }  // namespace
 
 void GpsScreen::enter(Canvas&) {
@@ -104,11 +121,13 @@ void GpsScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
+void GpsScreen::draw_background(Canvas& c) { chrome::title(c, "GPS"); }
+
 WidgetList GpsScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- SystemScreen -------------------------------------------------------
 namespace {
-constexpr Rect kSysTable {16, 30, 288, 430};
+constexpr Rect kSysTable {14, 40, 452, 264};
 }  // namespace
 
 void SystemScreen::enter(Canvas&) {
@@ -165,11 +184,13 @@ void SystemScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
+void SystemScreen::draw_background(Canvas& c) { chrome::title(c, "SYSTEM"); }
+
 WidgetList SystemScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- BusScreen ----------------------------------------------------------
 namespace {
-constexpr Rect kBusTable {16, 30, 288, 430};
+constexpr Rect kBusTable {14, 40, 452, 264};
 }  // namespace
 
 void BusScreen::enter(Canvas&) {
@@ -218,12 +239,14 @@ void BusScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
+void BusScreen::draw_background(Canvas& c) { chrome::title(c, "BUS AND I/O"); }
+
 WidgetList BusScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- RadioScreen --------------------------------------------------------
 namespace {
-constexpr Rect kRadioNote  {16,  30, 288, 40};
-constexpr Rect kRadioTable {16,  90, 288, 300};
+constexpr Rect kRadioNote  {14,  40, 452,  16};
+constexpr Rect kRadioTable {14,  72, 452, 232};
 }  // namespace
 
 void RadioScreen::enter(Canvas&) {
@@ -247,6 +270,8 @@ void RadioScreen::update(const Frame& f) {
     table_.set_row(5, "Controller core", "1");
     table_.set_row_count(6);
 }
+
+void RadioScreen::draw_background(Canvas& c) { chrome::title(c, "RADIO"); }
 
 WidgetList RadioScreen::widgets() { return WidgetList{list_, 2}; }
 
