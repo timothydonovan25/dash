@@ -83,8 +83,17 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         // the filter has something physically consistent to track.
         const float omega_rps = curv * v_ftps;                 // rad/s
         yaw_rate_dps = static_cast<float>(omega_rps * 180.0 / kPi);
-        lean_deg_ = static_cast<float>(
+        const float corner_deg = static_cast<float>(
             std::atan2(v_ftps * omega_rps, kG_ftps2) * 180.0 / kPi);
+
+        // The slider adds to the corner rather than being ignored by it.
+        // Overwriting lean here meant that ticking "ride the circuit" — which
+        // is what you do to make the lap timer and the maps work — silently
+        // disconnected the lean slider, and the gauge looked broken when it
+        // was the simulated bike that had stopped listening.
+        lean_deg_ = corner_deg + c.lean_deg;
+        if (lean_deg_ < -60.0f) lean_deg_ = -60.0f;
+        if (lean_deg_ > 60.0f) lean_deg_ = 60.0f;
 
         lat_ = 42.500000 + y * kFtLat;
         lon_ = -83.100000 + x * kFtLon;
