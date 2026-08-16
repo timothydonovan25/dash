@@ -189,7 +189,6 @@ void LapHistoryScreen::update(const Frame& f) {
 }
 
 void LapHistoryScreen::draw_background(Canvas& c) {
-    chrome::title(c, "LAP HISTORY");
     c.draw_text(static_cast<int16_t>(kHistTitle.right()), kHistTitle.y,
                 "VS BEST", theme::secondary, 1, Align::Right);
 }
@@ -218,7 +217,6 @@ void TrackMapScreen::enter(Canvas&) {
 }
 
 void TrackMapScreen::draw_background(Canvas& c) {
-    chrome::title(c, "TRACK MAP");
     for (const Rect& r : {kTrkLap, kTrkLine, kTrkDelta}) {
         c.draw_round_rect(r, chrome::kRadius, theme::rule);
     }

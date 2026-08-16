@@ -72,6 +72,11 @@ public:
     // triple the file for nothing.
     virtual void draw_background(Canvas&) {}
 
+    // Whether the App should draw the mode/screen title bar above this
+    // screen. The big-speed screen says no: it is the one a rider stares at
+    // for hours and it wants every pixel.
+    virtual bool wants_title() const { return true; }
+
     // True if the screen consumed the event. C, D and E reach the screen
     // only after nav has decided they are not navigation.
     virtual bool handle(const core::nav::InputEvent&) { return false; }

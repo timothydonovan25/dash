@@ -85,8 +85,6 @@ void AllDataScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
-void AllDataScreen::draw_background(Canvas& c) { chrome::title(c, "ALL DATA"); }
-
 WidgetList AllDataScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- EngineScreen -------------------------------------------------------
@@ -146,7 +144,6 @@ void EngineScreen::update(const Frame& f) {
 }
 
 void EngineScreen::draw_background(Canvas& c) {
-    chrome::title(c, "ENGINE");
     for (const Rect& r : {kEngRpm, kEngCoolant, kEngTps, kEngVolts}) {
         c.draw_round_rect(r, chrome::kRadius, theme::rule);
     }
@@ -212,7 +209,6 @@ bool AttitudeScreen::handle(const core::nav::InputEvent& e) {
 }
 
 void AttitudeScreen::draw_background(Canvas& c) {
-    chrome::title(c, "ATTITUDE");
     c.draw_round_rect(kAttLean, chrome::kRadius, theme::rule);
     for (const Rect& r : {kAttPitch, kAttYaw, kAttGlat, kAttGvert, kAttAir,
                           kAttBest, kAttLand}) {

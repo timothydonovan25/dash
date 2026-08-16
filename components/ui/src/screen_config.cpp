@@ -123,7 +123,6 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
 }
 
 void ConfigScreen::draw_background(Canvas& c) {
-    chrome::title(c, "CONFIG");
     c.draw_text(static_cast<int16_t>(kScreenW - 14), chrome::kTitleY,
                 "saved automatically", theme::secondary, 1, Align::Right);
 }

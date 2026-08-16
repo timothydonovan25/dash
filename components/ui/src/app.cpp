@@ -1,4 +1,5 @@
 #include "ui/app.hpp"
+#include "ui/chrome.hpp"
 
 namespace ui {
 
@@ -107,6 +108,12 @@ void App::render(Canvas& c, bool full) {
     const bool repaint = full || needs_full_;
     if (repaint) {
         c.fill(color::kBg);
+        // Drawn here rather than by each screen: the App is the only thing
+        // that knows both halves, and fifteen hardcoded title strings would
+        // be fifteen chances to disagree with the screen's own name().
+        if (current().wants_title()) {
+            chrome::title(c, mode_name(), current().name());
+        }
         current().draw_background(c);
         // A band-based repaint has no memory of what was on the panel, so
         // everything has to be redrawn, not just what changed.

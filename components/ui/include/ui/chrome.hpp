@@ -18,11 +18,25 @@ inline constexpr int16_t kCapGap   = 3;    // caption baseline to tile top
 inline constexpr int16_t kTitleY   = 6;
 inline constexpr int16_t kBodyTop  = 30;   // first row below the title rule
 
-// The screen's name, top left, with a rule under it. Every screen that is
-// not the big-speed one carries this: it is how a rider knows which of
-// fifteen they landed on after two presses of B.
-inline void title(Canvas& c, const char* text) {
-    c.draw_text(14, kTitleY, text, theme::secondary, 1, Align::Left);
+// Where the rider is, top left, with a rule under it: "DIAG/SENSORS".
+//
+// Both halves, because either alone is ambiguous. Five of the screen names
+// repeat across modes or read the same at a glance, and after two presses of
+// B in the dark the question is not only which screen but which mode — A and
+// B are next to each other on the pod.
+//
+// The mode is drawn dim and the screen bright, so the eye lands on the half
+// that changed most recently.
+inline void title(Canvas& c, const char* mode, const char* screen) {
+    char lead[24];
+    size_t k = 0;
+    for (const char* p = mode; *p && k + 2 < sizeof lead; ++p) lead[k++] = *p;
+    lead[k++] = '/';
+    lead[k] = '\0';
+
+    c.draw_text(14, kTitleY, lead, theme::secondary, 1, Align::Left);
+    c.draw_text(static_cast<int16_t>(14 + c.text_width(lead, 1)), kTitleY,
+                screen, theme::primary, 1, Align::Left);
     c.fill_rect(Rect{14, 22, static_cast<int16_t>(kScreenW - 28), 1},
                 theme::rule);
 }

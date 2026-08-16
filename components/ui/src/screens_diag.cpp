@@ -58,7 +58,6 @@ void SensorsScreen::update(const Frame& f) {
 }
 
 void SensorsScreen::draw_background(Canvas& c) {
-    chrome::title(c, "SENSORS");
     // This screen is the bring-up tool. It says so, because on the day the
     // board arrives it is the only screen anybody should be looking at.
     c.draw_text(static_cast<int16_t>(kScreenW - 14), chrome::kTitleY,
@@ -121,8 +120,6 @@ void GpsScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
-void GpsScreen::draw_background(Canvas& c) { chrome::title(c, "GPS"); }
-
 WidgetList GpsScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- SystemScreen -------------------------------------------------------
@@ -184,8 +181,6 @@ void SystemScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
-void SystemScreen::draw_background(Canvas& c) { chrome::title(c, "SYSTEM"); }
-
 WidgetList SystemScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- BusScreen ----------------------------------------------------------
@@ -239,8 +234,6 @@ void BusScreen::update(const Frame& f) {
     table_.set_row_count(10);
 }
 
-void BusScreen::draw_background(Canvas& c) { chrome::title(c, "BUS AND I/O"); }
-
 WidgetList BusScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- RadioScreen --------------------------------------------------------
@@ -270,8 +263,6 @@ void RadioScreen::update(const Frame& f) {
     table_.set_row(5, "Controller core", "1");
     table_.set_row_count(6);
 }
-
-void RadioScreen::draw_background(Canvas& c) { chrome::title(c, "RADIO"); }
 
 WidgetList RadioScreen::widgets() { return WidgetList{list_, 2}; }
 

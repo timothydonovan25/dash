@@ -313,7 +313,6 @@ bool TripScreen::handle(const core::nav::InputEvent& e) {
 }
 
 void TripScreen::draw_background(Canvas& c) {
-    chrome::title(c, "TRIP");
     for (const Rect& r : {kTripOdo, kTripA, kTripB, kTripFuel, kTripHours,
                           kTripTop}) {
         c.draw_round_rect(r, chrome::kRadius, theme::rule);
@@ -353,7 +352,6 @@ void TripMapScreen::enter(Canvas&) {
 }
 
 void TripMapScreen::draw_background(Canvas& c) {
-    chrome::title(c, "TRIP MAP");
     for (const Rect& r : {kTMapDist, kTMapHead, kTMapSpeed}) {
         c.draw_round_rect(r, chrome::kRadius, theme::rule);
     }

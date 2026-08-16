@@ -23,6 +23,8 @@ public:
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
     void draw_background(Canvas& c) override { draw_chrome(c); }
+    // No title bar: this screen is read at speed and wants every pixel.
+    bool wants_title() const override { return false; }
     WidgetList widgets() override;
 
 private:
@@ -149,7 +151,6 @@ public:
     const char* name() const override { return "ALL"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
-    void draw_background(Canvas& c) override;
     WidgetList widgets() override;
 
 private:
@@ -206,7 +207,6 @@ private:
 
 class GpsScreen final : public Screen {
 public:
-    void draw_background(Canvas& c) override;
     const char* name() const override { return "GPS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -219,7 +219,6 @@ private:
 
 class SystemScreen final : public Screen {
 public:
-    void draw_background(Canvas& c) override;
     const char* name() const override { return "SYSTEM"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -232,7 +231,6 @@ private:
 
 class BusScreen final : public Screen {
 public:
-    void draw_background(Canvas& c) override;
     const char* name() const override { return "BUS"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
@@ -245,7 +243,6 @@ private:
 
 class RadioScreen final : public Screen {
 public:
-    void draw_background(Canvas& c) override;
     const char* name() const override { return "RADIO"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
