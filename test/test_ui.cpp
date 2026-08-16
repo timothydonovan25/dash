@@ -308,8 +308,12 @@ int main() {
 
         const uint8_t before = fx.settings.brightness_pct;
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
-        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);   // up
+        // C is up and D is down, on the value as much as on the list.
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
         CHECK(fx.settings.brightness_pct == before + 5);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        CHECK(fx.settings.brightness_pct == before);
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
         CHECK(!fx.sink.posted.empty());
         CHECK(fx.sink.posted.back().id == core::state::CommandId::ConfigSet);
         CHECK(fx.sink.posted.back().cfg.key == 0x0101);
@@ -319,6 +323,19 @@ int main() {
         const uint8_t after = fx.settings.brightness_pct;
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
         CHECK(fx.settings.brightness_pct == after);
+
+        // And the edit marker only shows while editing: the same frame
+        // rendered in and out of edit mode must differ.
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t not_editing = s.ink();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.update(busy_frame());
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != not_editing);
     }
 
     CASE("an alert draws over whatever screen is up, and E dismisses it");

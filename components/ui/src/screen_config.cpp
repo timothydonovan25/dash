@@ -46,8 +46,18 @@ void ConfigScreen::update(const Frame&) {
     size_t rows = 0;
     for (size_t i = 0; i < visible && first + i < total; ++i) {
         const cfg::ConfigItem& it = cfg::items()[first + i];
-        char value[24];
-        cfg::format(*settings_, it, value, sizeof value);
+
+        // The row being edited carries a '>' in front of its value. The
+        // highlight alone says which row the cursor is on; it does not say
+        // whether C and D will move the cursor or change the number, and
+        // those are the two things a rider needs to tell apart.
+        char value[28];
+        size_t vk = 0;
+        if (editing_ && first + i == focus_) {
+            value[vk++] = '>';
+            value[vk++] = ' ';
+        }
+        cfg::format(*settings_, it, value + vk, sizeof value - vk);
 
         // The group is shown on the row so a scrolled list still says which
         // section you are in, without a header that scrolls away.
@@ -90,7 +100,11 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
     // what `focus_count()` is for.
     if (e.button == Button::C || e.button == Button::D) {
         if (!editing_) return false;            // let nav move the focus
-        const int dir = (e.button == Button::D) ? +1 : -1;
+        // C is up and D is down, on the value as well as on the list. They
+        // were the other way round here, so pressing up counted a setting
+        // down, which is the sort of thing you notice once and then swear at
+        // every time.
+        const int dir = (e.button == Button::C) ? +1 : -1;
         if (cfg::nudge(*settings_, it, dir)) {
             // Report it up so the keeper writes NVS and every module holding
             // a copy of this value refreshes. The screen does not write
