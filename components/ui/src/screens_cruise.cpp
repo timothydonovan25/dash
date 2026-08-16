@@ -87,9 +87,19 @@ void SpeedScreen::update(const Frame& f) {
     rpm_.set(f.engine.rpm, f.engine.rpm > 0.0f || f.engine.neutral);
     shift_.set(f.engine.shift_mask, f.engine.shift_flash);
 
-    gear_.configure(f.engine.neutral ? "N" : "-",
-                    f.engine.neutral ? color::kGood : color::kDim, 10,
-                    Align::Center);
+    // Neutral is sensed; the gear is inferred. A dash that shows a confident
+    // digit through every clutch pull is worse than one that admits it does
+    // not know, so an unknown gear is a dash rather than a stale number.
+    char g[2] = {'-', '\0'};
+    Color gc = color::kDim;
+    if (f.engine.neutral) {
+        g[0] = 'N';
+        gc = color::kGood;
+    } else if (f.engine.gear > 0 && f.engine.gear <= 9) {
+        g[0] = static_cast<char>('0' + f.engine.gear);
+        gc = color::kText;
+    }
+    gear_.configure(g, gc, 10, Align::Center);
 
     char clock[12];
     u::fmt_clock(clock, sizeof clock, f.gnss.utc_ms,

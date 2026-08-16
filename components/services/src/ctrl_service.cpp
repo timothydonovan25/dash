@@ -9,6 +9,7 @@
 // or log. If a line here can wait, it belongs in `logic`.
 #include "services/services.hpp"
 #include "core/shift/shift.hpp"
+#include "core/gear/gear.hpp"
 #include "core/tach/tach.hpp"
 #include "bsp/pins.hpp"
 #include "drivers/mcp23s17.hpp"
@@ -29,6 +30,7 @@ void ctrl_task(void* arg) {
     core::tach::WheelMeter front;
     core::tach::WheelMeter rear;
     uint8_t last_mask = 0;
+    core::gear::Estimator gear;
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -72,6 +74,8 @@ void ctrl_task(void* arg) {
             last_mask = mask;
         }
 
+        const uint32_t now_ms_early = d.clock->now_ms();
+
         core::state::Engine e;
         e.shift_mask = mask;
         e.shift_flash = core::shift::over_limit(rpm, sc);
@@ -87,6 +91,14 @@ void ctrl_task(void* arg) {
         }
         d.slots->engine.publish(e);
 
+        // Needs both rpm and road speed, and this is the one task that has
+        // them first-hand.
+        const float road_mph = core::tach::best_speed_mph(
+            front.mph(), true, rear.mph(), true,
+            d.slots->gnss.get().speed_mph, d.slots->gnss.get().fix);
+        e.gear = gear.update(tach.rpm(), road_mph, c.neutral, now_ms_early,
+                             core::config::gear_view(*d.settings));
+
         core::state::Motion m;
         m.front_mph = front.mph();
         m.rear_mph = rear.mph();
@@ -97,7 +109,7 @@ void ctrl_task(void* arg) {
             m.gps_mph, d.slots->gnss.get().fix);
         d.slots->motion.publish(m);
 
-        const uint32_t now_ms = d.clock->now_ms();
+        const uint32_t now_ms = now_ms_early;
         if (hal::ok(s)) d.health->report_ok(core::state::Dev::McpBoard, now_ms);
         else            d.health->report_error(core::state::Dev::McpBoard,
                                                static_cast<int32_t>(s), now_ms);

@@ -41,6 +41,11 @@ constexpr ConfigItem action(uint16_t key, const char* label, const char* group,
 #define FIELD(f) static_cast<uint16_t>(offsetof(Settings, f)), \
                  static_cast<uint8_t>(sizeof(Settings::f))
 
+// One element of the gear table. Offsetting into the array by hand is the
+// price of keeping it an array, which the estimator wants to index.
+#define GEAR(i) static_cast<uint16_t>(offsetof(Settings, gear_rpm_per_mph) + \
+                                      (i) * sizeof(float)), 4
+
 // Keys are grouped by hundred for readability only. They are stable
 // identifiers, not indices — the order of this array may change freely, the
 // numbers may not.
@@ -70,6 +75,16 @@ const ConfigItem kItems[] = {
     action(0x0404, "Set line here", "Lap", state::CommandId::LapSetLine),
     action(0x0405, "Clear laps",    "Lap", state::CommandId::LapClear),
 
+    // Gearing. One ratio per gear, in rpm per mph. Calibrate against the
+    // ratio the DIAG screen shows at a steady speed in that gear.
+    num(0x0801, "Gears",   "Gearing", Kind::Int, 1, 6, 1, "", FIELD(gear_count)),
+    num(0x0802, "1st",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(0)),
+    num(0x0803, "2nd",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(1)),
+    num(0x0804, "3rd",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(2)),
+    num(0x0805, "4th",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(3)),
+    num(0x0806, "5th",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(4)),
+    num(0x0807, "6th",     "Gearing", Kind::Float,  0, 900, 5, "r/mph", GEAR(5)),
+
     // Fuel
     num(0x0501, "Idle burn", "Fuel", Kind::Float, 0.02f, 2.0f, 0.01f, "gph", FIELD(fuel_idle_gph)),
     num(0x0502, "WOT burn",  "Fuel", Kind::Float, 0.10f, 8.0f, 0.05f, "gph", FIELD(fuel_wot_gph)),
@@ -85,6 +100,7 @@ const ConfigItem kItems[] = {
 };
 
 #undef FIELD
+#undef GEAR
 
 constexpr size_t kCount = sizeof(kItems) / sizeof(kItems[0]);
 
@@ -222,6 +238,16 @@ size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n) {
 ShiftView shift_view(const Settings& s) {
     return ShiftView{s.shift_base_rpm, s.shift_span_rpm, s.shift_hyst_rpm,
                      s.shift_flash_rpm};
+}
+
+core::gear::Config gear_view(const Settings& s) {
+    core::gear::Config g;
+    g.count = s.gear_count > core::gear::kMaxGears ? core::gear::kMaxGears
+                                                   : s.gear_count;
+    for (uint8_t i = 0; i < core::gear::kMaxGears; ++i) {
+        g.rpm_per_mph[i] = s.gear_rpm_per_mph[i];
+    }
+    return g;
 }
 
 LapView lap_view(const Settings& s) {

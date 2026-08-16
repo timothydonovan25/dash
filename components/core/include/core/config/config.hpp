@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "core/state/command.hpp"
+#include "core/gear/gear.hpp"
 #include "core/units/units.hpp"
 
 namespace core::config {
@@ -40,6 +41,13 @@ struct Settings {
     uint16_t rear_circumference_mm  = 2050;
     uint8_t  front_pulses_per_rev   = 6;
     uint8_t  rear_pulses_per_rev    = 4;
+
+    // Gearing — rpm per mph in each gear. These depend on the sprockets and
+    // the rolling radius, so they are calibration rather than constants:
+    // ride at a steady speed in each gear and read the ratio off DIAG.
+    uint8_t gear_count = 5;
+    float   gear_rpm_per_mph[core::gear::kMaxGears] =
+        {420.0f, 290.0f, 215.0f, 165.0f, 130.0f, 0.0f};
 
     // Shift lights — mirrors core::shift::Config
     uint16_t shift_base_rpm  = 6000;
@@ -110,6 +118,7 @@ struct ShiftView { uint16_t base_rpm, span_rpm, hysteresis_rpm, flash_rpm; };
 struct LapView   { double half_width_ft; float min_speed_mph; uint32_t min_lap_ms; };
 ShiftView shift_view(const Settings& s);
 LapView   lap_view(const Settings& s);
+core::gear::Config gear_view(const Settings& s);
 
 // Checks the table against itself: no duplicate keys, no key 0, offsets and
 // ranges sane, enums with options, actions without offsets. The host test

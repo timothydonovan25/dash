@@ -96,6 +96,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     core::state::Engine e;
     e.shift_mask = c.shift_mask;
     e.shift_flash = c.shift_flash;
+    e.gear = c.gear;
     e.rpm = c.rpm;
     e.neutral = c.neutral;
     e.coolant_c = c.coolant_c;

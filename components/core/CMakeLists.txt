@@ -15,4 +15,5 @@ idf_component_register(
          "src/tach.cpp"
          "src/log.cpp"
          "src/delta.cpp"
+         "src/gear.cpp"
     INCLUDE_DIRS "include")

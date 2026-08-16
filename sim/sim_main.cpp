@@ -22,6 +22,7 @@
 #include "core/config/config.hpp"
 #include "core/health/health.hpp"
 #include "core/input/input.hpp"
+#include "core/gear/gear.hpp"
 #include "core/shift/shift.hpp"
 #include "services/logic_tick.hpp"
 #include "ui/app.hpp"
@@ -181,6 +182,7 @@ int main() {
     core::input::Config   button_cfg;
     uint8_t button_mask = 0;
     uint8_t lamp_mask = 0;
+    core::gear::Estimator gearbox;
 
     services::logic_restore(deps, logic);
 
@@ -249,6 +251,10 @@ int main() {
         const bool flash = core::shift::over_limit(rpm, sc);
         controls.shift_mask = lamp_mask;
         controls.shift_flash = flash;
+        // What `ctrl` does: infer the gear from rpm against road speed.
+        controls.gear = gearbox.update(controls.rpm, controls.speed_mph,
+                                       controls.neutral, now,
+                                       core::config::gear_view(settings));
 
         health.tick(now, core::health::Policy{});
         for (uint8_t i = 0; i < core::state::kDevCount; ++i) {

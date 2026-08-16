@@ -33,6 +33,7 @@ struct Controls {
     // `ctrl` does before it publishes.
     uint8_t shift_mask  = 0;
     bool    shift_flash = false;
+    uint8_t gear        = 0;
 };
 
 // The circuit: a rounded rectangle, roughly a kilometre round, laid out at

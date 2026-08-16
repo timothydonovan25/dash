@@ -156,7 +156,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
-19 host test suites, all passing.
+20 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -173,6 +173,8 @@ Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
 - `log/` the blackbox ring and its CSV format
+- `gear/` gear inferred from rpm against road speed, with the ratios in
+  CONFIG because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.

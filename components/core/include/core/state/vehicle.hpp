@@ -26,6 +26,12 @@ struct Engine {
     // the lamps actually lit on the handlebar.
     uint8_t shift_mask  = 0;
     bool    shift_flash = false;
+
+    // Inferred from rpm against road speed — there is no gear sensor on this
+    // bike. 0 means the estimate is not to be trusted right now: clutch in,
+    // stopped, or a ratio that matches nothing. Neutral is separate, above,
+    // because that one really is sensed.
+    uint8_t gear = 0;
 };
 
 struct Motion {
