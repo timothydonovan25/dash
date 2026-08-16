@@ -19,13 +19,20 @@ this repo has run on real hardware. Treat every driver as unproven.
 
 ## Build
 
-Firmware (needs ESP-IDF v5.x on PATH):
+Firmware. ESP-IDF **v6.0.2**, installed with EIM, so it is not on PATH
+until you source its activation script:
 
 ```bash
+. ~/.espressif/tools/activate_idf_v6.0.2.sh
 idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
+
+v6 is not v5. It split the peripheral drivers into `esp_driver_*`
+components, so `REQUIRES driver` no longer brings in UART or GPIO, and it is
+stricter about `gpio_num_t` in C++ — a plain `int` pin number will not
+convert on its own.
 
 Host tests — **no ESP-IDF needed, this is the fast loop**:
 
@@ -59,7 +66,7 @@ Do not break these without saying so explicitly.
 ```
 main/                  esp_main, task creation, dependency wiring
 components/bsp/        pin map and bus setup — the only hardware truth
-components/hal/        abstract interfaces (IEngine, IImu, IGnss, ...)
+components/dash_hal/   abstract interfaces (IEngine, IImu, IGnss, ...)
 components/drivers/    one component per chip
 components/core/       pure logic. NO esp headers. Builds on host.
 components/services/   the tasks that glue drivers to core
@@ -67,6 +74,14 @@ components/ui/         canvas, widgets, screens, render task
 test/                  host build, plain CMake + ctest
 docs/                  architecture and hardware reviews
 ```
+
+The architecture document calls the interface component `hal/`. It is
+`dash_hal/` on disk because **ESP-IDF has its own component called `hal`**,
+a component name is its directory name, and a project component wins. Naming
+ours `hal` silently replaced the IDF's, and the build died three components
+away with `fatal error: hal/efuse_hal.h: No such file or directory` inside
+`espcoredump`. The include prefix and the namespace are both still `hal`, so
+`#include "hal/i_imu.hpp"` is unchanged — only the directory moved.
 
 ## Hardware truths
 
@@ -125,16 +140,71 @@ dependency to install; swap it for Catch2 if you want more.
 
 ## Current state
 
-Scaffold only. What exists and is tested:
+Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
+19 host test suites, all passing.
 
-- `core/state/published.hpp` — the seqlock slot
-- `core/nav/` — mode and screen state machine
-- `core/shift/` — RPM to lamp pattern with hysteresis
-- `core/geo/` — distance, bearing, finish-line crossing with sub-sample
-  interpolation
+**`core/`** — all host-tested:
 
-Everything else in the architecture document is unwritten. Build order is
-in `docs/system-architecture.md` §17. Steps 1, 3 and 4 need no hardware.
+- `state/` — the seqlock slot, the slot table, `Frame` + `snapshot()`, the
+  `TrackBuffer` ring for bulk data, the `Command` type
+- `nav/` mode and screen machine · `shift/` RPM to lamp pattern
+- `geo/` distance, bearing, finish-line crossing with sub-sample interpolation
+- `lap/` arm, score, best lap, and the speed / min-lap / fix-gap gates that
+  turn a geometric crossing into a real lap
+- `units/` conversions and all display formatting · `trip/` odometer,
+  tripmeters, fuel model, engine hours
+- `config/` the one ConfigItem table · `health/` DevState and the retry policy
+- `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
+- `nmea/` the sentence parser, so the GPS driver is only bytes
+- `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
+- `log/` the blackbox ring and its CSV format
+- `delta/` lap delta against the session best — a **placeholder**, see below
+
+**`dash_hal/`** — the abstract interfaces, including `NullEngine`.
+
+**`ui/`** — canvas, 12 widgets, all 15 screens, the render loop. Builds and
+renders on the host; `test_ui` draws every screen against a fake Frame.
+
+**`bsp/`** — pins plus `buses.cpp`: SPI2, SPI3, I2C0 and UART1 are brought
+up in one place, and a driver only ever adds a device to a bus. That matters
+most for SPI2, which three drivers share.
+
+**`drivers/`, `services/`, `main/`** — compile clean for esp32s3 against
+IDF v6.0.2 and link into a 440 kB `dash.bin`. **Nothing has run.** Compiling
+is not working: the drivers are written against datasheets and a netlist,
+and the PCB is still at fab. See `components/drivers/README.md` for the
+specific BRINGUP holes.
+
+Nine tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
+storage, keeper on core 1.
+
+### What is deliberately not here
+
+- **BLE** (`services/ble/`, `core/tpms/`) — step 9 of the build order, after
+  the real-time path works, so a change in shift-light timing has one
+  suspect. `sdkconfig.defaults` already pins the controller and host to
+  core 1 for when it lands.
+- **CAN / `engine_service`** — the board has no transceiver (§10.1).
+  `NullEngine` is wired in and every screen renders `--` for the ECU.
+- **USB mass storage** (§9.3) — the ownership seam is in
+  `services/storage_service.cpp` and the TinyUSB half is not written. It
+  cannot be a partial implementation: the device must unmount the card
+  before a host touches it, or the FAT volume is corrupted by two writers.
+- **A tuned lap delta.** `core/delta/` exists and works, but it is
+  explicitly a placeholder: the reference is the session best held in RAM,
+  matching is nearest-point on that trace within a window around the last
+  match, and the number is quantised to a tenth at the source. Every
+  threshold in `delta::Config` is a guess that has never seen a real GPS
+  trace, and the tests around it are synthetic — they prove the matcher does
+  what it was designed to do, not that the design suits real fixes. Tune the
+  search window and `max_match_ft` on the first track day. A saved
+  per-track reference is the next step and needs track identity, which is
+  still open in §18.
+
+Where files differ from the §3 sketch: `tach_capture` and `hall_capture` are
+one `engine_sense` driver because they are the same three counters;
+`backlight` is part of `ili9488` because it is one LEDC channel; `theme.hpp`
+is the semantic layer over the palette in `geometry.hpp`.
 
 ## Before the board arrives
 

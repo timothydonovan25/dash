@@ -1,0 +1,9 @@
+## Managed dependencies.
+##
+## The ILI9488 panel driver is pulled in rather than written. In 4-wire SPI
+## mode this panel needs 18-bit colour and will not take RGB565, and the
+## conversion plus the command sequence is exactly the kind of code that is
+## already correct somewhere else (§7.6).
+dependencies:
+  atanisoft/esp_lcd_ili9488: "^1.0.0"
+  idf: ">=5.0"

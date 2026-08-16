@@ -1,0 +1,176 @@
+#include "check.hpp"
+#include "core/config/config.hpp"
+#include <cstring>
+
+using namespace core::config;
+
+namespace {
+bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
+
+// Every key that has ever shipped. An NVS partition written by an older
+// firmware still has these in it, so removing or renumbering one silently
+// loses a rider's setting — the odometer lives in the same flash. Adding to
+// this list is fine. Changing a number in it is not.
+const uint16_t kShippedKeys[] = {
+    0x0101, 0x0102, 0x0103, 0x0104,
+    0x0201, 0x0202, 0x0203, 0x0204,
+    0x0301, 0x0302, 0x0303, 0x0304,
+    0x0401, 0x0402, 0x0403, 0x0404, 0x0405,
+    0x0501, 0x0502, 0x0503,
+    0x0601, 0x0602, 0x0603,
+    0x0701,
+};
+}  // namespace
+
+int main() {
+    CASE("the table is internally consistent");
+    {
+        const char* why = "";
+        const bool ok = validate_table(&why);
+        if (!ok) std::printf("       table says: %s\n", why);
+        CHECK(ok);
+        CHECK(item_count() > 0);
+    }
+
+    CASE("no shipped NVS key has been renumbered or dropped");
+    {
+        for (uint16_t k : kShippedKeys) {
+            const ConfigItem* it = find(k);
+            if (!it) std::printf("       missing key 0x%04X\n", k);
+            CHECK(it != nullptr);
+        }
+        CHECK(item_count() == sizeof(kShippedKeys) / sizeof(kShippedKeys[0]));
+        CHECK(find(0xDEAD) == nullptr);      // a key from a newer firmware
+    }
+
+    CASE("every item round-trips through its own range");
+    {
+        for (size_t i = 0; i < item_count(); ++i) {
+            const ConfigItem& it = items()[i];
+            if (it.kind == Kind::Action) continue;
+            Settings s;
+            set(s, it, it.min);
+            CHECK_NEAR(get(s, it), it.min, 1e-3);
+            set(s, it, it.max);
+            CHECK_NEAR(get(s, it), it.max, 1e-3);
+        }
+    }
+
+    CASE("out-of-range values clamp instead of wrapping");
+    {
+        Settings s;
+        const ConfigItem* bright = find(0x0101);       // uint8, 5..100
+        set(s, *bright, 5000.0f);
+        CHECK_NEAR(get(s, *bright), 100.0, 1e-6);
+        CHECK(s.brightness_pct == 100);                // not 5000 & 0xFF
+        set(s, *bright, -40.0f);
+        CHECK_NEAR(get(s, *bright), 5.0, 1e-6);
+
+        const ConfigItem* tz = find(0x0103);           // int32, -12..14
+        set(s, *tz, -99.0f);
+        CHECK(s.tz_offset_h == -12);
+        set(s, *tz, 99.0f);
+        CHECK(s.tz_offset_h == 14);
+    }
+
+    CASE("writing one setting never disturbs its neighbours");
+    {
+        // The failure this catches: an item whose declared range needs two
+        // bytes sitting over a one-byte field. The write runs off the end
+        // and the setting next door changes on its own.
+        Settings s;
+        for (size_t i = 0; i < item_count(); ++i) {
+            const ConfigItem& it = items()[i];
+            if (it.kind != Kind::Action) set(s, it, it.max);
+        }
+        for (size_t i = 0; i < item_count(); ++i) {
+            const ConfigItem& it = items()[i];
+            if (it.kind == Kind::Action) continue;
+            CHECK_NEAR(get(s, it), it.max, 1e-3);
+        }
+    }
+
+    CASE("set() reports whether anything actually changed");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0301);           // first lamp rpm
+        CHECK(set(s, *it, 7000.0f));
+        CHECK(!set(s, *it, 7000.0f));                  // same value
+        CHECK(!set(s, *it, 7000.4f));                  // rounds to the same
+        CHECK(set(s, *it, 7100.0f));
+    }
+
+    CASE("C and D step by the item's own step size");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0101);           // brightness, step 5
+        s.brightness_pct = 80;
+        nudge(s, *it, +1);
+        CHECK(s.brightness_pct == 85);
+        nudge(s, *it, -1);
+        CHECK(s.brightness_pct == 80);
+        for (int i = 0; i < 20; ++i) nudge(s, *it, +1);
+        CHECK(s.brightness_pct == 100);                // stops at the top
+    }
+
+    CASE("enums wrap so a rider can reach every option");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0102);           // units
+        CHECK(s.unit_system == 0);
+        nudge(s, *it, +1);
+        CHECK(s.unit_system == 1);
+        nudge(s, *it, +1);
+        CHECK(s.unit_system == 0);                     // wrapped
+        nudge(s, *it, -1);
+        CHECK(s.unit_system == 1);
+    }
+
+    CASE("bools toggle");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0104);
+        CHECK(!s.dim_at_night);
+        nudge(s, *it, +1);
+        CHECK(s.dim_at_night);
+        nudge(s, *it, +1);
+        CHECK(!s.dim_at_night);
+    }
+
+    CASE("actions carry a command and hold no value");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0404);
+        CHECK(it->kind == Kind::Action);
+        CHECK(it->action == core::state::CommandId::LapSetLine);
+        CHECK(!set(s, *it, 1.0f));
+        CHECK(!nudge(s, *it, +1));
+    }
+
+    CASE("the config screen draws each row from the table alone");
+    {
+        Settings s;
+        char buf[32];
+        format(s, *find(0x0101), buf, sizeof buf);  CHECK(eq(buf, "80 %"));
+        format(s, *find(0x0102), buf, sizeof buf);  CHECK(eq(buf, "Imperial"));
+        format(s, *find(0x0104), buf, sizeof buf);  CHECK(eq(buf, "Off"));
+        format(s, *find(0x0301), buf, sizeof buf);  CHECK(eq(buf, "6000 rpm"));
+        format(s, *find(0x0501), buf, sizeof buf);  CHECK(eq(buf, "0.18 gph"));
+        format(s, *find(0x0404), buf, sizeof buf);  CHECK(eq(buf, "press E"));
+    }
+
+    CASE("the modules that keep their own config read it from here");
+    {
+        Settings s;
+        s.shift_base_rpm = 7000;
+        s.lap_min_lap_s  = 25;
+        const ShiftView sv = shift_view(s);
+        CHECK(sv.base_rpm == 7000);
+        CHECK(sv.flash_rpm == s.shift_flash_rpm);
+        const LapView lv = lap_view(s);
+        CHECK(lv.min_lap_ms == 25000);
+        CHECK_NEAR(lv.half_width_ft, s.lap_half_width_ft, 1e-6);
+    }
+
+    return check::report("config");
+}

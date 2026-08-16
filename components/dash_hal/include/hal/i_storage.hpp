@@ -1,0 +1,56 @@
+// Persistent settings, life data, and the card.
+//
+// `life` (odometer, engine hours) and `cfg` (user settings) live in separate
+// NVS namespaces, as they did in v1. Losing the settings must not cost the
+// rider their odometer, and the two are written at very different rates.
+//
+// Keys are the `ConfigItem::key` numbers from core/config. They are stable
+// forever — that is what lets an NVS partition written by an older firmware
+// still load. Note that changing the partition table erases NVS, which is
+// why §17 says set it before step 2 rather than after.
+#pragma once
+#include <cstddef>
+#include <cstdint>
+#include "hal/status.hpp"
+
+namespace hal {
+
+inline constexpr const char* kNsLife = "life";
+inline constexpr const char* kNsCfg  = "cfg";
+
+// Life keys. Not ConfigItems: the rider cannot edit these, and they are
+// written by the keeper rather than the config screen.
+inline constexpr uint16_t kKeyOdometerMi   = 0x0001;
+inline constexpr uint16_t kKeyEngineHours  = 0x0002;
+
+class IStorage {
+public:
+    virtual ~IStorage() = default;
+    virtual Status init() = 0;
+
+    // NotPresent for a key that has never been written — a fresh board, or
+    // a setting added by a newer firmware. That is not an error, and the
+    // caller keeps its default.
+    virtual Status read_f32(const char* ns, uint16_t key, float& out) = 0;
+    virtual Status write_f32(const char* ns, uint16_t key, float value) = 0;
+
+    // The odometer is a double for the reason spelled out in core/trip: a
+    // float stops counting at 100,000 miles.
+    virtual Status read_f64(const char* ns, uint16_t key, double& out) = 0;
+    virtual Status write_f64(const char* ns, uint16_t key, double value) = 0;
+
+    virtual Status commit() = 0;
+};
+
+// The SD card: logs, sessions, tracks. Bulk and best-effort. Never on the
+// real-time path, and never on core 0.
+class ICard {
+public:
+    virtual ~ICard() = default;
+    virtual Status init() = 0;
+    virtual bool   present() const = 0;
+    virtual Status append(const char* path, const void* data, size_t len) = 0;
+    virtual Status sync() = 0;
+};
+
+}  // namespace hal

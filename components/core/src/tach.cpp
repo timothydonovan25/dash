@@ -1,0 +1,99 @@
+#include "core/tach/tach.hpp"
+
+namespace core::tach {
+namespace {
+constexpr float kMmPerMile = 1609344.0f;
+constexpr float kUsPerHour = 3600.0f * 1000000.0f;
+constexpr float kUsPerMin  = 60.0f * 1000000.0f;
+}  // namespace
+
+float rpm_from_pulses(uint32_t pulses, uint32_t dt_us, uint8_t pulses_per_rev) {
+    if (pulses == 0 || dt_us == 0 || pulses_per_rev == 0) return 0.0f;
+    const float revs = static_cast<float>(pulses) / pulses_per_rev;
+    return revs * kUsPerMin / static_cast<float>(dt_us);
+}
+
+float mph_from_pulses(uint32_t pulses, uint32_t dt_us, const WheelConfig& c) {
+    if (pulses == 0 || dt_us == 0 || c.pulses_per_rev == 0) return 0.0f;
+    const float revs = static_cast<float>(pulses) / c.pulses_per_rev;
+    const float miles = revs * c.circumference_mm / kMmPerMile;
+    return miles * kUsPerHour / static_cast<float>(dt_us);
+}
+
+void Meter::reset() {
+    rpm_ = raw_rpm_ = 0.0f;
+    running_ = false;
+    started_ = false;
+}
+
+void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
+                   const Config& c) {
+    if (!started_) {
+        last_total_ = total;
+        last_edge_us_ = edge_us ? edge_us : now_us;
+        started_ = true;
+        return;
+    }
+
+    const uint32_t dp = total - last_total_;         // unsigned: wrap-safe
+    last_total_ = total;
+
+    if (dp > 0 && edge_us > last_edge_us_) {
+        // The interval that matters is between the edge that ended the last
+        // measurement and the edge that ended this one — not between polls.
+        const uint64_t dt = edge_us - last_edge_us_;
+        last_edge_us_ = edge_us;
+        raw_rpm_ = rpm_from_pulses(dp, static_cast<uint32_t>(dt), c.pulses_per_rev);
+        running_ = true;
+        rpm_ += (raw_rpm_ - rpm_) * c.smoothing;
+        return;
+    }
+
+    // No pulses this tick. At 500 Hz that is normal even at 6000 rpm — one
+    // pulse every 10 ms — so silence only means stalled once it has gone on
+    // longer than any real idle.
+    if ((now_us - last_edge_us_) / 1000u >= c.stall_ms) {
+        running_ = false;
+        raw_rpm_ = 0.0f;
+        rpm_ = 0.0f;     // snapped, not decayed: a stopped engine reads zero
+    }
+}
+
+void WheelMeter::reset() {
+    mph_ = 0.0f;
+    started_ = false;
+}
+
+void WheelMeter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
+                        const WheelConfig& c) {
+    if (!started_) {
+        last_total_ = total;
+        last_edge_us_ = edge_us ? edge_us : now_us;
+        started_ = true;
+        return;
+    }
+
+    const uint32_t dp = total - last_total_;
+    last_total_ = total;
+
+    if (dp > 0 && edge_us > last_edge_us_) {
+        const uint64_t dt = edge_us - last_edge_us_;
+        last_edge_us_ = edge_us;
+        const float raw = mph_from_pulses(dp, static_cast<uint32_t>(dt), c);
+        mph_ += (raw - mph_) * c.smoothing;
+        return;
+    }
+
+    if ((now_us - last_edge_us_) / 1000u >= c.stall_ms) mph_ = 0.0f;
+}
+
+float best_speed_mph(float front_mph, bool front_ok,
+                     float rear_mph,  bool rear_ok,
+                     float gps_mph,   bool gps_ok) {
+    if (front_ok) return front_mph;
+    if (rear_ok)  return rear_mph;
+    if (gps_ok)   return gps_mph;
+    return 0.0f;
+}
+
+}  // namespace core::tach
