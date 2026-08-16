@@ -73,6 +73,8 @@ void ctrl_task(void* arg) {
         }
 
         core::state::Engine e;
+        e.shift_mask = mask;
+        e.shift_flash = core::shift::over_limit(rpm, sc);
         e.rpm = tach.rpm();
         e.neutral = c.neutral;
         e.ecu_online = d.engine && d.engine->online();

@@ -59,6 +59,10 @@ void SpeedScreen::update(const Frame& f) {
 
     rpm_.set(f.engine.rpm, f.engine.rpm > 0.0f || f.engine.neutral);
 
+    // Straight off the mask ctrl sent to the lamps, so the strip on the
+    // screen and the strip on the handlebar cannot disagree.
+    shift_.set(f.engine.shift_mask, f.engine.shift_flash);
+
     const char* tunit = "C";
     const float coolant = u::temp_for_display(f.engine.coolant_c, units(), &tunit);
     gear_hint_.set_unit(tunit);

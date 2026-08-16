@@ -6,3 +6,4 @@ managed_components/
 dependencies.lock
 compile_commands.json
 .cache/
+build-sim/

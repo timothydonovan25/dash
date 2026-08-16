@@ -83,7 +83,11 @@ void LapScreen::update(const Frame& f) {
     // widget shows `--` rather than a zero, which would read as "dead on
     // your best lap" and be a lie (§18: the reference is still an open
     // question).
-    delta_.set(f.lap.delta_ms, f.lap.best_ms > 0 && f.lap.delta_ms != 0);
+    // The logic task says whether the delta means anything: there has to be
+    // a reference lap, and the rider has to be on it. Inferring it from
+    // `delta_ms != 0` would show `--` to a rider who is exactly on their
+    // best lap, which is the one moment they most want to see the zero.
+    delta_.set(f.lap.delta_ms, f.lap.delta_valid);
 
     lap_count_.set(static_cast<float>(f.lap.count), true);
 

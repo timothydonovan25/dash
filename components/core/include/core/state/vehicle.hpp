@@ -18,6 +18,14 @@ struct Engine {
     float coolant_c  = 0.0f;
     float tps_pct    = 0.0f;
     bool  ecu_online = false;   // false until the CAN adapter exists
+
+    // The lamp pattern `ctrl` just sent to the MCP23S17, and whether it is
+    // over the limit. Published rather than recomputed by the screen: the
+    // pattern carries hysteresis state, so a screen working it out again
+    // from `rpm` would keep its own and could show something different from
+    // the lamps actually lit on the handlebar.
+    uint8_t shift_mask  = 0;
+    bool    shift_flash = false;
 };
 
 struct Motion {

@@ -34,6 +34,21 @@ components, so `REQUIRES driver` no longer brings in UART or GPIO, and it is
 stricter about `gpio_num_t` in C++ — a plain `int` pin number will not
 convert on its own.
 
+Simulator — the dashboard on a laptop, no hardware and no ESP-IDF:
+
+```bash
+cmake -S sim -B build-sim && cmake --build build-sim
+python3 sim/dash_sim.py
+```
+
+It runs the firmware's own `ui::App`, screens, widgets, `logic_tick`,
+button debounce and `shift::pattern()` against a fake bike, so what the
+window shows is what the panel will show. Sliders for speed, rpm, lean and
+the rest; the five buttons send down/up separately so the real debounce and
+long-press timing decide what a press was. `build-sim/dash_sim` also speaks
+a plain text protocol on stdin and emits PPM frames on stdout, so it can be
+scripted and piped into ffmpeg.
+
 Host tests — **no ESP-IDF needed, this is the fast loop**:
 
 ```bash
@@ -164,6 +179,11 @@ Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
 
 **`ui/`** — canvas, 12 widgets, all 15 screens, the render loop. Builds and
 renders on the host; `test_ui` draws every screen against a fake Frame.
+
+**`sim/`** — the desktop simulator. `logic_tick.hpp` exists so it executes
+the firmware's decisions rather than a copy of them: a simulator that
+mirrors the code instead of running it drifts, and then stops being
+evidence of anything.
 
 **`bsp/`** — pins plus `buses.cpp`: SPI2, SPI3, I2C0 and UART1 are brought
 up in one place, and a driver only ever adds a device to a bus. That matters
