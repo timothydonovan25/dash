@@ -23,7 +23,9 @@ import tkinter as tk
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIM = os.path.join(os.path.dirname(HERE), "build-sim", "dash_sim")
 
-W, H = 320, 480
+# Taken from the first frame's PPM header rather than hardcoded. The panel
+# is landscape now, and a front end that assumes otherwise silently crops
+# the right-hand third of the dash.
 SCALE = 1
 
 # Green, amber, red across the strip -- the same order as the lamps on the
@@ -140,6 +142,7 @@ class App:
         self.sim = sim
         self.root = root
         self.blink = False
+        self.size = (0, 0)
         root.title("dash — simulator")
         root.configure(bg="#0d0f14")
 
@@ -158,7 +161,7 @@ class App:
             self.lamps.append(lamp)
 
         # --- the panel ---------------------------------------------------
-        self.canvas = tk.Canvas(left, width=W * SCALE, height=H * SCALE,
+        self.canvas = tk.Canvas(left, width=480 * SCALE, height=320 * SCALE,
                                 bg="black", highlightthickness=1,
                                 highlightbackground="#2c3440")
         self.canvas.pack()
@@ -229,6 +232,12 @@ class App:
         ppm, lamps, flash, mode, screen = frame
 
         self.photo = tk.PhotoImage(data=ppm)
+        # Follow whatever the simulator actually sent, so a change of
+        # orientation in the firmware needs no change here.
+        w, h = self.photo.width(), self.photo.height()
+        if (w, h) != self.size:
+            self.size = (w, h)
+            self.canvas.config(width=w * SCALE, height=h * SCALE)
         self.canvas.itemconfig(self.image_id, image=self.photo)
 
         # Over the limit, everything flashes -- the caller owns the blink

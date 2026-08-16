@@ -18,6 +18,9 @@ namespace u = core::units;
 // fills with rpm rather than being decoration.
 namespace {
 constexpr Color kFrame = color::kText;
+// The unlit part of the tach bar. Dark enough to read as "empty" without
+// being invisible at night.
+constexpr Color kTachTrack = rgb(72, 14, 14);
 
 // Tach bar: the L, and the diagonal that cuts its corner off.
 constexpr int16_t kBarTop    = 25;    // thickness of the top run
@@ -97,7 +100,11 @@ void SpeedScreen::update(const Frame& f) {
     sats_ = f.gnss.sats;
     hdop_ft_ = f.gnss.hdop * 16.0f;      // rough DOP-to-feet, for a glance
     fix_ = f.gnss.fix;
-    rpm_frac_ = f.engine.rpm / 11000.0f;
+    // Full scale is the first shift lamp, not the redline: above that the
+    // lamps are the instrument and the bar just stays full.
+    const uint16_t base = has_ctx() && ctx().settings
+                              ? ctx().settings->shift_base_rpm : 6000;
+    rpm_frac_ = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
     if (rpm_frac_ < 0.0f) rpm_frac_ = 0.0f;
     if (rpm_frac_ > 1.0f) rpm_frac_ = 1.0f;
     lap_ms_ = f.lap.current_ms;
@@ -111,18 +118,41 @@ void SpeedScreen::update(const Frame& f) {
 // lean gauge and the small print. Drawn by the screen itself because they
 // are the screen's identity rather than reusable furniture.
 void SpeedScreen::draw_chrome(Canvas& c) {
-    // The L, with its corner cut away on the diagonal.
-    c.fill_rect(Rect{0, kBarTop, kBarLeft,
-                     static_cast<int16_t>(kScreenH - kBarTop)}, color::kTach);
-    c.fill_rect(Rect{0, 0, kBarTopEnd, kBarTop}, color::kTach);
+    // The tach bar is a gauge, not a border. It is one continuous track that
+    // starts at the bottom left corner, runs up the left edge, turns, and
+    // runs right along the top until the diagonal cuts it off.
+    //
+    // It fills over 0 to the first shift lamp's rpm, so it is full at the
+    // moment lamp one lights. That is the whole point of it: the shift
+    // lights say nothing below their own threshold, and a rider pulling away
+    // or lugging it in third has nothing else to look at. The bar covers
+    // exactly that gap and then hands over.
+    const int16_t up_len = static_cast<int16_t>(kScreenH - kBarTop);
+    const int16_t across_len = kBarTopEnd;
+    const int total_len = up_len + across_len;
+    const int filled = static_cast<int>(total_len * rpm_frac_);
+
+    // Track first, tapered: the diagonal is cut out of the *empty* bar, so
+    // at rest the panel keeps the swept shape of the reference layout.
+    c.fill_rect(Rect{0, kBarTop, kBarLeft, up_len}, kTachTrack);
+    c.fill_rect(Rect{0, 0, across_len, kBarTop}, kTachTrack);
     c.fill_triangle(kBarTopEnd, 0, kBarCut, kBarTop, 27, kBarTop, color::kBg);
 
-    // The left run fills from the bottom with rpm, so the bar is an
-    // instrument rather than a border.
-    const int16_t lit = static_cast<int16_t>((kScreenH - kBarTop) * rpm_frac_);
-    if (lit > 0) {
-        c.fill_rect(Rect{0, static_cast<int16_t>(kScreenH - lit),
-                         kBarLeft, lit}, color::kWhite);
+    // Then the lit part, over the top of it, following the same path — and
+    // *not* cut by the diagonal. The fill climbs into the corner the taper
+    // takes away, so the bar squares itself off as it reaches full. That is
+    // what makes the top of the travel visible: tapered, the last third of
+    // the sweep would be a few pixels wide and read as nothing at all.
+    const int16_t up_lit = static_cast<int16_t>(filled < up_len ? filled : up_len);
+    if (up_lit > 0) {
+        c.fill_rect(Rect{0, static_cast<int16_t>(kScreenH - up_lit),
+                         kBarLeft, up_lit}, color::kTach);
+    }
+    if (filled > up_len) {
+        const int16_t across_lit =
+            static_cast<int16_t>(filled - up_len > across_len ? across_len
+                                                             : filled - up_len);
+        c.fill_rect(Rect{0, 0, across_lit, kBarTop}, color::kTach);
     }
 
     c.draw_round_rect(kRpmTile, 6, kFrame);
