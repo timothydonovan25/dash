@@ -33,6 +33,23 @@ public:
     virtual void fill(Color c) = 0;
     virtual void fill_rect(const Rect& r, Color c) = 0;
     virtual void draw_rect(const Rect& r, Color c) = 0;
+
+    // Rounded rectangles are the frame around every readout on this dash,
+    // so they are a primitive rather than something each screen draws.
+    virtual void draw_round_rect(const Rect& r, int16_t radius, Color c) = 0;
+    virtual void fill_round_rect(const Rect& r, int16_t radius, Color c) = 0;
+
+    virtual void fill_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                               int16_t x2, int16_t y2, Color c) = 0;
+
+    // A filled annulus sector: the lean gauge and the tach arc are both this.
+    //
+    // Angles are degrees clockwise from twelve o'clock, which is how a rider
+    // reads a gauge and how core/geo already talks about headings. `r_outer`
+    // is the outside edge; `r_inner` makes it a band rather than a pie slice.
+    virtual void fill_arc(int16_t cx, int16_t cy, int16_t r_outer,
+                          int16_t r_inner, float start_deg, float end_deg,
+                          Color c) = 0;
     virtual void draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, Color c) = 0;
     virtual void fill_circle(int16_t cx, int16_t cy, int16_t radius, Color c) = 0;
     virtual void draw_circle(int16_t cx, int16_t cy, int16_t radius, Color c) = 0;

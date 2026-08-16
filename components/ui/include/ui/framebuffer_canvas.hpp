@@ -21,6 +21,12 @@ public:
     void fill(Color c) override;
     void fill_rect(const Rect& r, Color c) override;
     void draw_rect(const Rect& r, Color c) override;
+    void draw_round_rect(const Rect& r, int16_t radius, Color c) override;
+    void fill_round_rect(const Rect& r, int16_t radius, Color c) override;
+    void fill_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                       int16_t x2, int16_t y2, Color c) override;
+    void fill_arc(int16_t cx, int16_t cy, int16_t r_outer, int16_t r_inner,
+                  float start_deg, float end_deg, Color c) override;
     void draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, Color c) override;
     void fill_circle(int16_t cx, int16_t cy, int16_t radius, Color c) override;
     void draw_circle(int16_t cx, int16_t cy, int16_t radius, Color c) override;

@@ -23,8 +23,10 @@ hal::Status from_esp(int err) {
 
 }  // namespace
 
-uint16_t Ili9488::width() const  { return bsp::kTftWidth; }
-uint16_t Ili9488::height() const { return bsp::kTftHeight; }
+// The part is 320x480. The dash is mounted landscape, so the panel is
+// rotated in hardware and everything above this line thinks in 480x320.
+uint16_t Ili9488::width() const  { return bsp::kTftHeight; }
+uint16_t Ili9488::height() const { return bsp::kTftWidth; }
 
 hal::Status Ili9488::init() {
     // The reset line is on the expander. If that is dead we carry on anyway:
@@ -34,7 +36,7 @@ hal::Status Ili9488::init() {
     if (mcp_) mcp_->pulse_tft_reset();
 
     // SPI3 belongs to bsp, which sizes its transfers for exactly one band.
-    const int max_transfer = bsp::kTftWidth * 40 * 3;
+    const int max_transfer = bsp::kTftHeight * 40 * 3;   // landscape width
     esp_err_t err = ESP_OK;
 
     esp_lcd_panel_io_spi_config_t io_cfg = {};
@@ -68,6 +70,15 @@ hal::Status Ili9488::init() {
     if (err != ESP_OK) return from_esp(err);
     err = esp_lcd_panel_init(panel);
     if (err != ESP_OK) return from_esp(err);
+    // Landscape. swap_xy transposes, and one mirror puts the origin at the
+    // top left rather than giving a mirror image — which way round depends
+    // on how the panel is fitted in the case.
+    //
+    // BRINGUP: if the display comes up mirrored or upside down when the
+    // board arrives, these two lines are the only thing to change.
+    esp_lcd_panel_swap_xy(panel, true);
+    esp_lcd_panel_mirror(panel, true, false);
+
     esp_lcd_panel_disp_on_off(panel, true);
 
     return hal::Status::Ok;

@@ -21,7 +21,7 @@ namespace services {
 namespace {
 
 constexpr int16_t kBandLines = 40;
-constexpr size_t  kBandPixels = static_cast<size_t>(bsp::kTftWidth) * kBandLines;
+constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
 
 // Both traces, exposed to the map widgets as a read-only view. The widget
 // walks the buffer; it never gets a copy of it (§4.4).
@@ -74,7 +74,7 @@ void render_task(void* arg) {
         return;
     }
 
-    ui::FrameBufferCanvas canvas(band, bsp::kTftWidth, kBandLines);
+    ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
     app.begin(canvas);
 
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
@@ -95,12 +95,12 @@ void render_task(void* arg) {
         // Each band is a full repaint of its own strip: the buffer has no
         // memory of what was on the panel a frame ago, so the dirty flags
         // save the widget's work, not the pixels.
-        for (int16_t y = 0; y < bsp::kTftHeight; y += kBandLines) {
+        for (int16_t y = 0; y < ui::kScreenH; y += kBandLines) {
             canvas.set_origin(0, y);
             app.render(canvas, true);
             if (d.panel) {
                 const hal::Status s = d.panel->blit(0, static_cast<uint16_t>(y),
-                                                    bsp::kTftWidth, kBandLines,
+                                                    ui::kScreenW, kBandLines,
                                                     band);
                 if (hal::ok(s)) d.health->report_ok(core::state::Dev::Display, now);
                 else d.health->report_error(core::state::Dev::Display,

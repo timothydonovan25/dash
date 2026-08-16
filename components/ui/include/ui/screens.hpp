@@ -22,16 +22,33 @@ public:
     const char* name() const override { return "SPEED"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override { draw_chrome(c); }
     WidgetList widgets() override;
 
 private:
+    void draw_chrome(Canvas& c);
+
     BigNumber  speed_;
+    BigNumber  rpm_;
     ShiftStrip shift_;
-    ValueBox   rpm_;
-    ValueBox   gear_hint_;
+    Label      gear_;
     Label      clock_;
-    Label      neutral_;
-    Widget*    list_[6] = {};
+    Widget*    list_[5] = {};
+
+    // Read by draw_chrome, set by update. The screen is still a pure
+    // function of one Frame; this is just where the frame's numbers wait
+    // between the two halves of a repaint.
+    float    lean_deg_ = 0.0f;
+    bool     lean_ok_ = false;
+    uint8_t  sats_ = 0;
+    float    hdop_ft_ = 0.0f;
+    bool     fix_ = false;
+    float    rpm_frac_ = 0.0f;
+    uint32_t lap_ms_ = 0;
+    bool     lap_timing_ = false;
+    float    trip_mi_ = 0.0f;
+    float    odo_mi_ = 0.0f;
+    bool     chrome_dirty_ = true;
 };
 
 class TripScreen final : public Screen {

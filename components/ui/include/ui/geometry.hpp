@@ -26,6 +26,8 @@ constexpr Color kAccent   = rgb(56, 170, 255);
 constexpr Color kGood     = rgb(64, 200, 120);
 constexpr Color kWarn     = rgb(255, 176, 32);
 constexpr Color kAlarm    = rgb(255, 64, 56);
+// The tach bar red, matched to the reference layout: RGB565 0xE945.
+constexpr Color kTach     = rgb(239, 40, 41);
 constexpr Color kWhite    = rgb(255, 255, 255);
 }  // namespace color
 
@@ -57,9 +59,10 @@ struct Rect {
 
 enum class Align : uint8_t { Left = 0, Center, Right };
 
-// The panel, in the orientation the dash is mounted: portrait, 320 wide by
-// 480 tall. Every screen layout below is written against these two numbers.
-inline constexpr int16_t kScreenW = 320;
-inline constexpr int16_t kScreenH = 480;
+// The panel, in the orientation the dash is mounted: **landscape**, 480
+// wide by 320 tall. The ILI9488 is a 320x480 part; the driver rotates it.
+// Every screen layout is written against these two numbers.
+inline constexpr int16_t kScreenW = 480;
+inline constexpr int16_t kScreenH = 320;
 
 }  // namespace ui

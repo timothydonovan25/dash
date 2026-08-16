@@ -107,6 +107,7 @@ void App::render(Canvas& c, bool full) {
     const bool repaint = full || needs_full_;
     if (repaint) {
         c.fill(color::kBg);
+        current().draw_background(c);
         // A band-based repaint has no memory of what was on the panel, so
         // everything has to be redrawn, not just what changed.
         for (Widget* w : current().widgets()) if (w) w->touch();

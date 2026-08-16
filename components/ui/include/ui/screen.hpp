@@ -63,6 +63,15 @@ public:
     // Set widget values. Must not draw.
     virtual void update(const core::state::Frame& f) = 0;
 
+    // The parts of a screen that are not widgets: frames, gauges, rules,
+    // small print. Drawn once per full repaint, underneath the widgets.
+    //
+    // A screen draws its own chrome rather than owning a widget per line
+    // because the chrome *is* the screen — it does not change, it is not
+    // reused, and turning every rounded rectangle into a Widget would
+    // triple the file for nothing.
+    virtual void draw_background(Canvas&) {}
+
     // True if the screen consumed the event. C, D and E reach the screen
     // only after nav has decided they are not navigation.
     virtual bool handle(const core::nav::InputEvent&) { return false; }
