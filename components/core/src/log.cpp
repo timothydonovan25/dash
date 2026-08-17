@@ -57,33 +57,75 @@ size_t terminate(char* buf, size_t n, size_t k) {
 }  // namespace
 
 size_t csv_header(char* buf, size_t n) {
+    // The first line has to be exactly this for RaceRender to accept the
+    // lap tags and the named columns. Anything else and it falls back to
+    // guessing, which gets Time wrong.
     const char* h =
-        "t_ms,speed_mph,rpm,lean_deg,pitch_deg,g_lat,g_vert,lat,lon,"
-        "lap_ms,sats,flags\n";
+        "# RaceRender Data\n"
+        "Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,"
+        "Lean,Pitch,GVert,LapTime,Sats,Flags\n";
     return terminate(buf, n, put_str(buf, n, 0, h));
+}
+
+// Two digits, zero padded. Lap tags are hh:mm:ss.nn and RaceRender parses
+// them strictly.
+namespace {
+size_t put_2(char* buf, size_t n, size_t k, unsigned v) {
+    k = put(buf, n, k, static_cast<char>('0' + (v / 10) % 10));
+    return put(buf, n, k, static_cast<char>('0' + v % 10));
+}
+}  // namespace
+
+size_t format_lap_marker(char* buf, size_t n, uint16_t index, uint32_t lap_ms) {
+    size_t k = put_str(buf, n, 0, "# Lap ");
+    k = put_num(buf, n, k, static_cast<float>(index), 0);
+    k = put_str(buf, n, k, ": ");
+    const uint32_t total_s = lap_ms / 1000u;
+    k = put_2(buf, n, k, total_s / 3600u);
+    k = put(buf, n, k, ':');
+    k = put_2(buf, n, k, (total_s / 60u) % 60u);
+    k = put(buf, n, k, ':');
+    k = put_2(buf, n, k, total_s % 60u);
+    k = put(buf, n, k, '.');
+    // Hundredths, which is the resolution the tag format carries.
+    k = put_2(buf, n, k, (lap_ms % 1000u) / 10u);
+    k = put(buf, n, k, '\n');
+    return terminate(buf, n, k);
 }
 
 size_t format_csv(char* buf, size_t n, const Record& r) {
     size_t k = 0;
-    k = put_num(buf, n, k, static_cast<float>(r.t_ms), 0);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.speed_mph, 1);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.rpm, 0);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.lean_deg, 1);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.pitch_deg, 1);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.g_lat, 2);
-    k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, r.g_vert, 2);
+    // Seconds, not milliseconds. This is the one column RaceRender requires
+    // and the one it would silently misread.
+    k = put_num(buf, n, k, static_cast<float>(r.t_ms) / 1000.0f, 3);
     k = put(buf, n, k, ',');
     k = put_deg(buf, n, k, r.lat);
     k = put(buf, n, k, ',');
     k = put_deg(buf, n, k, r.lon);
     k = put(buf, n, k, ',');
-    k = put_num(buf, n, k, static_cast<float>(r.lap_ms), 0);
+    k = put_num(buf, n, k, r.speed_mph, 1);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.rpm, 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.g_lon, 2);          // X
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.g_lat, 2);          // Y
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.lap_num), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.course_deg, 1);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.gear), 0);
+    k = put(buf, n, k, ',');
+    // Ours from here on. RaceRender ignores what it does not know, and
+    // these are what the blackbox is actually for.
+    k = put_num(buf, n, k, r.lean_deg, 1);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.pitch_deg, 1);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.g_vert, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.lap_ms) / 1000.0f, 2);
     k = put(buf, n, k, ',');
     k = put_num(buf, n, k, static_cast<float>(r.sats), 0);
     k = put(buf, n, k, ',');

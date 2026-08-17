@@ -22,19 +22,30 @@ namespace core::log {
 // records, and a variable-length format means a partial write at power-off
 // corrupts the tail rather than truncating it.
 struct Record {
-    uint32_t t_ms      = 0;
-    float    speed_mph = 0.0f;
-    float    rpm       = 0.0f;
-    float    lean_deg  = 0.0f;
-    float    pitch_deg = 0.0f;
-    float    g_lat     = 0.0f;
-    float    g_vert    = 0.0f;
-    double   lat       = 0.0;
-    double   lon       = 0.0;
-    uint32_t lap_ms    = 0;
-    uint16_t flags     = 0;
-    uint8_t  sats      = 0;
-    uint8_t  gear_hint = 0;
+    uint32_t t_ms       = 0;
+    float    speed_mph  = 0.0f;
+    float    rpm        = 0.0f;
+    float    lean_deg   = 0.0f;
+    float    pitch_deg  = 0.0f;
+    float    g_lat      = 0.0f;   // lateral, RaceRender's Y
+    float    g_lon      = 0.0f;   // accel and braking, RaceRender's X
+    float    g_vert     = 0.0f;
+    float    course_deg = 0.0f;
+    double   lat        = 0.0;
+    double   lon        = 0.0;
+    uint32_t lap_ms     = 0;      // elapsed in the current lap
+    // The time of a lap that finished on this tick, 0 otherwise. It rides
+    // along in the record rather than going down a side channel so the
+    // marker lands between the right two data rows: RaceRender takes lap
+    // tags anywhere in the file but requires them in chronological order,
+    // and the logger only ever sees the stream.
+    uint32_t lap_done_ms= 0;
+    uint16_t lap_num    = 0;      // 0-based, matching the lap tags
+    uint16_t flags      = 0;
+    uint8_t  sats       = 0;
+    // 0 is neutral *and* unknown, because RaceRender has no third state.
+    // Nothing is lost: kFlagNeutral is the sensed one, and this is inferred.
+    uint8_t  gear       = 0;
 };
 
 enum Flags : uint16_t {
@@ -111,7 +122,22 @@ private:
 // task, never on a producer. CSV rather than a packed binary format because
 // the point of a blackbox you never open is nothing at all — this one opens
 // in any spreadsheet on the card.
+//
+// The columns are named for RaceRender so the same file is both the
+// blackbox and the video overlay source: `Time` in **seconds** (it reads
+// that column as seconds, and milliseconds would import a six-minute
+// session as a hundred hours), `X` and `Y` for the g axes, and the rest of
+// its vocabulary where we have the data. The extra columns past those are
+// ours; RaceRender ignores what it does not recognise and can drive custom
+// gauges from them.
 size_t format_csv(char* buf, size_t n, const Record& r);
+
+// Two lines: the `# RaceRender Data` marker that has to be first in the
+// file, then the column names.
 size_t csv_header(char* buf, size_t n);
+
+// `# Lap 3: 00:02:43.08` — a measured lap time, which beats RaceRender
+// inferring one from the trace. `index` is 0-based, as its tags are.
+size_t format_lap_marker(char* buf, size_t n, uint16_t index, uint32_t lap_ms);
 
 }  // namespace core::log

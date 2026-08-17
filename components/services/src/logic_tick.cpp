@@ -90,6 +90,11 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         lc.min_lap_ms = lv.min_lap_ms;
     }
 
+    // Picked up by the blackbox row below, so a lap tag lands between the
+    // right two data rows rather than at the end of the file.
+    uint32_t lap_done_ms = 0;
+    uint16_t lap_done_index = 0;
+
     core::lap::Fix lf;
     lf.pos = core::geo::LatLon{g.lat, g.lon};
     lf.speed_mph = g.speed_mph;      // Doppler, not differenced positions
@@ -100,6 +105,10 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     if (lu.event == core::lap::Event::Started) {
         if (d.delta) d.delta->start_lap();
     } else if (lu.event == core::lap::Event::Completed) {
+        // The lap tag in the log is 0-based, so it is the count *before*
+        // this lap is added.
+        lap_done_index = s.lap_count;
+        lap_done_ms = lu.lap_ms;
         if (s.lap_count < LogicState::kMaxLaps) s.laps_ms[s.lap_count++] = lu.lap_ms;
         if (d.lap_history && d.lap_history->count < LapHistory::kMax) {
             d.lap_history->ms[d.lap_history->count++] = lu.lap_ms;
@@ -153,10 +162,18 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         rec.lean_deg = a.lean_deg;
         rec.pitch_deg = a.pitch_deg;
         rec.g_lat = a.g_lat;
+        rec.g_lon = a.g_lon;
         rec.g_vert = a.g_vert;
+        rec.course_deg = g.course_deg;
         rec.lat = g.lat;
         rec.lon = g.lon;
         rec.lap_ms = s.lap.state().current_ms;
+        rec.lap_done_ms = lap_done_ms;
+        rec.lap_num = lap_done_ms != 0 ? lap_done_index
+                                       : static_cast<uint16_t>(s.lap_count);
+        // RaceRender has no "unknown" gear, so neutral and no-idea share 0.
+        // kFlagNeutral below is the sensed one; this is the inference.
+        rec.gear = e.neutral ? 0 : e.gear;
         rec.sats = g.sats;
         rec.flags = static_cast<uint16_t>(
             (e.neutral ? core::log::kFlagNeutral : 0) |

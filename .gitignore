@@ -7,3 +7,4 @@ dependencies.lock
 compile_commands.json
 .cache/
 build-sim/
+dash_log.csv

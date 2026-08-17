@@ -209,6 +209,17 @@ int main() {
 
     services::logic_restore(deps, logic);
 
+    // What `logger` does with the blackbox ring, minus the SD card. The
+    // point is that you can ride the simulated circuit and get a real
+    // RaceRender file out of it, so the overlay pipeline can be checked
+    // before there is a board to log from.
+    std::FILE* log_file = std::fopen("dash_log.csv", "wb");
+    if (log_file) {
+        char head[256];
+        const size_t h = core::log::csv_header(head, sizeof head);
+        std::fwrite(head, 1, h, log_file);
+    }
+
     uint32_t now = 0;
     uint32_t last_frame = 0;
     std::vector<unsigned char> rgb(static_cast<size_t>(ui::kScreenW) *
@@ -252,6 +263,7 @@ int main() {
                 else if (std::strcmp(a, "tripreset") == 0) commands.post(Command(CommandId::TripReset, int32_t{0}));
                 else if (std::strcmp(a, "jump") == 0) bike.trigger_jump(now);
             } else if (line.rfind("quit", 0) == 0) {
+                if (log_file) std::fclose(log_file);
                 return 0;
             }
         }
@@ -285,6 +297,21 @@ int main() {
         controls.gear = core::gear::estimate(controls.rpm, controls.speed_mph,
                                              controls.neutral,
                                              core::config::gear_view(settings));
+
+        if (log_file) {
+            core::log::Record rec;
+            while (blackbox.pop(rec)) {
+                char line[192];
+                if (rec.lap_done_ms != 0) {
+                    char tag[64];
+                    const size_t t = core::log::format_lap_marker(
+                        tag, sizeof tag, rec.lap_num, rec.lap_done_ms);
+                    std::fwrite(tag, 1, t, log_file);
+                }
+                const size_t len = core::log::format_csv(line, sizeof line, rec);
+                std::fwrite(line, 1, len, log_file);
+            }
+        }
 
         health.tick(now, core::health::Policy{});
         for (uint8_t i = 0; i < core::state::kDevCount; ++i) {

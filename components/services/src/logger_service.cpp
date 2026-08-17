@@ -74,7 +74,20 @@ void logger_task(void* arg) {
 
         for (size_t i = 0; i < n; ++i) {
             char line[192];
-            const size_t len = core::log::format_csv(line, sizeof line, batch[i]);
+            size_t len = 0;
+            // A lap tag goes in immediately before the row it happened on.
+            // RaceRender takes them anywhere in the file but insists they be
+            // in chronological order, and this is the only place that sees
+            // the records in order.
+            if (batch[i].lap_done_ms != 0) {
+                char tag[64];
+                const size_t t = core::log::format_lap_marker(
+                    tag, sizeof tag, batch[i].lap_num, batch[i].lap_done_ms);
+                for (size_t k = 0; k < t && len + 1 < sizeof line; ++k) {
+                    line[len++] = tag[k];
+                }
+            }
+            len += core::log::format_csv(line + len, sizeof line - len, batch[i]);
             if (used + len >= sizeof block) {
                 const hal::Status s = card->append(path, block, used);
                 used = 0;

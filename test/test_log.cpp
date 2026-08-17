@@ -128,7 +128,7 @@ int main() {
         CHECK(torn.load() == 0);
     }
 
-    CASE("a record formats as a CSV line anyone can open");
+    CASE("a record formats as a CSV line RaceRender can read");
     {
         Record r;
         r.t_ms = 12345;
@@ -137,10 +137,14 @@ int main() {
         r.lean_deg = -32.5f;
         r.pitch_deg = 3.0f;
         r.g_lat = 0.62f;
+        r.g_lon = -0.45f;
         r.g_vert = 1.18f;
+        r.course_deg = 191.0f;
         r.lat = 42.501234;
         r.lon = -83.123456;
         r.lap_ms = 42150;
+        r.lap_num = 3;
+        r.gear = 4;
         r.sats = 11;
         r.flags = kFlagFix | kFlagTiming;
 
@@ -149,9 +153,17 @@ int main() {
         CHECK(n > 0);
         CHECK(line[n] == '\0');
         CHECK(line[n - 1] == '\n');
-        CHECK(contains(line, "12345,"));
+
+        // Seconds, not milliseconds. RaceRender reads this column as
+        // seconds, so 12345 here would import a twelve-second sample as
+        // three and a half hours and stretch the whole video with it.
+        CHECK(contains(line, "12.345,"));
+        CHECK(!contains(line, "12345,"));
+
         CHECK(contains(line, "54.2,"));
         CHECK(contains(line, "-32.5,"));
+        // X before Y: accel and braking, then lateral.
+        CHECK(contains(line, "-0.45,0.62,"));
         // Position keeps six decimals. A float would quantise this to about
         // thirty feet and the trace would not show your line through a turn.
         CHECK(contains(line, "42.501234"));
@@ -159,8 +171,33 @@ int main() {
 
         char head[256];
         CHECK(csv_header(head, sizeof head) > 0);
-        CHECK(contains(head, "t_ms,speed_mph"));
-        CHECK(contains(head, "lat,lon"));
+        // The marker has to be the very first thing in the file or the lap
+        // tags and column names are ignored.
+        CHECK(head[0] == '#');
+        CHECK(contains(head, "# RaceRender Data\n"));
+        CHECK(contains(head, "\nTime,Latitude,Longitude,MPH,RPM,X,Y,"));
+    }
+
+    CASE("a lap tag is hh:mm:ss.nn, which RaceRender parses strictly");
+    {
+        char tag[64];
+
+        // 2m43.08s, the example from the format documentation.
+        CHECK(format_lap_marker(tag, sizeof tag, 0, 163080) > 0);
+        CHECK(contains(tag, "# Lap 0: 00:02:43.08\n"));
+
+        // Every field zero padded, including the hours nobody will ever use.
+        CHECK(format_lap_marker(tag, sizeof tag, 7, 5000) > 0);
+        CHECK(contains(tag, "# Lap 7: 00:00:05.00\n"));
+
+        // Hundredths truncate rather than round up into a whole second,
+        // which would make a lap read one hundredth quicker than it was.
+        CHECK(format_lap_marker(tag, sizeof tag, 1, 3999) > 0);
+        CHECK(contains(tag, "# Lap 1: 00:00:03.99\n"));
+
+        // Over an hour, because a trail ride is not a track session.
+        CHECK(format_lap_marker(tag, sizeof tag, 2, 3723456) > 0);
+        CHECK(contains(tag, "# Lap 2: 01:02:03.45\n"));
     }
 
     CASE("a short buffer truncates and still terminates");

@@ -529,20 +529,38 @@ Producers write fixed-size records into a PSRAM ring buffer. The `logger`
 task drains the ring to SD in 8 kB blocks. Producers never touch the
 filesystem and never block.
 
-```cpp
-struct LogRecord {          // 32 bytes, fixed
-    uint32_t t_ms;
-    uint8_t  type;          // sample, event, marker
-    uint8_t  flags;
-    uint16_t seq;
-    uint8_t  payload[24];
-};
+`core::log::Record` is 72 bytes fixed; the ring is 512 of them, 36 kB in
+PSRAM. Fixed size matters because the drain writes whole records: a
+variable-length format means a partial write at power-off corrupts the
+tail rather than truncating it.
+
+**The file is CSV, not a binary format.** The original sketch called for
+binary — four times smaller, decoded by a script on the PC. That was the
+wrong trade. A blackbox you need a tool to read is a blackbox you never
+read, and the SD card is 16 GB against a 50 Hz record of 72 bytes, which
+is 13 MB an hour. Space is not the constraint.
+
+Given it is CSV anyway, the columns are named for **RaceRender**, so the
+same file is both the blackbox and the source for a video overlay
+without a conversion step:
+
+```
+# RaceRender Data
+Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags
 ```
 
-Write a binary format, not CSV. It is 4× smaller, and a small Python
-script on your PC turns it into CSV or a chart. Put a header record with a
-schema version at the start of every file, so old logs stay readable when
-you add a field.
+`Time` is in **seconds** — RaceRender reads that column as seconds, and
+milliseconds would import a six-minute session as a hundred hours. `X` is
+longitudinal g and `Y` lateral, which is its convention. The columns past
+`Gear` are ours; it ignores what it does not recognise, and can drive
+custom gauges from them.
+
+Completed laps are written as `# Lap 0: 00:02:43.08` tags, from the lap
+timer's own measurement rather than left for RaceRender to infer from the
+trace. The tag rides along in the record that closed the lap
+(`lap_done_ms`) so the logger — the only thing that sees records in order
+— can place it between the right two rows. Tags may appear anywhere in
+the file but must be in chronological order.
 
 Blackbox is the same ring, kept always full. On an event (a hard landing,
 a fault, an ignition-off), flush the last N seconds to a separate file.
