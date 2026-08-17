@@ -1,7 +1,17 @@
 # Dashboard V2 — System Architecture
 
-Target: ESP32-S3-WROOM-1 N16R8, ESP-IDF v5.x, FreeRTOS, C++17.
-Status: design only. No PCB yet.
+Target: ESP32-S3-WROOM-1 N16R8, ESP-IDF **v6.0.2**, FreeRTOS, C++17.
+
+**Status.** This was written as a design, before any of it existed. Most of
+it is now built and the two have been reconciled where they drifted, but
+read it as the argument for the shape of the thing rather than as a
+description of the tree. `CLAUDE.md` holds the current state, and where a
+file differs from the sketch in §3 it says why.
+
+Not built, deliberately: **BLE** (§11, step 9), **CAN / `engine_service`**
+(§10.1 — the board has no transceiver), **USB mass storage** (§9.3 — the
+ownership seam exists, the TinyUSB half does not). The PCB is at fab and
+nothing here has run on hardware.
 
 Decisions already made:
 
@@ -79,20 +89,21 @@ dash/
 │   ├── main.cpp                 # esp_main: build objects, start tasks
 │   └── wiring.cpp               # the one place drivers meet services
 ├── components/
-│   ├── bsp/                     # pins.hpp, buses.cpp, board_init.cpp
-│   ├── hal/                     # abstract interfaces only, no code
-│   │   ├── i_imu.hpp  i_gnss.hpp  i_engine.hpp
+│   ├── bsp/                     # pins.hpp, buses.cpp
+│   ├── dash_hal/                # abstract interfaces only, no code
+│   │   ├── i_imu.hpp  i_gnss.hpp  i_engine.hpp  i_display.hpp
 │   │   ├── i_gpio_expander.hpp  i_storage.hpp  i_clock.hpp
-│   ├── drivers/
-│   │   ├── icm42688p/           # SPI, FIFO, data-ready interrupt
-│   │   ├── pa1616d/             # UART, NMEA parse, PPS
-│   │   ├── mcp23s17/            # SPI expander, on board
-│   │   ├── mcp23017/            # I2C expander, handlebar pod
-│   │   ├── ili9488/             # esp_lcd panel, RGB666 in SPI mode
-│   │   ├── tach_capture/        # MCPWM or GPIO edge capture
-│   │   ├── hall_capture/        # front and rear wheel edges
-│   │   ├── backlight/           # LEDC PWM
-│   │   └── sdmmc/               # card mount, hotplug
+│   │   └── i_shift_lamps.hpp
+│   ├── drivers/                 # one file per chip, not one directory
+│   │   ├── icm42688p            # SPI, FIFO
+│   │   ├── pa1616d              # UART only; the parser is core/nmea
+│   │   ├── mcp23s17             # SPI expander, on board
+│   │   ├── pod                  # MCP23017, handlebar, over I2C
+│   │   ├── ili9488              # esp_lcd panel, RGB666, plus the backlight
+│   │   ├── engine_sense         # tach, both wheel Halls, neutral
+│   │   ├── shift_lamps          # eight bits on the expander, one PWM gate
+│   │   ├── nvs_storage  clock
+│   │   └── sdcard               # card mount, hotplug
 │   ├── core/                    # NO esp headers. Builds for host.
 │   │   ├── state/               # Published<T>, VehicleState, Frame
 │   │   ├── attitude/            # lean, pitch, yaw rate filter
@@ -105,32 +116,42 @@ dash/
 │   │   ├── nav/                 # mode and screen state machine
 │   │   ├── tpms/                # advertisement decoders, one per family
 │   │   └── config/              # ConfigItem table, validation
-│   ├── services/
-│   │   ├── sensor_hub/          # tach, wheels, shift output, control
-│   │   ├── gnss_service/
-│   │   ├── imu_service/
-│   │   ├── engine_service/      # null now, CAN later
-│   │   ├── input_service/       # pod poll, debounce, event queue
-│   │   ├── ble/                 # NimBLE host glue
-│   │   │   ├── ble_service.cpp  # start, advertise, bond, health
-│   │   │   ├── media_gatt.cpp   # the one Feed characteristic (§11.1)
-│   │   │   └── tpms_scan.cpp    # passive scan, calls core/tpms decoders
-│   │   ├── logger/              # ring buffer to SD
-│   │   ├── storage/             # NVS + SD files + USB MSC owner
-│   │   └── health/              # per-device state, retry timer
+│   ├── services/               # one file per task
+│   │   ├── ctrl_service         # tach, wheels, shift output  (was sensor_hub)
+│   │   ├── gnss_service  imu_service  input_service
+│   │   ├── logic_service        # thin; the work is in logic_tick.cpp, which
+│   │   │                        #   the simulator calls too
+│   │   ├── logger_service       # ring buffer to SD
+│   │   ├── storage_service      # NVS + SD files + USB MSC owner
+│   │   ├── keeper_service       # health retry, NVS writes, backlight
+│   │   ├── queues.cpp           # the command and input queues
+│   │   ├── ble/                 # NOT BUILT — step 9
+│   │   └── engine_service/      # NOT BUILT — no CAN transceiver (§10.1)
 │   └── ui/
-│       ├── canvas/              # framebuffer, blit, text, primitives
-│       ├── widgets/             # BigNumber, Bar, Gauge, Map, Table...
-│       ├── screens/
-│       │   ├── cruise/  track/  stat/  diag/  config/
-│       ├── theme.hpp            # colors, fonts, one place
-│       └── render_task.cpp
-└── test/                        # host build: cmake + Catch2 + ctest
+│       ├── canvas.hpp  framebuffer_canvas.cpp   # primitives, clipping
+│       ├── widgets.hpp/.cpp     # all 16 widgets in one pair
+│       ├── screens_cruise.cpp  screens_track.cpp  screens_stat.cpp
+│       ├── screens_diag.cpp    screen_config.cpp
+│       ├── geometry.hpp theme.hpp chrome.hpp    # palette, meaning, furniture
+│       ├── font5x7.cpp  icons.cpp
+│       └── app.cpp              # the render loop and mode/screen dispatch
+└── test/                        # host build: plain cmake + ctest
     ├── CMakeLists.txt           # plain cmake, does not use idf.py
     └── test_lap.cpp  test_attitude.cpp  test_nav.cpp  ...
 ```
 
 `core/` and `test/` are the parts you can write today, before the PCB lands.
+
+Two names differ from the sketch above and both were forced. **`hal/` is
+`dash_hal/`** because ESP-IDF ships a component called `hal`, a component
+name is its directory name, and a project component wins — ours silently
+replaced the IDF's and the build died three components away inside
+`espcoredump`. The include prefix and the namespace are still `hal`.
+**`tach_capture` and `hall_capture` are one `engine_sense`**, because they
+are the same three edge counters behind one latched read; `backlight` is
+part of `ili9488`, being one LEDC channel.
+
+`core/tpms/` does not exist yet — it arrives with the radio.
 
 ---
 
@@ -287,14 +308,21 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | Task | Core | Prio | Rate | Owns |
 |---|---|---|---|---|
 | `ctrl` | 0 | 18 | 500 Hz | tach math, wheel speed, shift-light output |
-| `imu` | 0 | 15 | 200 Hz, INT | ICM-42688-P FIFO, attitude filter, jumps |
-| `gnss` | 0 | 12 | UART event | NMEA parse, PPS time, position |
+| `imu` | 0 | 15 | 200 Hz | ICM-42688-P FIFO, attitude filter, jumps |
+| `gnss` | 0 | 12 | 20 ms poll | NMEA parse, position |
 | `logic` | 0 | 10 | 50 Hz | lap timer, trip, fuel, command drain |
 | `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue |
 | `render` | 1 | 6 | 30 Hz | frame snapshot, widgets, TFT SPI |
 | `logger` | 1 | 5 | drain | ring buffer to SD |
-| `ble` | 1 | 4 | event | media Feed characteristic, TPMS scan (see §11) |
-| `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, USB MSC state |
+| `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
+| `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
+| `ble` | 1 | 4 | event | media Feed characteristic, TPMS scan (§11) — **not built** |
+
+The IMU is polled rather than interrupt-driven and the GPS is polled
+rather than reading a UART event queue. Both were measured and both were
+left alone: the wins are 4 ms and 10 ms on paths whose end-to-end latency
+is 5 ms and 140 ms, which is nothing a rider can see. INT1 is wired if
+that ever changes.
 
 Nine tasks of your own. Each one has a single job you can say in one line.
 Stack sizes and high-water marks go on the DIAG system screen.
@@ -430,9 +458,14 @@ protected:
 
 Set of widgets to start with:
 
-`Label` · `BigNumber` · `Bar` · `ArcGauge` · `Sparkline` · `Table` ·
-`MapView` · `StatusDot` · `DeltaBar` · `LeanIndicator` · `ShiftStrip` ·
-`MediaStrip` · `AlertOverlay`
+`Label` · `ValueBox` · `BigNumber` · `Bar` · `Sparkline` · `Table` ·
+`MapView` · `StatusDot` · `DeltaBar` · `LeanIndicator` · `LeanGauge` ·
+`ShiftStrip` · `TachBar` · `GBall` · `MediaRow` · `AlertOverlay`
+
+`ArcGauge` became `LeanGauge`, which is the only arc anything wanted.
+`MediaStrip` became three `MediaRow`s, one per line, because a widget is
+the unit of redraw and a scrolling album title should not drag a static
+artist name down the bus with it.
 
 `AlertOverlay` is mode-independent. A TPMS low-pressure warning draws over
 whatever screen is up. It is the only thing allowed to break the
@@ -979,7 +1012,9 @@ NVS partition still load after a firmware change.
 ## 14. Host tests
 
 `test/` is a plain CMake project. It does not use `idf.py`. It compiles
-`components/core/**` with g++ and links Catch2.
+`components/core/**` with g++. It links no test framework: `test/check.hpp`
+is a 40-line assertion harness, so there is nothing to install before the
+fast loop works. Swap it for Catch2 if you ever want more.
 
 ```bash
 cmake -S test -B build-host && cmake --build build-host && ctest --test-dir build-host
@@ -1039,8 +1074,8 @@ appear.
 | TFT RST | MCP23S17 GPB6 |
 | Backlight PWM | IO15 |
 | GPS UART RX / TX | IO4 / IO5 |
-| GPS PPS | IO18 |
-| IMU data ready (INT1) | IO8 |
+| GPS PPS | IO18 — wired, unused |
+| IMU data ready (INT1) | IO8 — wired, unused |
 | Tach input | IO17 |
 | Wheel hall front / rear | IO1 / IO2 |
 | Shift-lamp master PWM | IO16 |

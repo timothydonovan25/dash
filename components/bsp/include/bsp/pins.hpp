@@ -46,11 +46,20 @@ inline constexpr int kTftHeight      = 480;
 // ── GPS: PA1616D on UART1 ────────────────────────────────────────────
 inline constexpr int kGpsRx          = 4;    // ESP RX  <- GPS TX
 inline constexpr int kGpsTx          = 5;    // ESP TX  -> GPS RX
+// Wired, and deliberately unused. Nothing needs it: the clock on screen is
+// whatever the last RMC said and does not care about a few tens of
+// milliseconds, lap crossings are interpolated between fixes by core/geo
+// rather than timed off a pulse, and every t_ms in the firmware is
+// esp_timer since boot. It would earn its place for disciplining the
+// oscillator or timestamping in absolute UTC, and neither is wanted here.
 inline constexpr int kGpsPps         = 18;
 inline constexpr int kGpsBootBaud    = 9600;
 inline constexpr int kGpsRunBaud     = 57600;
 
 // ── IMU ──────────────────────────────────────────────────────────────
+// Wired, and unused for the same reason as kGpsPps: the imu task polls the
+// FIFO every 5 ms and the interrupt would save about 4 ms on a path whose
+// end-to-end latency is 5. It is here for the day that matters.
 inline constexpr int kImuInt1        = 8;    // data ready
 
 // ── Vehicle inputs ───────────────────────────────────────────────────
