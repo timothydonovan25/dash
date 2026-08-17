@@ -24,15 +24,26 @@ public:
     // this on a timer and after any run of NACKs (§12).
     hal::Status refresh_config();
 
-    // Reset the I2C peripheral itself, for when the bus is stuck low rather
-    // than the device being confused.
+    // Clock a stuck slave off the bus, then reset the I2C peripheral. For
+    // when the bus itself is wedged rather than the device being confused.
+    // Returns IoError if SDA was still held low afterwards.
     hal::Status recover_bus();
+
+    // For the DIAG bus screen. `stuck` counts the recoveries that did not
+    // free SDA, which is the difference between a pod that glitches and a
+    // pod whose cable is shorted.
+    uint16_t recoveries() const { return recoveries_; }
+    uint16_t stuck() const { return stuck_; }
+    uint8_t  last_clocks() const { return last_clocks_; }
 
 private:
     hal::Status write_reg(uint8_t reg, uint8_t value);
     hal::Status read_reg(uint8_t reg, uint8_t& value);
 
-    bool installed_ = false;
+    bool     installed_ = false;
+    uint16_t recoveries_ = 0;
+    uint16_t stuck_ = 0;
+    uint8_t  last_clocks_ = 0;
 };
 
 }  // namespace drivers

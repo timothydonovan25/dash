@@ -158,7 +158,7 @@ private:
 // A two-column table. The lap history and the config list are both this.
 class Table : public Widget {
 public:
-    static constexpr size_t kRows = 10;
+    static constexpr size_t kRows = 12;
     void configure(uint8_t visible_rows, uint8_t scale = 1);
     void set_row(size_t i, const char* left, const char* right);
     void set_row_count(size_t n);

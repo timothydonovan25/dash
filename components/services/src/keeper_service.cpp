@@ -122,6 +122,13 @@ void keeper_task(void* arg) {
                 heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
             d.system->psram_free_b = static_cast<uint32_t>(
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+            // Bus recoveries live in the driver that performs them; the
+            // DIAG bus screen is the reason they are counted at all.
+            if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) {
+                d.system->pod_recoveries = pod->recoveries();
+                d.system->pod_stuck = pod->stuck();
+            }
         }
 
         // Backlight follows the config setting. There is no light sensor on

@@ -40,6 +40,10 @@ struct SystemInfo {
     uint32_t gnss_bad_csum = 0;
     uint16_t render_hz_x10 = 0;
     uint16_t ctrl_late     = 0;    // ctrl ticks that missed their deadline
+    // I2C0 bus recoveries, and how many of those failed to free SDA. The
+    // difference is a pod that glitches versus a cable that is shorted.
+    uint16_t pod_recoveries= 0;
+    uint16_t pod_stuck     = 0;
 };
 
 struct Context {

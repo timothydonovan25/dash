@@ -21,9 +21,17 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 # Both of these MUST stay on core 1 or the shift-light latency budget breaks.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
+# Peripheral: the phone connects in and writes the media Feed
+# characteristic. Observer: passive scan for TPMS beacons, which never
+# connect. Central and the GATT client existed only for Apple's AMS, which
+# section 11.1 is explicitly not doing -- the phone here is an Android
+# handset. They are off because they are not free: NimBLE and the
+# controller add about 268 kB of image as configured.
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_BT_NIMBLE_GATT_CLIENT=n
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_PINNED_TO_CORE=1

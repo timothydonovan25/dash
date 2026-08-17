@@ -496,6 +496,39 @@ int main() {
         m.render(s.canvas);
         CHECK(s.px != at_zero);
 
+        // Two rows with the same text do not slide in lockstep. They share
+        // one clock, so without a per-row phase the whole block moves as if
+        // it were one thing.
+        {
+            MediaRow a, b;
+            a.set_bounds(box);
+            b.set_bounds(box);
+            // The same colour on both, or this measures the palette rather
+            // than the phase and passes with the offset taken out.
+            a.configure(MediaRow::Kind::Song, color::kText);
+            b.configure(MediaRow::Kind::Album, color::kText);
+            bool differed = false;
+            for (uint32_t t = 0; t < 8000 && !differed; t += 250) {
+                a.set(kLong, true, t);
+                for (Color& c : s.px) c = 0;
+                a.render(s.canvas);
+                const std::vector<Color> from_a = s.px;
+
+                b.set(kLong, true, t);
+                for (Color& c : s.px) c = 0;
+                b.render(s.canvas);
+                // The icons differ by kind, so compare only the text window.
+                for (int16_t y = box.y; y < box.bottom() && !differed; ++y) {
+                    for (int16_t x = static_cast<int16_t>(box.x + MediaRow::kTextX);
+                         x < box.right(); ++x) {
+                        const size_t i = static_cast<size_t>(y) * kScreenW + x;
+                        if (from_a[i] != s.px[i]) { differed = true; break; }
+                    }
+                }
+            }
+            CHECK(differed);
+        }
+
         // A name that fits does not scroll, however long the bike has been
         // running — a static artist name repainting twelve times a second
         // would be the whole point of the row widget thrown away.

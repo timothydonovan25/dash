@@ -716,6 +716,12 @@ void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
         // that has been running for a month.
         uint32_t travelled = (now_ms / 1000u) * kSpeedPxPerS +
                              ((now_ms % 1000u) * kSpeedPxPerS) / 1000u;
+        // Each row starts a third of a cycle further along than the one
+        // above it. Two rows that both overflow otherwise slide in
+        // lockstep, because they are driven off the same frame clock, and
+        // three lines moving as one block reads as a glitch rather than as
+        // three names that happen to be long.
+        travelled += (static_cast<uint32_t>(kind_) * cycle) / 3u;
         travelled %= cycle;
         off = static_cast<int16_t>((travelled / kStepPx) * kStepPx);
     }

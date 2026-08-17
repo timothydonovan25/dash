@@ -190,7 +190,7 @@ constexpr Rect kBusTable {14, 40, 452, 264};
 
 void BusScreen::enter(Canvas&) {
     table_.set_bounds(kBusTable);
-    table_.configure(10, 2);
+    table_.configure(12, 2);
     list_[0] = &table_;
 }
 
@@ -231,7 +231,22 @@ void BusScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, f.elec.vbat, 1, f.elec.vbat > 0.0f);
     table_.set_row(9, "VIN sense", v);      // no divider this revision: reads --
 
-    table_.set_row_count(10);
+    // The pod is the only device on a cable that leaves the box, so it is
+    // the one that gets its bus wedged. `stuck` non-zero means clocking the
+    // bus did not free SDA, which is a wiring fault rather than a glitch.
+    u::fmt_value(v, sizeof v,
+                 static_cast<float>(has_ctx() && ctx().system
+                                        ? ctx().system->pod_recoveries : 0),
+                 0, true);
+    table_.set_row(10, "I2C recover", v);
+
+    u::fmt_value(v, sizeof v,
+                 static_cast<float>(has_ctx() && ctx().system
+                                        ? ctx().system->pod_stuck : 0),
+                 0, true);
+    table_.set_row(11, "  still stuck", v);
+
+    table_.set_row_count(12);
 }
 
 WidgetList BusScreen::widgets() { return WidgetList{list_, 1}; }

@@ -2,7 +2,9 @@
 #include "bsp/pins.hpp"
 #include "bsp/buses.hpp"
 
+#include "driver/gpio.h"
 #include "driver/i2c.h"
+#include "esp_rom_sys.h"
 
 namespace drivers {
 namespace {
@@ -13,6 +15,11 @@ constexpr uint8_t kIodirA = 0x00, kGppuA = 0x0C, kGpioA = 0x12, kIpolA = 0x02;
 // Short, on purpose. A pod that has fallen off its connector must not stall
 // the 100 Hz poll loop; it must fail fast and be counted.
 constexpr int kTimeoutMs = 10;
+
+// Half a bit at 100 kHz. Recovery clocks the bus at the speed the bus runs
+// at, not as fast as the CPU can toggle a pin: the pod is half a metre away
+// behind 4.7k pull-ups and the rise time is about 470 ns.
+constexpr uint32_t kHalfPeriodUs = 5;
 
 hal::Status from_esp(int err) {
     switch (err) {
@@ -67,15 +74,67 @@ hal::Status ButtonPod::read_buttons(uint8_t& pressed_mask) {
 }
 
 hal::Status ButtonPod::recover_bus() {
-    // BRINGUP: if a slave is holding SDA low, tearing the driver down and
-    // back up is not always enough — the usual fix is to bit-bang nine clock
-    // pulses on SCL first to walk the slave out of its transfer. Add that
-    // here once there is a pod to reproduce it on; doing it blind risks
-    // driving a line the board does not expect.
-    i2c_driver_delete(kPort);
-    installed_ = false;
+    // A slave interrupted mid-byte can be left holding SDA low, waiting to
+    // finish a transfer nobody is clocking any more. Here that is the pod
+    // browning out over a jump. The master cannot issue a START while SDA is
+    // low, so from then on *every* transaction fails and no button on the
+    // bike works until the power is cycled.
+    //
+    // Tearing the driver down and putting it back does not fix it: the
+    // peripheral does not drive SCL while idle, so the slave never gets the
+    // edges it is waiting for. The bus has to be clocked by hand.
+    if (installed_) {
+        i2c_driver_delete(kPort);
+        installed_ = false;
+    }
+
+    const gpio_num_t sda = static_cast<gpio_num_t>(bsp::kI2cSda);
+    const gpio_num_t scl = static_cast<gpio_num_t>(bsp::kI2cScl);
+
+    gpio_config_t io = {};
+    io.pin_bit_mask = (1ULL << bsp::kI2cSda) | (1ULL << bsp::kI2cScl);
+    // Open drain, and readable: I2C lines are only ever pulled down, never
+    // driven high, and we have to watch SDA to know when to stop.
+    io.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+    io.pull_up_en = GPIO_PULLUP_ENABLE;
+    io.intr_type = GPIO_INTR_DISABLE;
+    if (gpio_config(&io) != ESP_OK) return hal::Status::IoError;
+    gpio_set_level(sda, 1);
+    gpio_set_level(scl, 1);
+
+    // Nine, because a byte plus its ACK is the longest a slave can still be
+    // holding out for. Stop as soon as SDA comes back: every extra edge is
+    // another chance to be read as the start of something new.
+    last_clocks_ = 0;
+    for (int i = 0; i < 9 && gpio_get_level(sda) == 0; ++i) {
+        gpio_set_level(scl, 0);
+        esp_rom_delay_us(kHalfPeriodUs);
+        gpio_set_level(scl, 1);
+        esp_rom_delay_us(kHalfPeriodUs);
+        ++last_clocks_;
+    }
+    const bool freed = gpio_get_level(sda) != 0;
+
+    // A STOP — SDA rising while SCL is high — so the slave treats the next
+    // START as a new transfer rather than a continuation of the old one.
+    gpio_set_level(sda, 0);
+    esp_rom_delay_us(kHalfPeriodUs);
+    gpio_set_level(scl, 1);
+    esp_rom_delay_us(kHalfPeriodUs);
+    gpio_set_level(sda, 1);
+    esp_rom_delay_us(kHalfPeriodUs);
+
+    if (recoveries_ != UINT16_MAX) ++recoveries_;
+    if (!freed && stuck_ != UINT16_MAX) ++stuck_;
+
+    // Hand the pins back to the peripheral.
     if (!bsp::init_buses().i2c0) return hal::Status::IoError;
-    return init();
+    const hal::Status s = init();
+
+    // A bus still held low is a failure even when the re-init went fine.
+    // Reporting Ok here would have the keeper stop retrying and the dash
+    // sit there with dead buttons and a healthy-looking DIAG screen.
+    return freed ? s : hal::Status::IoError;
 }
 
 }  // namespace drivers
