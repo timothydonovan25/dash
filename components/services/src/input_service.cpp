@@ -10,6 +10,7 @@
 // "no buttons pressed" and looks perfectly healthy.
 #include "services/services.hpp"
 #include "core/input/input.hpp"
+#include "bsp/pins.hpp"
 #include "drivers/pod.hpp"
 
 #include "freertos/FreeRTOS.h"
@@ -65,7 +66,11 @@ void input_task(void* arg) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));      // 100 Hz
+        // From bsp, not a literal: the pod has no interrupt line, so this
+        // rate is a board fact and core::input's windows are specified in
+        // milliseconds so that changing it here does not silently change
+        // what counts as a long press.
+        vTaskDelay(pdMS_TO_TICKS(1000 / bsp::kPodPollHz));
     }
 }
 

@@ -1,10 +1,20 @@
 #include "drivers/shift_lamps.hpp"
 #include "drivers/mcp23s17.hpp"
 #include "bsp/pins.hpp"
+#include "core/shift/shift.hpp"
 
 #include "driver/ledc.h"
 
 namespace drivers {
+
+// The mask that core/shift produces has to fit the port the lamps are on.
+// Both numbers already existed and neither referenced the other, so nothing
+// would have noticed them drifting apart.
+static_assert(core::shift::kLampCount == bsp::mcp::kShiftCount,
+              "core/shift and the MCP23S17 port disagree about lamp count");
+static_assert(bsp::mcp::kShift0 == 0,
+              "the lamp mask goes straight to the port; lamp 1 must be bit 0");
+
 namespace {
 // Channel 1: the backlight already has channel 0 on the same timer.
 constexpr ledc_timer_t   kTimer   = LEDC_TIMER_0;

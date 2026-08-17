@@ -96,6 +96,10 @@ inline constexpr uint8_t kPodAddr    = 0x20;
 inline constexpr int kPodPollHz      = 100;
 
 // ── USB and debug ────────────────────────────────────────────────────
+// Fixed-function, and used by the IDF rather than by anything here: these
+// four appear so the pin map is complete and so nobody assigns them to
+// something else. USB is the secondary console (`idf.py monitor` over the
+// C connector); UART0 is the primary one and needs an adapter.
 inline constexpr int kUsbDminus      = 19;   // dedicated S3 USB pins
 inline constexpr int kUsbDplus       = 20;
 inline constexpr int kDebugRx        = 44;   // header H1
@@ -114,8 +118,13 @@ inline constexpr bool kNeutralActiveLow = true;
 
 // ── Spare pins ───────────────────────────────────────────────────────
 // IO6 is the ONLY spare on an ADC (ADC1_CH5). IO1 and IO2 are ADC1
-// channels already spent on the wheel Halls. Reserve IO6 for the VIN
-// sense divider the next board revision needs.
+// channels already spent on the wheel Halls.
+//
+// Reserve it for the VIN sense divider. That one part is what would let the
+// firmware tell bike power from bench USB, flush the blackbox on
+// ignition-off, and trigger the USB-MSC handover on something real rather
+// than on a guess (§10.1, netlist review §3). Do not spend it on anything
+// digital — there are two spare digital pins below.
 inline constexpr int kSpareAdc       = 6;
 inline constexpr int kSpareDigital0  = 38;
 inline constexpr int kSpareDigital1  = 39;
