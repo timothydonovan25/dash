@@ -87,7 +87,7 @@ components/core/       pure logic. NO esp headers. Builds on host.
 components/services/   the tasks that glue drivers to core
 components/ui/         canvas, widgets, screens, render task
 test/                  host build, plain CMake + ctest
-docs/                  architecture and hardware reviews
+docs/                  architecture, hardware reviews, bring-up
 ```
 
 The architecture document calls the interface component `hal/`. It is
@@ -238,6 +238,12 @@ Where files differ from the §3 sketch: `tach_capture` and `hall_capture` are
 one `engine_sense` driver because they are the same three counters;
 `backlight` is part of `ili9488` because it is one LEDC channel; `theme.hpp`
 is the semantic layer over the palette in `geometry.hpp`.
+
+## When the board arrives
+
+`docs/bringup.md` is the procedure: what to do in what order, what you
+should see, and what each failure means. Read §0 before applying power —
+the FPC pin check and the partition table are both irreversible.
 
 ## Before the board arrives
 
