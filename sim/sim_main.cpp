@@ -10,7 +10,7 @@
 // drive it from a shell script and pipe the frames into ffmpeg.
 //
 //   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
-//                                vbat, sats, neutral, ecu, fix, auto
+//                                vbat, sats, neutral, ecu, fix, auto, media
 //        btn <A-E> down|up       real debounce and long-press timing
 //        cmd <lapline|laparm|lapclear|tripreset|jump>
 //        quit
@@ -102,6 +102,7 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "ecu")     c.ecu_online = v != 0.0f;
     else if (name == "fix")     c.gps_fix = v != 0.0f;
     else if (name == "auto")    c.auto_ride = v != 0.0f;
+    else if (name == "media")   c.media_on = v != 0.0f;
 }
 
 }  // namespace

@@ -60,6 +60,16 @@ public:
     virtual void draw_text(int16_t x, int16_t y, const char* text, Color c,
                            uint8_t scale = 1, Align align = Align::Left) = 0;
 
+    // A 1-bit-per-pixel image: row-major, MSB first, each row padded out to a
+    // whole byte. Set bits are drawn in `c` and clear bits are left alone, so
+    // an icon lands on whatever is already there.
+    //
+    // This is the format every bitmap converter emits, which is the point —
+    // an icon comes out of a tool as a byte array and goes in as one, with
+    // nothing in between to get wrong.
+    virtual void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
+                             int16_t w, int16_t h, Color c) = 0;
+
     int16_t text_width(const char* text, uint8_t scale = 1) const;
     int16_t text_height(uint8_t scale = 1) const;
 

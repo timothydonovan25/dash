@@ -1,5 +1,6 @@
 #include "ui/widgets.hpp"
 #include "core/units/units.hpp"
+#include "ui/icons.hpp"
 #include <cmath>
 
 namespace ui {
@@ -33,6 +34,7 @@ template struct TextBuf<16>;
 template struct TextBuf<20>;
 template struct TextBuf<24>;
 template struct TextBuf<28>;
+template struct TextBuf<40>;
 
 // --- Label --------------------------------------------------------------
 
@@ -673,6 +675,74 @@ void GBall::render(Canvas& c) {
     }
     c.draw_text(cx, static_cast<int16_t>(cy + r + 8), buf,
                 valid_ ? color::kText : color::kDim, 2, Align::Center);
+}
+
+// --- MediaBlock ---------------------------------------------------------
+
+namespace {
+
+// Copies as much of `s` as fits in `avail` pixels, ending in ".." when it had
+// to stop early. Measured with the canvas rather than assumed from a
+// character count, so it stays right if the font ever changes.
+void fit_text(Canvas& c, char* out, size_t n, const char* s, uint8_t scale,
+              int16_t avail) {
+    out[0] = '\0';
+    if (!s || !*s || n == 0) return;
+
+    size_t k = 0;
+    while (s[k] != '\0' && k + 1 < n) {
+        out[k] = s[k];
+        out[k + 1] = '\0';
+        if (c.text_width(out, scale) > avail) {
+            // One too many. Back off far enough to sign the truncation.
+            out[k] = '\0';
+            while (k > 0) {
+                out[k] = '\0';
+                char probe[8] = {'.', '.', '\0'};
+                if (c.text_width(out, scale) + c.text_width(probe, scale) <= avail) {
+                    out[k] = '.';
+                    if (k + 2 < n) { out[k + 1] = '.'; out[k + 2] = '\0'; }
+                    return;
+                }
+                --k;
+            }
+            return;
+        }
+        ++k;
+    }
+}
+
+void media_row(Canvas& c, const Rect& bounds, int row, const icon::Bitmap& ic,
+               const char* text, Color text_col) {
+    if (!text || !*text) return;
+    const int16_t y = static_cast<int16_t>(bounds.y + row * MediaBlock::kRowH);
+    c.draw_bitmap(bounds.x, y, ic.bits, ic.w, ic.h, color::kDim);
+
+    const int16_t tx = static_cast<int16_t>(bounds.x + 21);
+    char buf[48];
+    fit_text(c, buf, sizeof buf, text, 2,
+             static_cast<int16_t>(bounds.right() - tx));
+    // Centred against the 16 px icon rather than sharing its top edge.
+    c.draw_text(tx, static_cast<int16_t>(y + 1), buf, text_col, 2, Align::Left);
+}
+
+}  // namespace
+
+void MediaBlock::set(const char* title, const char* album, const char* artist,
+                     bool valid) {
+    const bool a = title_.set(title ? title : "");
+    const bool b = album_.set(album ? album : "");
+    const bool d = artist_.set(artist ? artist : "");
+    const bool e = assign_t(valid_, valid);
+    if (a || b || d || e) touch();
+}
+
+void MediaBlock::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    if (!valid_) return;
+    media_row(c, bounds, 0, icon::kSong,   title_.s,  color::kText);
+    media_row(c, bounds, 1, icon::kAlbum,  album_.s,  color::kDim);
+    media_row(c, bounds, 2, icon::kArtist, artist_.s, color::kDim);
 }
 
 // --- AlertOverlay -------------------------------------------------------

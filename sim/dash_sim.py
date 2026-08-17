@@ -58,6 +58,8 @@ TOGGLES = [
     ("neutral", "Neutral",          False),
     ("fix",     "GPS fix",          True),
     ("ecu",     "ECU online",       False),
+    # Stands in for the BLE task, which is not in this build.
+    ("media",   "Music playing",    True),
 ]
 
 COMMANDS = [

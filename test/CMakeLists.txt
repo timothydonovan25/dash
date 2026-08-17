@@ -39,6 +39,7 @@ set(UI ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui)
 add_library(ui STATIC
     ${UI}/src/font5x7.cpp
     ${UI}/src/framebuffer_canvas.cpp
+    ${UI}/src/icons.cpp
     ${UI}/src/widgets.cpp
     ${UI}/src/screens_cruise.cpp
     ${UI}/src/screens_track.cpp

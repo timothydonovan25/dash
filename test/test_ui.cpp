@@ -322,6 +322,64 @@ int main() {
         CHECK(s.ink() == healthy);
     }
 
+    CASE("the media block and its icons come and go together");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+
+        // busy_frame() leaves updated_ms at zero, which is the gate: nothing
+        // has ever arrived, so there is no media rather than a nameless song.
+        Frame f = busy_frame();
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t silent = s.ink();
+
+        std::strcpy(f.media.title, "In the Forest");
+        std::strcpy(f.media.album, "Terra Incognita");
+        std::strcpy(f.media.artist, "Gojira");
+        f.media.updated_ms = 90000;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > silent);
+
+        // The phone goes away and `ble` clears the slot. The icons have to go
+        // with the text — three icons next to nothing is what would happen if
+        // they were painted as background chrome.
+        f.media = core::state::Media{};
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() == silent);
+    }
+
+    CASE("a long title is truncated to the block, not painted past it");
+    {
+        Screen320x480 s;
+        MediaBlock m;
+        const Rect box{40, 60, 150, 66};
+        m.set_bounds(box);
+        m.set("A Song Title Far Longer Than The Space Available",
+              "An Album Name That Does Not Fit Either", "Some Artist", true);
+        for (Color& c : s.px) c = 0;
+        m.render(s.canvas);
+
+        // Nothing outside the widget's own rectangle. A block that paints
+        // past its bounds would land on the speed readout, and on a partial
+        // update the overspill would never be cleaned up.
+        size_t outside = 0;
+        for (int16_t y = 0; y < kScreenH; ++y) {
+            for (int16_t x = 0; x < kScreenW; ++x) {
+                if (s.canvas.pixel(x, y) == 0) continue;
+                if (!box.contains(x, y)) ++outside;
+            }
+        }
+        CHECK(outside == 0);
+    }
+
     CASE("widgets only repaint when their value changes");
     {
         // This is the whole reason set() compares: at 30 Hz over SPI, a

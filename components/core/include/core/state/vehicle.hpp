@@ -113,9 +113,14 @@ struct Elec {
 // later does not disturb the Frame contract.
 struct Media {
     char     title[60]  = {};
+    char     album[60]  = {};
     char     artist[60] = {};
     uint8_t  state      = 0;
     uint8_t  src        = 0;
+    // Zero means nothing has ever arrived, and every screen treats that as
+    // "no media" rather than as an empty song. When the phone goes away the
+    // `ble` task must clear this slot: a dashboard still showing what was
+    // playing forty minutes ago is worse than one showing nothing.
     uint32_t updated_ms = 0;
 };
 

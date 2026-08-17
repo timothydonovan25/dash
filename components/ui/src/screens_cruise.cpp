@@ -46,10 +46,12 @@ constexpr Rect kSats      { 28, 266, 120,  10};
 constexpr Rect kHdop      { 28, 286, 120,  10};
 constexpr Rect kClock     {297, 140, 175,  16};
 constexpr Rect kLapVal    {297, 176, 175,  16};
-constexpr Rect kTrackInfo {297, 198, 175,  10};
-constexpr Rect kDelta     {300, 212, 172,  32};
-constexpr Rect kOdo       {216, 250, 120,  10};
-constexpr Rect kTrip      {346, 250, 120,  10};
+// Song, album, artist, three rows of MediaBlock::kRowH from here down.
+constexpr Rect kMedia     {297, 238, 179,  66};
+// Under the g-ball rather than beside the media block, which now owns the
+// bottom right corner.
+constexpr Rect kOdo       {150, 254, 142,  10};
+constexpr Rect kTrip      {150, 272, 142,  10};
 
 // How long the tile shows a jump before going back to being a g-ball. Long
 // enough to read after you have stopped concentrating on landing.
@@ -103,18 +105,16 @@ void SpeedScreen::enter(Canvas&) {
     fault_what_.set_bounds(kFaultWhat);
     fault_what_.configure("", theme::secondary, 1, Align::Left);
     lap_.set_bounds(kLapVal); lap_.configure("", color::kDim, 2, Align::Right);
-    track_.set_bounds(kTrackInfo);
-    track_.configure("", color::kDim, 1, Align::Right);
-    delta_.set_bounds(kDelta);
+    media_.set_bounds(kMedia);
     odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
-    trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
+    trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Left);
 
     list_[0]  = &bar_up_;   list_[1]  = &bar_across_; list_[2]  = &speed_;
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
     list_[9]  = &hdop_;     list_[10] = &lap_;        list_[11] = &odo_;
     list_[12] = &trip_;     list_[13] = &ball_;       list_[14] = &fault_;
-    list_[15] = &fault_what_; list_[16] = &track_;    list_[17] = &delta_;
+    list_[15] = &fault_what_; list_[16] = &media_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -188,24 +188,11 @@ void SpeedScreen::update(const Frame& f) {
         fault_what_.set_text("");
     }
 
-    // Track info under the running lap: which lap this is and what the best
-    // one was, then the delta against it.
-    size_t j = 0;
-    if (f.lap.phase == core::lap::Phase::NoLine) {
-        j = append(buf, sizeof buf, 0, "NO FINISH LINE");
-    } else if (f.lap.count == 0) {
-        j = append(buf, sizeof buf, 0, "ARMED");
-    } else {
-        j = append(buf, sizeof buf, 0, "L");
-        j += u::fmt_value(buf + j, sizeof buf - j,
-                          static_cast<float>(f.lap.count), 0, true);
-        j = append(buf, sizeof buf, j, "  BEST ");
-        j += u::fmt_duration(buf + j, sizeof buf - j, f.lap.best_ms,
-                             f.lap.best_ms > 0);
-    }
-    (void)j;
-    track_.set_text(buf);
-    delta_.set(f.lap.delta_ms, f.lap.delta_valid);
+    // What is playing. `updated_ms` of zero is the same gate the diag screen
+    // uses: nothing has ever arrived, so there is no media rather than a
+    // song with no name. The whole block including its icons disappears.
+    media_.set(f.media.title, f.media.album, f.media.artist,
+               f.media.updated_ms != 0);
 
     size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
                             f.gnss.fix);
@@ -266,7 +253,7 @@ void SpeedScreen::draw_background(Canvas& c) {
     (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 17}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //

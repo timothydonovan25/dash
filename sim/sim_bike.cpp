@@ -53,6 +53,13 @@ void at(float s, float& x_ft, float& y_ft, float& heading_deg,
     }
 }
 
+template <size_t N>
+void copy_into(char (&dst)[N], const char* src) {
+    size_t i = 0;
+    for (; src[i] != '\0' && i + 1 < N; ++i) dst[i] = src[i];
+    dst[i] = '\0';
+}
+
 }  // namespace
 
 void Bike::reset() {
@@ -196,6 +203,19 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     g.speed_mph = c.speed_mph;
     g.utc_ms = now_ms;
     slots.gnss.publish(g);
+
+    // What `ble` will publish once it exists. The strings are long enough to
+    // exercise the truncation — "Terra Incognita" does not fit the block, and
+    // finding that out on a laptop is the point of having one.
+    core::state::Media md;
+    if (c.media_on) {
+        copy_into(md.title,  "In the Forest");
+        copy_into(md.album,  "Terra Incognita");
+        copy_into(md.artist, "Gojira");
+        md.state = 1;
+        md.updated_ms = now_ms;
+    }
+    slots.media.publish(md);
 
     core::state::Elec el;
     el.vbat = c.vbat;

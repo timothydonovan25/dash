@@ -34,6 +34,8 @@ public:
     void draw_circle(int16_t cx, int16_t cy, int16_t radius, Color c) override;
     void draw_text(int16_t x, int16_t y, const char* text, Color c,
                    uint8_t scale, Align align) override;
+    void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits, int16_t w,
+                     int16_t h, Color c) override;
 
     // The band this canvas represents within the full screen. The render
     // task sets it so a screen can draw in whole-screen coordinates while

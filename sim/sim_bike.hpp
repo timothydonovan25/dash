@@ -25,6 +25,12 @@ struct Controls {
     bool  gps_fix    = true;
     int   sats       = 11;
 
+    // There is no BLE in this build, so the media slot has no writer on the
+    // bike yet. The simulator fills it anyway: the speed screen's media
+    // block is laid out now, and a layout that can only be judged after the
+    // radio lands is a layout nobody checks.
+    bool  media_on   = false;
+
     // Drives the bike round a synthetic circuit at `speed_mph`, so the lap
     // timer, the delta matcher and the map screens have something real to
     // chew on. Lean is then computed from the corner rather than set.

@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS "src/font5x7.cpp"
          "src/framebuffer_canvas.cpp"
+         "src/icons.cpp"
          "src/widgets.cpp"
          "src/screens_cruise.cpp"
          "src/screens_track.cpp"

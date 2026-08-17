@@ -49,11 +49,10 @@ private:
     Label       fault_;
     Label       fault_what_;
     Label       lap_;
-    Label       track_;
-    DeltaBar    delta_;
+    MediaBlock  media_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[18] = {};
+    Widget*     list_[17] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

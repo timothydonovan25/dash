@@ -270,6 +270,34 @@ private:
     bool     jump_ = false;
 };
 
+// What is playing: song, album and artist, each behind its icon.
+//
+// One widget rather than three labels and three background icons, because
+// the icons must disappear along with the text. Chrome painted by a screen
+// is only refreshed on a full repaint, so three icons drawn as background
+// would still be sitting there next to nothing when the music stopped.
+//
+// The text is truncated to the width available. A marquee would fit more,
+// but it would repaint this block on every frame forever, and a scrolling
+// album title is not worth a permanent share of the SPI budget.
+class MediaBlock : public Widget {
+public:
+    // `valid` is false when nothing has ever arrived, or when the phone has
+    // gone away — a dash still showing what was playing forty minutes ago is
+    // worse than one showing nothing.
+    void set(const char* title, const char* album, const char* artist,
+             bool valid);
+    void render(Canvas& c) override;
+
+    static constexpr int16_t kRowH = 22;
+
+private:
+    TextBuf<40> title_;
+    TextBuf<40> album_;
+    TextBuf<40> artist_;
+    bool        valid_ = false;
+};
+
 // The one widget allowed to draw over whatever screen is up. A tyre losing
 // air is worth interrupting the trip map for (§7.4).
 class AlertOverlay : public Widget {

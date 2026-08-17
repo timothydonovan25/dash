@@ -252,4 +252,20 @@ void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
     }
 }
 
+void FrameBufferCanvas::draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
+                                    int16_t w, int16_t h, Color c) {
+    if (!bits || w <= 0 || h <= 0) return;
+    // Rows are byte-aligned, so a 13-wide icon still steps two bytes a row.
+    const int16_t stride = static_cast<int16_t>((w + 7) / 8);
+    for (int16_t row = 0; row < h; ++row) {
+        const uint8_t* line = bits + static_cast<size_t>(row) * stride;
+        for (int16_t col = 0; col < w; ++col) {
+            if (line[col >> 3] & (0x80u >> (col & 7))) {
+                put(static_cast<int16_t>(x + col),
+                    static_cast<int16_t>(y + row), c);
+            }
+        }
+    }
+}
+
 }  // namespace ui
