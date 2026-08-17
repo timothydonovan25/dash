@@ -2,6 +2,7 @@
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "core/state/track_buffer.hpp"
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -320,6 +321,43 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() == healthy);
+    }
+
+    CASE("no two widgets on a screen claim the same pixel");
+    {
+        // Bounds are what a repaint clears, so two widgets sharing a
+        // rectangle take turns wiping each other out. On a full repaint that
+        // is invisible — whoever draws last wins — and on the partial-update
+        // panel it is a notch that appears whenever the other one changes.
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+
+        const core::nav::Layout layout;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t sc = 0; sc < layout.screens[m]; ++sc) {
+                go_to(fx.app, s.canvas, static_cast<Mode>(m), sc);
+                const WidgetList ws = fx.app.current().widgets();
+                for (size_t i = 0; i < ws.count; ++i) {
+                    for (size_t j = i + 1; j < ws.count; ++j) {
+                        if (!ws.items[i] || !ws.items[j]) continue;
+                        const Rect& a = ws.items[i]->bounds;
+                        const Rect& b = ws.items[j]->bounds;
+                        if (a.empty() || b.empty()) continue;
+                        const bool overlap =
+                            a.x < b.right() && b.x < a.right() &&
+                            a.y < b.bottom() && b.y < a.bottom();
+                        if (overlap) {
+                            std::printf("  %s widget %zu %d,%d %dx%d overlaps "
+                                        "%zu %d,%d %dx%d\n",
+                                        fx.app.current().name(), i, a.x, a.y,
+                                        a.w, a.h, j, b.x, b.y, b.w, b.h);
+                        }
+                        CHECK(!overlap);
+                    }
+                }
+            }
+        }
     }
 
     CASE("the tach marker travels continuously and widens into the flare");
