@@ -45,7 +45,6 @@ constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
 constexpr Rect kHdop      { 28, 286, 120,  10};
 constexpr Rect kClock     {297, 140, 175,  16};
-constexpr Rect kLapVal    {297, 176, 175,  16};
 // Song, album and artist, starting below the g-ball and running to the right
 // edge. Wider than the reference put it, because real track names are longer
 // than the ones a layout gets mocked up with: at 297 this fitted thirteen
@@ -110,7 +109,6 @@ void SpeedScreen::enter(Canvas&) {
     fault_.configure("", theme::alarm, 2, Align::Left);
     fault_what_.set_bounds(kFaultWhat);
     fault_what_.configure("", theme::secondary, 1, Align::Left);
-    lap_.set_bounds(kLapVal); lap_.configure("", color::kDim, 2, Align::Right);
     song_.set_bounds(kSong);
     song_.configure(MediaRow::Kind::Song, color::kText);
     album_.set_bounds(kAlbum);
@@ -124,10 +122,9 @@ void SpeedScreen::enter(Canvas&) {
     list_[0]  = &bar_up_;   list_[1]  = &bar_across_; list_[2]  = &speed_;
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
-    list_[9]  = &hdop_;     list_[10] = &lap_;        list_[11] = &odo_;
-    list_[12] = &trip_;     list_[13] = &ball_;       list_[14] = &fault_;
-    list_[15] = &fault_what_; list_[16] = &song_;     list_[17] = &album_;
-    list_[18] = &artist_;
+    list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
+    list_[12] = &ball_;     list_[13] = &fault_;      list_[14] = &fault_what_;
+    list_[15] = &song_;     list_[16] = &album_;      list_[17] = &artist_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -223,12 +220,6 @@ void SpeedScreen::update(const Frame& f) {
     }
     hdop_.set_text(buf);
 
-    u::fmt_duration(buf, sizeof buf, f.lap.current_ms,
-                    f.lap.phase == core::lap::Phase::Timing);
-    lap_.configure(buf, f.lap.phase == core::lap::Phase::Timing ? color::kAccent
-                                                                : color::kDim,
-                   2, Align::Right);
-
     const char* dunit = "mi";
     k = u::fmt_float(buf, sizeof buf,
                      u::distance_for_display(f.trip.odo_mi, units(), &dunit), 0);
@@ -249,8 +240,8 @@ void SpeedScreen::update(const Frame& f) {
     trip_.set_text(buf);
 }
 
-// Only what never changes: the tile frames, the unit labels and the caption
-// over the lap clock. Everything with data in it is a widget above.
+// Only what never changes: the tile frames and the unit labels. Everything
+// with data in it is a widget above.
 void SpeedScreen::draw_background(Canvas& c) {
     c.draw_round_rect(kRpmTile, 6, kFrame);
     c.draw_round_rect(kGearTile, 8, kFrame);
@@ -263,12 +254,10 @@ void SpeedScreen::draw_background(Canvas& c) {
     c.draw_text(static_cast<int16_t>(kRpmTile.right() - 6),
                 static_cast<int16_t>(kRpmTile.bottom() + 4), "rpm",
                 color::kDim, 1, Align::Right);
-    c.draw_text(kLapVal.right(), static_cast<int16_t>(kLapVal.y - 12), "LAP",
-                color::kDim, 1, Align::Right);
     (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 19}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //
