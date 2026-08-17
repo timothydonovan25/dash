@@ -113,8 +113,7 @@ dash/
 │   │   ├── input_service/       # pod poll, debounce, event queue
 │   │   ├── ble/                 # NimBLE host glue
 │   │   │   ├── ble_service.cpp  # start, advertise, bond, health
-│   │   │   ├── media_ams.cpp    # iOS: GATT client on Apple Media Service
-│   │   │   ├── media_gatt.cpp   # Android: custom GATT server
+│   │   │   ├── media_gatt.cpp   # the one Feed characteristic (§11.1)
 │   │   │   └── tpms_scan.cpp    # passive scan, calls core/tpms decoders
 │   │   ├── logger/              # ring buffer to SD
 │   │   ├── storage/             # NVS + SD files + USB MSC owner
@@ -204,8 +203,8 @@ struct Lap      { LapPhase phase; uint16_t count;
                   uint32_t current_ms, last_ms, best_ms;
                   int32_t delta_ms; float dist_to_line_ft; };
 struct Elec     { float vbat, v5, v3v3; };
-struct Media    { char title[60], artist[60]; uint8_t state, src;
-                  uint32_t updated_ms; };            // see §11.5
+struct Media    { char title[60], album[60], artist[60];
+                  uint8_t state, src; uint32_t updated_ms; };  // see §11.5
 struct TpmsWheel{ float psi, temp_c; uint8_t batt_pct;
                   bool alarm; uint32_t age_ms; bool valid; };
 struct Tpms     { TpmsWheel front, rear; };
@@ -294,7 +293,7 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue |
 | `render` | 1 | 6 | 30 Hz | frame snapshot, widgets, TFT SPI |
 | `logger` | 1 | 5 | drain | ring buffer to SD |
-| `ble` | 1 | 4 | event | AMS client, media server, TPMS scan (see §11) |
+| `ble` | 1 | 4 | event | media Feed characteristic, TPMS scan (see §11) |
 | `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, USB MSC state |
 
 Nine tasks of your own. Each one has a single job you can say in one line.
@@ -654,35 +653,72 @@ never connects, nothing else in the dash changes behaviour.
 
 The ESP32-S3 has **BLE 5.0 only**. It has no Bluetooth Classic radio at
 all. That rules out AVRCP, which is the normal way a car stereo gets track
-metadata. There is no workaround in firmware. So the metadata path depends
-on which phone you carry:
+metadata, and it rules out SPP, which is the normal way to get a serial
+stream. There is no workaround in firmware.
 
-| Phone | Path | Works? |
-|---|---|---|
-| iPhone | Apple Media Service (AMS) — a GATT service the phone exposes | Yes, natively. No app needed. |
-| Android | Custom GATT service on the dash; a phone-side app pushes to it | Yes, but you must run something on the phone |
+The phone is a Sonim XP3900, an Android handset, so there is one path:
+something runs on the phone and pushes strings to the dash. The V1 build
+worked this way too.
 
-**iPhone / AMS.** After bonding, the dash acts as a GATT **client** and
-subscribes to the AMS Entity Update characteristic. iOS then pushes track
-title, artist, album, and player state as they change. Service UUID
-`89D3502B-0F36-433A-8EF4-C502AD55F8DC`. This is the good path: it is built
-into iOS, it works with any music app, and it needs nothing installed.
+**BLE offers exactly two connection-oriented transports**: ATT/GATT, and
+L2CAP connection-oriented channels. There is no third. Advertising cannot
+carry this — 31 bytes of payload will not hold a song title, and it is
+fire-and-forget with no delivery guarantee.
 
-**Android.** There is no AMS equivalent. The dash acts as a GATT
-**server** with a small custom service, and the phone pushes to it. Your
-V1 build already did this. Options on the phone side: Tasker with
-AutoNotification, or a thin app you write. Define the service once and
-keep it stable:
+We take GATT, in its smallest form: **one characteristic that the phone
+writes bytes to.** L2CAP CoC is a real socket and would also work, but
+nRF Connect and every other off-the-shelf BLE app speak GATT and not CoC.
+When neither the dash nor the phone app has ever worked, being able to
+poke the dash from an app you did not write is worth more than the
+difference between `write()` and a stream.
 
 ```
 Service   6e5f0001-b5a3-f393-e0a9-e50e24dcca9e   "Dash Media"
-  char    ...0002  Title    write-no-response, UTF-8, max 60 bytes
-  char    ...0003  Artist   write-no-response, UTF-8, max 60 bytes
-  char    ...0004  State    write-no-response, 1 byte: 0 stop 1 play 2 pause
+  char    ...0002  Feed     write-no-response, UTF-8
 ```
 
-Write the source into `Media.src` so the DIAG screen can tell you which
-path fed the data.
+One handle, one line per write, tag character then the value:
+
+```
+T The Devil In I
+A Slipknot
+L .5: The Gray Chapter (Special Edition)
+S 1
+```
+
+| Tag | Meaning | Value |
+|---|---|---|
+| `T` | Title | UTF-8, truncated to 59 bytes on arrival |
+| `A` | Artist | as above |
+| `L` | aLbum | as above (`A` was taken) |
+| `S` | State | `0` stop, `1` play, `2` pause |
+
+Rules the firmware side depends on:
+
+- **One line per write.** The trailing newline is optional; the end of the
+  write is the end of the line. No reassembly across writes, so a dropped
+  write costs one field and not the parser's state.
+- **No chunking.** `CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU` is 256, so a
+  60-byte string is a single write. If a negotiated MTU ever comes back
+  smaller, truncate on the phone rather than chunking here.
+- **Any tag may arrive at any time**, and unknown tags are ignored rather
+  than being an error. That is what lets a tag be added later without
+  breaking a phone app that predates it.
+- **`updated_ms` is set on every accepted line.** Screens use it as the
+  "is there any media" gate.
+- **On disconnect, `ble` must publish a zeroed `Media`.** A dash still
+  showing what was playing forty minutes ago is worse than one showing
+  nothing, and nothing downstream can tell stale from current.
+
+`Media.src` records which path fed the data, so the DIAG screen can say.
+There is only one path today; the field stays because a second one would
+otherwise be indistinguishable.
+
+**Not doing: Apple's AMS.** An iPhone exposes track metadata natively over
+GATT (service `89D3502B-0F36-433A-8EF4-C502AD55F8DC`), needing no app —
+but it needs the dash to be a GATT *client* and a BLE *central*, which is
+a second connection path to write and debug for a phone nobody here
+carries. If that ever changes, this is the note that says where to start.
 
 ### 11.2 TPMS
 
@@ -720,12 +756,18 @@ pressures before you commit.
 
 ### 11.3 Radio topology
 
-The dash needs all three BLE roles at once:
+The dash needs two BLE roles at once:
 
-- **Peripheral** — advertises so the phone can find and bond with it.
-- **Central** — connects out to the phone to read AMS. (On iOS the phone
-  is the peripheral for AMS purposes; the dash connects to it.)
+- **Peripheral** — advertises the Dash Media service; the phone connects
+  in and writes to it.
 - **Observer** — passive scan for TPMS advertisements.
+
+**Not Central, and not a GATT client.** Both were only there for AMS
+(§11.1), and dropping them is worth real flash: NimBLE and the controller
+together add about 268 kB of image and 33 kB of internal RAM as configured
+today, measured by linking them in. `CONFIG_BT_NIMBLE_ROLE_CENTRAL` and
+`CONFIG_BT_NIMBLE_GATT_CLIENT` are both still `y` in `sdkconfig` and can
+go when the radio work starts.
 
 NimBLE supports this. The cost is radio time. Scanning and an active
 connection compete for the same antenna, so duty-cycle the scan:
@@ -763,7 +805,7 @@ Add one application task:
 
 | Task | Core | Prio | Rate | Owns |
 |---|---|---|---|---|
-| `ble` | 1 | 4 | event | AMS client, media GATT server, TPMS scan callback, publishes `Media` and `Tpms` |
+| `ble` | 1 | 4 | event | media GATT server, TPMS scan callback, publishes `Media` and `Tpms` |
 
 The task itself does almost nothing. It receives NimBLE callbacks, runs a
 decoder, and publishes. All the real work is in the NimBLE host task,
@@ -772,10 +814,10 @@ which the IDF creates for you.
 ### 11.5 State
 
 ```cpp
-struct Media { char title[60]; char artist[60];
+struct Media { char title[60]; char album[60]; char artist[60];
                uint8_t state;        // 0 stop 1 play 2 pause
-               uint8_t src;          // 0 none 1 AMS 2 custom
-               uint32_t updated_ms; };
+               uint8_t src;          // 0 none 1 phone app
+               uint32_t updated_ms; };   // 0 means no media at all
 
 struct TpmsWheel { float psi, temp_c; uint8_t batt_pct;
                    bool alarm; uint32_t age_ms; bool valid; };
@@ -783,7 +825,7 @@ struct Tpms { TpmsWheel front, rear; };
 ```
 
 Both go in `Slots` as their own `Published<T>`, written only by `ble`.
-`Media` is 128 bytes, so the seqlock copy is cheap enough at 30 Hz.
+`Media` is 188 bytes, so the seqlock copy is cheap enough at 30 Hz.
 
 Add to `Health`: `ble_host`, `phone`, `tpms_f`, `tpms_r`. A TPMS wheel is
 `Degraded` when its reading is older than about 5 minutes while moving,
@@ -791,13 +833,16 @@ and `Absent` when no ID is bound.
 
 ### 11.6 Where it shows on screen
 
-- **Cruise → big speed.** A one-line `MediaStrip` widget along the bottom:
-  title, artist, and a play/pause dot. It disappears when nothing is
-  playing, so it never steals space from the speed digits.
+- **Cruise → big speed.** Three `MediaRow` widgets in the bottom right:
+  song, album and artist, each behind its icon, scrolling if the name is
+  wider than the row. The whole block disappears when `updated_ms` is 0,
+  so it never steals space from the speed digits. **Built already** —
+  the rows are laid out and drawing, and the only missing piece is the
+  radio that fills the slot.
 - **Stat → all data.** TPMS front and rear pressure and temperature.
-- **Diag → a new BLE screen.** Connection state, bonded device, RSSI, AMS
-  subscription state, last TPMS advertisement age per wheel, decoder hit
-  and miss counts. This screen is what you will actually use to work out
+- **Diag → a new BLE screen.** Connection state, bonded device, RSSI,
+  last line accepted on the Feed characteristic, last TPMS advertisement
+  age per wheel, decoder hit and miss counts. This screen is what you will actually use to work out
   why a sensor is not showing up.
 - **Config.** Forget phone, pairing mode, learn front sensor, learn rear
   sensor, TPMS low-pressure alarm thresholds.
@@ -1071,10 +1116,11 @@ erases NVS, and NVS holds your odometer.
 - Does the trip map in Cruise mode need any base map, or just a
   breadcrumb trail? A base map means tiles on the SD card and a lot of
   work.
-- Which phone do you carry? iPhone means song metadata works with no app
-  at all, through AMS. Android means you must run Tasker or write a small
-  app. This does not change the architecture, but it changes what you
-  build first in step 9.
+- ~~Which phone do you carry?~~ **Settled: a Sonim XP3900, an Android
+  handset.** So there is no AMS path and a phone-side app is required.
+  The dash side is one write characteristic (§11.1); the app is a
+  separate piece of work and should wait until the radio works on the
+  dash, or you are debugging two unproven ends at once.
 - Which TPMS sensors? The decoder is trivial once you know the layout, but
   it is guesswork until you have a sensor to sniff. Buy the set before you
   write `core/tpms/`.
