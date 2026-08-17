@@ -33,21 +33,21 @@ constexpr Rect kTachStem  {0, TachBar::kFlareH, TachBar::kStemW,
                            kScreenH - TachBar::kFlareH};
 constexpr Rect kTachFlare {0, 0, TachBar::kFlareW, TachBar::kFlareH};
 
-constexpr Rect kRpmTile   { 47,  28, 163, 43};
+constexpr Rect kRpmTile   { 31,  28, 169, 43};
 constexpr Rect kGearTile  {216,   2,  78, 84};
 constexpr Rect kSpeedTile {310,  12, 162, 78};
 // scale 10 is 70 px of glyph in an 84 px tile.
 constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
 
-constexpr Rect kLean      { 46,  96, 112, 104};
+constexpr Rect kLean      { 30,  96, 112, 104};
 // Shares a left edge with the media rows below it, which puts it a little
 // right of where it was and squares the middle column up.
 constexpr Rect kBall      {176,  92, 142, 150};
-constexpr Rect kFault     { 44, 222, 120,  16};
-constexpr Rect kFaultWhat { 44, 242, 120,  10};
-constexpr Rect kSats      { 44, 266, 120,  10};
-constexpr Rect kHdop      { 44, 286, 120,  10};
+constexpr Rect kFault     { 28, 222, 120,  16};
+constexpr Rect kFaultWhat { 28, 242, 120,  10};
+constexpr Rect kSats      { 28, 266, 120,  10};
+constexpr Rect kHdop      { 28, 286, 120,  10};
 // Right-aligned at the screen edge, and only as wide as it needs to be:
 // fmt_clock is always five characters, 58 px at scale 2. Widget bounds are
 // what gets cleared on a repaint, so a clock reserving the whole right half
@@ -63,7 +63,7 @@ constexpr Rect kArtist    {176, 284, 300, MediaRow::kRowH};
 
 // The odometer and trip meter are the least urgent things here, so they get
 // the strip along the bottom that nothing else wants.
-constexpr Rect kOdo       { 44, 306, 194,  10};
+constexpr Rect kOdo       { 28, 306, 210,  10};
 constexpr Rect kTrip      {262, 306, 210,  10};
 
 // How long the tile shows a jump before going back to being a g-ball. Long

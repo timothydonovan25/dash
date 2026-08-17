@@ -227,12 +227,12 @@ public:
     // kStemW from either side.
     static int16_t width_at(int16_t y);
 
-    static constexpr int16_t kStemW   = 40;    // the straight run, all the way down
+    static constexpr int16_t kStemW   = 25;    // the straight run, all the way down
     static constexpr int16_t kFlareH  = 25;    // how far down the flare reaches
     // Width at the very top. Bounded by the shift lamp strip at x=136: the
     // flare cannot grow past it without the two overlapping.
     static constexpr int16_t kFlareW  = 135;
-    static constexpr int16_t kMarkerH = 8;
+    static constexpr int16_t kMarkerH = 12;
 
 private:
     // A pixel of movement is not worth a repaint of the whole strip.
