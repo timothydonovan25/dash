@@ -56,6 +56,48 @@ enum Flags : uint16_t {
     kFlagEcu      = 1u << 4,
 };
 
+// How often `logic` puts a row in the ring, as the config menu offers it.
+//
+// Only divisors of the 50 Hz logic tick are on the list. A rate the tick
+// cannot divide evenly — 30 Hz, say — logs alternating 20 ms and 40 ms gaps,
+// which RaceRender will happily read and which quietly stops the file being
+// an honest time base. Picking from a list is also one button press to a
+// known-good value, which is what you want with gloves on.
+enum class Rate : uint8_t { Off = 0, Hz1, Hz5, Hz10, Hz25, Hz50 };
+
+constexpr uint8_t kRateCount   = 6;
+constexpr Rate    kDefaultRate = Rate::Hz10;
+
+// The label and the interval come out of one table, so a menu option cannot
+// disagree with the rate it selects. `kRateLabels` is what the ConfigItem
+// enum points at — an array rather than an accessor, because the item table
+// is a constexpr initialiser and a function call in it would drag the whole
+// table out of flash and into RAM. The interval is 0 for Off.
+extern const char* const kRateLabels[kRateCount];
+
+uint32_t rate_interval_ms(uint8_t rate);
+
+// Decides which ticks get a row. The logic task owns one, and it is the only
+// thing in the firmware that knows a logging rate is not the tick rate.
+class Decimator {
+public:
+    // `force` writes a row whatever the cadence. It is for the tick a lap
+    // starts or finishes on: that record is the only channel the lap marker
+    // has, so decimating it away loses the lap from the file entirely.
+    //
+    // It does not override Rate::Off. Off means no rows, including that one —
+    // if the rider turned logging off, the firmware does not log anyway.
+    bool due(uint8_t rate, uint32_t now_ms, bool force = false);
+
+    // Forget the cadence, so the next tick logs. Called when the card is
+    // swapped or the rate changes; a new file should start with a row.
+    void reset() { primed_ = false; }
+
+private:
+    uint32_t last_ms_ = 0;
+    bool     primed_  = false;
+};
+
 // Single producer, single consumer, lock-free. The producer is `logic`; the
 // consumer is `logger` on the other core.
 template <typename T, size_t N>

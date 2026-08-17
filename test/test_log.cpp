@@ -200,6 +200,81 @@ int main() {
         CHECK(contains(tag, "# Lap 2: 01:02:03.45\n"));
     }
 
+    CASE("every offered rate divides the 50 Hz logic tick");
+    {
+        // The reason the menu is a list and not a Hz field: a rate the tick
+        // cannot divide evenly logs alternating 20 ms and 40 ms gaps.
+        for (uint8_t r = 1; r < kRateCount; ++r) {
+            const uint32_t ms = rate_interval_ms(r);
+            CHECK(ms > 0);
+            CHECK(ms % 20 == 0);
+        }
+        CHECK(rate_interval_ms(static_cast<uint8_t>(Rate::Off)) == 0);
+        CHECK(rate_interval_ms(static_cast<uint8_t>(Rate::Hz50)) == 20);
+        CHECK(rate_interval_ms(static_cast<uint8_t>(Rate::Hz1)) == 1000);
+
+        // A value from a firmware that knew more rates falls back to the
+        // default, rather than silently turning the blackbox off.
+        CHECK(rate_interval_ms(kRateCount) ==
+              rate_interval_ms(static_cast<uint8_t>(kDefaultRate)));
+
+        // Every option has a label; the menu indexes this array directly.
+        for (uint8_t r = 0; r < kRateCount; ++r) CHECK(kRateLabels[r] != nullptr);
+        CHECK(contains(kRateLabels[0], "Off"));
+    }
+
+    CASE("the decimator logs the first tick, then holds the rate");
+    {
+        Decimator g;
+        const uint8_t hz10 = static_cast<uint8_t>(Rate::Hz10);
+
+        CHECK(g.due(hz10, 1000));            // primes on the first call
+        CHECK(!g.due(hz10, 1020));
+        CHECK(!g.due(hz10, 1080));
+        CHECK(g.due(hz10, 1100));            // 100 ms later
+        CHECK(!g.due(hz10, 1120));
+
+        // 50 Hz has to fire on every 20 ms tick. The slack is what makes a
+        // clock that reads 19 ms of elapsed time still count as due — without
+        // it the top rate would quietly log at half its name.
+        Decimator fast;
+        const uint8_t hz50 = static_cast<uint8_t>(Rate::Hz50);
+        CHECK(fast.due(hz50, 0));
+        CHECK(fast.due(hz50, 19));
+        CHECK(fast.due(hz50, 39));
+    }
+
+    CASE("a lap event is logged whatever the rate, unless logging is off");
+    {
+        Decimator g;
+        const uint8_t hz1 = static_cast<uint8_t>(Rate::Hz1);
+        CHECK(g.due(hz1, 0));
+        CHECK(!g.due(hz1, 200));
+        // The lap marker rides in the record, so dropping this tick would
+        // lose the lap from the file altogether.
+        CHECK(g.due(hz1, 300, /*force=*/true));
+        // ...and the forced row restarts the cadence rather than being extra.
+        CHECK(!g.due(hz1, 900));
+        CHECK(g.due(hz1, 1300));
+
+        // Off means off. A rider who turned logging off does not get a row
+        // because a lap happened to end.
+        Decimator off;
+        const uint8_t none = static_cast<uint8_t>(Rate::Off);
+        CHECK(!off.due(none, 0));
+        CHECK(!off.due(none, 5000, /*force=*/true));
+    }
+
+    CASE("reset makes the next tick due, whenever it comes");
+    {
+        Decimator g;
+        const uint8_t hz1 = static_cast<uint8_t>(Rate::Hz1);
+        CHECK(g.due(hz1, 10000));
+        CHECK(!g.due(hz1, 10020));
+        g.reset();                            // rate changed, or a new card
+        CHECK(g.due(hz1, 10040));
+    }
+
     CASE("a short buffer truncates and still terminates");
     {
         Record r;

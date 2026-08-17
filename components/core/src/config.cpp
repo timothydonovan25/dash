@@ -97,6 +97,12 @@ const ConfigItem kItems[] = {
 
     // Trip
     action(0x0701, "Reset trip A", "Trip", state::CommandId::TripReset),
+
+    // Blackbox. 50 Hz is about 27 MB an hour and gives the ring ten seconds
+    // of slack against an SD stall; 5 Hz is a hundred. Lap markers are
+    // written whatever this says.
+    choice(0x0901, "Rate", "Log", FIELD(log_rate),
+           core::log::kRateLabels, core::log::kRateCount),
 };
 
 #undef FIELD

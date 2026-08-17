@@ -597,6 +597,21 @@ trace. The tag rides along in the record that closed the lap
 — can place it between the right two rows. Tags may appear anywhere in
 the file but must be in chronological order.
 
+**The rate is a setting** (§13, key `0x0901`), not the tick rate. `logic`
+runs at 50 Hz and a decimator in `core::log` decides which of those ticks
+gets a row: Off, 1, 5, 10, 25 or 50 Hz, defaulting to 10. The menu offers a
+list rather than a number because only divisors of the tick give evenly
+spaced rows — 30 Hz would log alternating 20 ms and 40 ms gaps, which
+RaceRender reads without complaint and which stops the file being an honest
+time base. The rate also sets how much slack the ring has against an SD
+stall: 512 records is ten seconds at 50 Hz and a hundred at 5.
+
+One exception, and it is the reason the decimator is not a plain modulo: a
+tick that starts or finishes a lap always gets its row, whatever the rate.
+The lap tag rides in that record and has no other channel, so decimating it
+away would lose the lap from the file. Off is still off — a rate of Off
+writes nothing at all, laps included.
+
 Blackbox is the same ring, kept always full. On an event (a hard landing,
 a fault, an ignition-off), flush the last N seconds to a separate file.
 

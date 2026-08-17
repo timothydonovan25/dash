@@ -66,6 +66,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                     s.fuel.wot_gph  = d.settings->fuel_wot_gph;
                     s.fuel.tank_gal = d.settings->fuel_tank_gal;
                 }
+                // A new logging rate starts its cadence now rather than from
+                // whenever the last row happened to land.
+                s.log_gate.reset();
                 break;
             default:
                 break;
@@ -102,6 +105,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     lf.t_ms = now;
 
     const core::lap::Update lu = s.lap.update(lf, lc);
+    const bool lap_event = lu.event != core::lap::Event::None;
     if (lu.event == core::lap::Event::Started) {
         if (d.delta) d.delta->start_lap();
     } else if (lu.event == core::lap::Event::Completed) {
@@ -153,7 +157,14 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // Filled here rather than by each producer so one record is one coherent
     // moment. push() never blocks and never waits on the card; a full ring
     // drops the record and counts it.
-    if (d.blackbox) {
+    //
+    // Not every tick: the rate is a setting (§13), and the decimator decides.
+    // A lap event forces a row through whatever the rate, because the marker
+    // rides in the record and this is the only tick that carries it.
+    const uint8_t log_rate = d.settings
+        ? d.settings->log_rate
+        : static_cast<uint8_t>(core::log::kDefaultRate);
+    if (d.blackbox && s.log_gate.due(log_rate, now, lap_event)) {
         const core::state::Attitude a = d.slots->attitude.get();
         core::log::Record rec;
         rec.t_ms = now;

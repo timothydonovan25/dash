@@ -21,6 +21,7 @@
 #include <cstdint>
 #include "core/state/command.hpp"
 #include "core/gear/gear.hpp"
+#include "core/log/log.hpp"
 #include "core/units/units.hpp"
 
 namespace core::config {
@@ -59,6 +60,10 @@ struct Settings {
     float    lap_half_width_ft = 50.0f;
     float    lap_min_speed_mph = 10.0f;
     uint16_t lap_min_lap_s     = 10;
+
+    // Blackbox — how often `logic` puts a row in the ring. One of
+    // core::log::Rate, not a Hz number; see the note on that enum.
+    uint8_t log_rate = static_cast<uint8_t>(core::log::kDefaultRate);
 
     // Fuel model
     float fuel_idle_gph = 0.18f;

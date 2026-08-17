@@ -40,6 +40,10 @@ struct LogicState {
     core::geo::LatLon origin{};
     bool     have_origin = false;
     uint32_t last_trace_ms = 0;
+
+    // Which ticks get a blackbox row. The rate is a setting, so this is not
+    // simply every tick.
+    core::log::Decimator log_gate;
 };
 
 // Call at 50 Hz. Drains commands, advances the trip computer and the lap

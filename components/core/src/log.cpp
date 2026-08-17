@@ -54,7 +54,54 @@ size_t terminate(char* buf, size_t n, size_t k) {
     return w;
 }
 
+// One row per Rate, in enum order. The label and the interval live together
+// because the only way they can lie is by being written apart.
+struct RateRow { const char* label; uint32_t interval_ms; };
+
+constexpr RateRow kRates[kRateCount] = {
+    {"Off",    0},
+    {"1 Hz",   1000},
+    {"5 Hz",   200},
+    {"10 Hz",  100},
+    {"25 Hz",  40},
+    {"50 Hz",  20},
+};
+
+// The logic tick is 20 ms and `now_ms` is a millisecond clock, so an interval
+// measured between two ticks can read 19 as easily as 20. Without a little
+// slack the 50 Hz option would defer every other tick and log at 25.
+constexpr uint32_t kSlackMs = 2;
+
 }  // namespace
+
+// Derived from the table above rather than typed out a second time. Every
+// initialiser is a constant expression, so this lands in flash and is ready
+// before any static constructor runs — which matters, because the config
+// item table in another translation unit points at it.
+const char* const kRateLabels[kRateCount] = {
+    kRates[0].label, kRates[1].label, kRates[2].label,
+    kRates[3].label, kRates[4].label, kRates[5].label,
+};
+
+uint32_t rate_interval_ms(uint8_t rate) {
+    // Out of range means an NVS blob from a firmware that knew more rates
+    // than this one. Fall back to the default rather than to Off: a blackbox
+    // that stopped recording because of a byte it did not recognise is the
+    // worst of the available failures.
+    if (rate >= kRateCount) rate = static_cast<uint8_t>(kDefaultRate);
+    return kRates[rate].interval_ms;
+}
+
+bool Decimator::due(uint8_t rate, uint32_t now_ms, bool force) {
+    const uint32_t interval = rate_interval_ms(rate);
+    if (interval == 0) return false;                  // Off, forced or not
+    if (primed_ && !force && now_ms - last_ms_ + kSlackMs < interval) {
+        return false;
+    }
+    last_ms_ = now_ms;
+    primed_  = true;
+    return true;
+}
 
 size_t csv_header(char* buf, size_t n) {
     // The first line has to be exactly this for RaceRender to accept the

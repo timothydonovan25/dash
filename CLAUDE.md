@@ -180,7 +180,7 @@ Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
 - `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
-- `log/` the blackbox ring and its CSV format
+- `log/` the blackbox ring, its CSV format, and the rate decimator
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below

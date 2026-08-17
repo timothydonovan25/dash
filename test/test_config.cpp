@@ -20,6 +20,7 @@ const uint16_t kShippedKeys[] = {
     0x0601, 0x0602, 0x0603,
     0x0701,
     0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806, 0x0807,
+    0x0901,
 };
 }  // namespace
 
@@ -158,6 +159,32 @@ int main() {
         format(s, *find(0x0301), buf, sizeof buf);  CHECK(eq(buf, "6000 rpm"));
         format(s, *find(0x0501), buf, sizeof buf);  CHECK(eq(buf, "0.18 gph"));
         format(s, *find(0x0404), buf, sizeof buf);  CHECK(eq(buf, "press E"));
+        format(s, *find(0x0901), buf, sizeof buf);  CHECK(eq(buf, "10 Hz"));
+    }
+
+    CASE("the log rate is an enum of known rates, and it wraps");
+    {
+        Settings s;
+        const ConfigItem* it = find(0x0901);
+        CHECK(it != nullptr);
+        CHECK(it->kind == Kind::Enum);
+        CHECK(it->option_count == core::log::kRateCount);
+
+        // Down from the default walks the list; down off the end comes back
+        // round to the fastest rate, so Off is one press from 1 Hz.
+        CHECK(nudge(s, *it, -1));
+        CHECK(s.log_rate == static_cast<uint8_t>(core::log::Rate::Hz5));
+        CHECK(nudge(s, *it, -1));
+        CHECK(nudge(s, *it, -1));
+        CHECK(s.log_rate == static_cast<uint8_t>(core::log::Rate::Off));
+        CHECK(nudge(s, *it, -1));
+        CHECK(s.log_rate == static_cast<uint8_t>(core::log::Rate::Hz50));
+
+        // What the menu shows is the rate the decimator will keep.
+        char buf[32];
+        format(s, *it, buf, sizeof buf);
+        CHECK(eq(buf, "50 Hz"));
+        CHECK(core::log::rate_interval_ms(s.log_rate) == 20);
     }
 
     CASE("the modules that keep their own config read it from here");
