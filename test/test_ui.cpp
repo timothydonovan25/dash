@@ -257,6 +257,71 @@ int main() {
         CHECK(s.ink() != with_fault);      // the screen genuinely differs
     }
 
+    CASE("the speed screen shows a jump, then goes back to the g-ball");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+
+        Frame f = busy_frame();
+        f.t_ms = 100000;
+        f.att.land_ms = 0;                  // nothing has happened yet
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t ball = s.ink();
+
+        // Just landed: the same tile, a different face.
+        f.att.land_ms = f.t_ms - 500;
+        f.att.airtime_ms = 1340;
+        f.att.last_land_g = 4.2f;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != ball);
+
+        // Ten seconds later it is a g-ball again, pixel for pixel. A hold
+        // that never expires would leave the tile stuck on a jump for the
+        // rest of the ride.
+        f.t_ms += 10000;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() == ball);
+    }
+
+    CASE("the speed screen names a failed device rather than degrading quietly");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+
+        Frame f = busy_frame();
+        f.health[Dev::McpPod].state = DevState::Ok;    // busy_frame degrades it
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t healthy = s.ink();
+
+        // The SD card is the test because nothing else on this screen reads
+        // it: any difference in the pixels has to be the fault line itself,
+        // not a readout dropping to dashes.
+        f.health[Dev::Sd].state = DevState::Degraded;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != healthy);
+
+        // And it clears again when the card comes back.
+        f.health[Dev::Sd].state = DevState::Ok;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() == healthy);
+    }
+
     CASE("widgets only repaint when their value changes");
     {
         // This is the whole reason set() compares: at 30 Hz over SPI, a

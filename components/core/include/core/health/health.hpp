@@ -32,6 +32,26 @@ struct Policy {
     uint32_t retry_every_ms = 5000;
 };
 
+// The one device most worth telling the rider about, for a screen that has
+// room for a line and not for a table.
+//
+// Only Fault and Degraded count. Ok and Absent are not problems, and Init is
+// transient by construction — `tick()` moves anything that stays quiet on to
+// Degraded, so a device cannot sit in Init and go unreported.
+struct Worst {
+    state::Dev      dev   = state::Dev::Count;
+    state::DevState state = state::DevState::Ok;
+    // How many devices are unhealthy in total, so a screen can say "and two
+    // others" without walking the table again.
+    uint8_t         count = 0;
+
+    bool any() const { return count > 0; }
+};
+
+// Ties break by Dev order, which is roughly the order that matters: a dead
+// IMU is worse news than a dead SD card.
+Worst worst(const state::Health& h);
+
 class Tracker {
 public:
     // Boot: everything is Absent until something says otherwise.

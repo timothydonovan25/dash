@@ -52,6 +52,11 @@ struct Attitude {
     bool     airborne    = false;
     uint32_t airtime_ms  = 0;
     float    last_land_g = 0.0f;
+    // When the last landing was reported. A screen that wants to show the
+    // jump for a few seconds and then go back to what it was showing cannot
+    // work this out for itself: `airtime_ms` holds the figure indefinitely,
+    // and a Frame is one instant with no history in it. 0 means no jump yet.
+    uint32_t land_ms     = 0;
 };
 
 struct Gnss {

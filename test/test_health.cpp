@@ -131,5 +131,41 @@ int main() {
         CHECK(t[Dev::Imu].state != DevState::Ok);
     }
 
+    CASE("worst() picks the one device worth a line on the speed screen");
+    {
+        core::state::Health h;
+
+        // Nothing fitted, nothing wrong. Absent is not a fault: this board
+        // ships with no ECU and no radio, and a permanent warning about
+        // parts that were never there teaches the rider to ignore the line.
+        CHECK(!worst(h).any());
+        CHECK(worst(h).count == 0);
+
+        h[Dev::Ecu].state = DevState::Absent;
+        h[Dev::Imu].state = DevState::Ok;
+        h[Dev::Sd].state = DevState::Init;
+        CHECK(!worst(h).any());
+
+        // One degraded device is the one reported.
+        h[Dev::Sd].state = DevState::Degraded;
+        CHECK(worst(h).any());
+        CHECK(worst(h).dev == Dev::Sd);
+        CHECK(worst(h).state == DevState::Degraded);
+        CHECK(worst(h).count == 1);
+
+        // A fault outranks a degrade regardless of table order — the SD card
+        // comes first in the enum and still loses to the GPS.
+        h[Dev::Gnss].state = DevState::Fault;
+        CHECK(worst(h).dev == Dev::Gnss);
+        CHECK(worst(h).state == DevState::Fault);
+        CHECK(worst(h).count == 2);
+
+        // Two faults: the earlier device in the table wins, which is roughly
+        // the order that matters — a dead IMU is worse news than a dead card.
+        h[Dev::Imu].state = DevState::Fault;
+        CHECK(worst(h).dev == Dev::Imu);
+        CHECK(worst(h).count == 3);
+    }
+
     return check::report("health");
 }

@@ -6,6 +6,7 @@
 // what the panel will show.
 #pragma once
 #include <cstdint>
+#include "core/jump/jump.hpp"
 #include "core/state/slots.hpp"
 
 namespace sim {
@@ -48,6 +49,12 @@ public:
     void step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
               uint32_t dt_ms);
 
+    // Send it off a jump. The accelerometer goes to zero for the duration
+    // and then spikes, and the firmware's own core::jump::Detector works out
+    // the rest — this does not tell the dash it jumped, it makes the sensor
+    // say what a sensor says during a jump.
+    void trigger_jump(uint32_t now_ms, uint32_t airtime_ms = 900);
+
     // Where the bike is on the circuit, 0..1. The front end draws a dot.
     float lap_fraction() const { return f_; }
     double lat() const { return lat_; }
@@ -59,6 +66,13 @@ private:
     double lon_ = -83.100000;
     float  heading_deg_ = 0.0f;
     float  lean_deg_ = 0.0f;
+
+    float    accel_g_ = 0.0f;        // low-passed, from the speed slider
+    float    prev_speed_mph_ = 0.0f;
+    uint32_t air_until_ms_ = 0;
+    uint32_t spike_until_ms_ = 0;
+
+    core::jump::Detector jump_;
 };
 
 }  // namespace sim

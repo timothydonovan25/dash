@@ -235,6 +235,41 @@ private:
     bool  valid_ = false;
 };
 
+// The accelerometer tile: lateral against longitudinal g as a dot in a
+// friction circle, and the last jump instead of it for a few seconds after a
+// landing.
+//
+// One widget with two faces rather than two widgets swapped in and out of a
+// screen's list, because the rectangle is the unit of redraw: two widgets
+// sharing a rectangle would each leave the other's pixels behind on a
+// partial update, which is exactly the invariant test_ui exists to hold.
+class GBall : public Widget {
+public:
+    // Both in g, from the IMU: `g_lat` positive to the right, `g_lon`
+    // positive under acceleration. These are what core/attitude publishes;
+    // `motion.accel_g` is nobody's to write on this board.
+    void set(float g_lat, float g_lon, bool valid);
+
+    // `show` latches the jump face on. How long that lasts is the screen's
+    // business — a widget has no clock, and a Frame has no history.
+    void set_jump(uint32_t airtime_ms, float landing_g, bool show);
+
+    void render(Canvas& c) override;
+
+    // Full scale. A CRF250F on dirt will not see much past 1 g either way,
+    // and a circle scaled for a superbike leaves the dot sitting in the
+    // middle doing nothing.
+    static constexpr float kFullScaleG = 1.5f;
+
+private:
+    float    g_lat_ = 0.0f;
+    float    g_lon_ = 0.0f;
+    bool     valid_ = false;
+    uint32_t airtime_ms_ = 0;
+    float    landing_g_ = 0.0f;
+    bool     jump_ = false;
+};
+
 // The one widget allowed to draw over whatever screen is up. A tyre losing
 // air is worth interrupting the trip map for (§7.4).
 class AlertOverlay : public Widget {

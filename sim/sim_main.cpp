@@ -12,7 +12,7 @@
 //   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
 //                                vbat, sats, neutral, ecu, fix, auto
 //        btn <A-E> down|up       real debounce and long-press timing
-//        cmd <lapline|laparm|lapclear|tripreset>
+//        cmd <lapline|laparm|lapclear|tripreset|jump>
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac>\n
@@ -220,6 +220,7 @@ int main() {
                 else if (std::strcmp(a, "laparm") == 0) commands.post(Command(CommandId::LapArm));
                 else if (std::strcmp(a, "lapclear") == 0) commands.post(Command(CommandId::LapClear));
                 else if (std::strcmp(a, "tripreset") == 0) commands.post(Command(CommandId::TripReset, int32_t{0}));
+                else if (std::strcmp(a, "jump") == 0) bike.trigger_jump(now);
             } else if (line.rfind("quit", 0) == 0) {
                 return 0;
             }

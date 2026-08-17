@@ -1,6 +1,8 @@
 #include "ui/screens.hpp"
+#include "core/health/health.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
+#include "ui/theme.hpp"
 #include <initializer_list>
 
 namespace ui {
@@ -37,12 +39,31 @@ constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
 
 constexpr Rect kLean      { 30,  96, 112, 104};
+constexpr Rect kBall      {150,  92, 142, 150};
+constexpr Rect kFault     { 28, 222, 120,  16};
+constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
 constexpr Rect kHdop      { 28, 286, 120,  10};
 constexpr Rect kClock     {297, 140, 175,  16};
 constexpr Rect kLapVal    {297, 176, 175,  16};
+constexpr Rect kTrackInfo {297, 198, 175,  10};
+constexpr Rect kDelta     {300, 212, 172,  32};
 constexpr Rect kOdo       {216, 250, 120,  10};
 constexpr Rect kTrip      {346, 250, 120,  10};
+
+// How long the tile shows a jump before going back to being a g-ball. Long
+// enough to read after you have stopped concentrating on landing.
+constexpr uint32_t kJumpHoldMs = 5000;
+
+// Appends a literal, returning the new length. The screens build strings out
+// of the core/units formatters and pieces like this rather than reaching for
+// snprintf, which pulls a float formatter into a binary that has no other
+// use for one.
+size_t append(char* buf, size_t n, size_t k, const char* s) {
+    while (*s != '\0' && k + 1 < n) buf[k++] = *s++;
+    buf[k] = '\0';
+    return k;
+}
 
 // The two legs share one travel: up the left edge, then along the top.
 constexpr float kUpShare = 295.0f / (295.0f + 135.0f);
@@ -74,9 +95,17 @@ void SpeedScreen::enter(Canvas&) {
     bar_across_.configure(TachSegment::Fill::Right, kUpShare, 1.0f, true);
 
     lean_.set_bounds(kLean);
+    ball_.set_bounds(kBall);
     sats_.set_bounds(kSats);  sats_.configure("", color::kText, 1, Align::Left);
     hdop_.set_bounds(kHdop);  hdop_.configure("", color::kDim, 1, Align::Left);
+    fault_.set_bounds(kFault);
+    fault_.configure("", theme::alarm, 2, Align::Left);
+    fault_what_.set_bounds(kFaultWhat);
+    fault_what_.configure("", theme::secondary, 1, Align::Left);
     lap_.set_bounds(kLapVal); lap_.configure("", color::kDim, 2, Align::Right);
+    track_.set_bounds(kTrackInfo);
+    track_.configure("", color::kDim, 1, Align::Right);
+    delta_.set_bounds(kDelta);
     odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
     trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
 
@@ -84,7 +113,8 @@ void SpeedScreen::enter(Canvas&) {
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
     list_[9]  = &hdop_;     list_[10] = &lap_;        list_[11] = &odo_;
-    list_[12] = &trip_;
+    list_[12] = &trip_;     list_[13] = &ball_;       list_[14] = &fault_;
+    list_[15] = &fault_what_; list_[16] = &track_;    list_[17] = &delta_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -124,7 +154,58 @@ void SpeedScreen::update(const Frame& f) {
     bar_up_.set(frac);
     bar_across_.set(frac);
 
-    lean_.set(f.att.lean_deg, f.health.ok(Dev::Imu));
+    const bool imu_ok = f.health.ok(Dev::Imu);
+    lean_.set(f.att.lean_deg, imu_ok);
+
+    // The g-ball, except for a few seconds after a landing, when the same
+    // tile is the jump. `land_ms` is in the Frame precisely so this screen
+    // does not have to remember anything between updates.
+    ball_.set(f.att.g_lat, f.att.g_lon, imu_ok);
+    const bool fresh_jump = f.att.land_ms != 0 &&
+                            (f.t_ms - f.att.land_ms) < kJumpHoldMs;
+    ball_.set_jump(f.att.airtime_ms, f.att.last_land_g, fresh_jump && imu_ok);
+
+    // The fault line. Blank when everything fitted is healthy, which means
+    // the space costs nothing on a normal ride and the screen stops
+    // degrading silently: a lean gauge showing `--` now says why.
+    const core::health::Worst w = core::health::worst(f.health);
+    if (w.any()) {
+        fault_.configure(core::state::dev_name(w.dev),
+                         w.state == core::state::DevState::Fault ? theme::alarm
+                                                                 : theme::warning,
+                         2, Align::Left);
+        size_t j = append(buf, sizeof buf, 0,
+                          w.state == core::state::DevState::Fault ? "FAULT"
+                                                                  : "DEGRADED");
+        if (w.count > 1) {
+            j = append(buf, sizeof buf, j, "  +");
+            j += u::fmt_value(buf + j, sizeof buf - j,
+                              static_cast<float>(w.count - 1), 0, true);
+        }
+        fault_what_.set_text(buf);
+    } else {
+        fault_.set_text("");
+        fault_what_.set_text("");
+    }
+
+    // Track info under the running lap: which lap this is and what the best
+    // one was, then the delta against it.
+    size_t j = 0;
+    if (f.lap.phase == core::lap::Phase::NoLine) {
+        j = append(buf, sizeof buf, 0, "NO FINISH LINE");
+    } else if (f.lap.count == 0) {
+        j = append(buf, sizeof buf, 0, "ARMED");
+    } else {
+        j = append(buf, sizeof buf, 0, "L");
+        j += u::fmt_value(buf + j, sizeof buf - j,
+                          static_cast<float>(f.lap.count), 0, true);
+        j = append(buf, sizeof buf, j, "  BEST ");
+        j += u::fmt_duration(buf + j, sizeof buf - j, f.lap.best_ms,
+                             f.lap.best_ms > 0);
+    }
+    (void)j;
+    track_.set_text(buf);
+    delta_.set(f.lap.delta_ms, f.lap.delta_valid);
 
     size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
                             f.gnss.fix);
@@ -185,7 +266,7 @@ void SpeedScreen::draw_background(Canvas& c) {
     (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 13}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //

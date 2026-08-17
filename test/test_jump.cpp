@@ -144,5 +144,38 @@ int main() {
         CHECK_NEAR(a.airtime_ms, 500.0, 10.0);
     }
 
+    CASE("the landing is timestamped, so a screen can hold it and let go");
+    {
+        Detector d;
+        uint32_t t = 0;
+
+        // Nothing has happened yet, and that must not look like a landing at
+        // time zero — a screen showing "0.00 s" from boot until the first
+        // jump would be worse than showing nothing.
+        core::state::Attitude a;
+        d.publish_into(a);
+        CHECK(a.land_ms == 0);
+
+        run(d, cfg, 1.0f, 200, t);
+        run(d, cfg, 0.05f, 800, t);          // in the air
+        run(d, cfg, 5.0f, 300, t);           // down, and past the impact window
+        d.publish_into(a);
+
+        CHECK(a.land_ms != 0);
+        CHECK(!a.airborne);
+        // Reported when the peak is known, which is one impact window after
+        // touchdown rather than at it.
+        CHECK_NEAR(a.land_ms, 1000.0 + cfg.impact_window_ms, 20.0);
+        CHECK_NEAR(a.airtime_ms, 800.0, 20.0);
+        CHECK_NEAR(a.last_land_g, 5.0, 0.01);
+
+        // It stays put afterwards: the hold is the screen's to time, and a
+        // timestamp that crept forward would never expire.
+        const uint32_t landed_at = a.land_ms;
+        run(d, cfg, 1.0f, 4000, t);
+        d.publish_into(a);
+        CHECK(a.land_ms == landed_at);
+    }
+
     return check::report("jump");
 }

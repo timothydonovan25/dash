@@ -40,12 +40,20 @@ private:
     TachSegment bar_up_;
     TachSegment bar_across_;
     LeanGauge   lean_;
+    GBall       ball_;
     Label       sats_;
     Label       hdop_;
+    // The worst-off device, in two lines: the name big enough to read at a
+    // glance and what is wrong with it underneath. Both blank when the bike
+    // is healthy, which is nearly always.
+    Label       fault_;
+    Label       fault_what_;
     Label       lap_;
+    Label       track_;
+    DeltaBar    delta_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[13] = {};
+    Widget*     list_[18] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

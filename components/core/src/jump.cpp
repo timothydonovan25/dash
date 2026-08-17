@@ -30,6 +30,10 @@ Update Detector::update(float mag_g, uint32_t t_ms, const Config& c) {
         if (t_ms - impact_start_ >= c.impact_window_ms) {
             impacting_ = false;
             last_landing_g_ = peak_g_;
+            // The landing is timed from when the peak is known, not from
+            // touchdown: this is the instant the figures become reportable,
+            // and it is what a screen counts its hold from.
+            landed_at_ms_ = t_ms;
             out.event = Event::Landed;
             out.airtime_ms = landed_airtime_ms_;
             out.landing_g = peak_g_;
@@ -88,6 +92,7 @@ void Detector::publish_into(state::Attitude& a) const {
     a.airborne = airborne_;
     a.airtime_ms = airtime_ms_;
     a.last_land_g = last_landing_g_;
+    a.land_ms = landed_at_ms_;
 }
 
 }  // namespace core::jump

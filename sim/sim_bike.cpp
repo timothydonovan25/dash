@@ -63,9 +63,27 @@ void Bike::reset() {
     lean_deg_ = 0.0f;
 }
 
+void Bike::trigger_jump(uint32_t now_ms, uint32_t airtime_ms) {
+    air_until_ms_ = now_ms + airtime_ms;
+    // The landing: a couple of hundred milliseconds above the detector's
+    // threshold, which is long enough for it to find the peak inside its
+    // impact window rather than sampling the trigger.
+    spike_until_ms_ = air_until_ms_ + 200;
+}
+
 void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
                 uint32_t dt_ms) {
     const float dt = static_cast<float>(dt_ms) / 1000.0f;
+
+    // Longitudinal g, from how fast the speed slider is being moved. Low
+    // passed hard: dragging a slider is a step change, and an unfiltered
+    // step reads as 40 g and pins the ball against the rim.
+    const float dv_ftps = (c.speed_mph - prev_speed_mph_) * kFtPerSPerMph;
+    prev_speed_mph_ = c.speed_mph;
+    const float raw_g = dt > 0.0f ? (dv_ftps / dt) / kG_ftps2 : 0.0f;
+    accel_g_ += 0.15f * (raw_g - accel_g_);
+    if (accel_g_ < -1.2f) accel_g_ = -1.2f;
+    if (accel_g_ >  1.2f) accel_g_ =  1.2f;
 
     float yaw_rate_dps = 0.0f;
 
@@ -124,7 +142,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     m.front_mph = c.speed_mph;
     m.rear_mph = c.speed_mph;
     m.best_mph = c.speed_mph;
-    m.accel_g = 0.0f;
+    m.accel_g = accel_g_;
     slots.motion.publish(m);
 
     // Published directly rather than run through core/attitude: the filter
@@ -138,7 +156,23 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     const float lean_rad = lean_deg_ * static_cast<float>(kPi) / 180.0f;
     a.g_lat = std::sin(lean_rad);
     a.g_vert = std::cos(lean_rad);
-    a.g_lon = 0.0f;
+    a.g_lon = accel_g_;
+
+    // What the accelerometer reads, fed to the firmware's own detector
+    // rather than to a flag that says "jumping". In free fall the magnitude
+    // is zero -- not one, not "down" -- which is the whole basis of core/jump,
+    // so the simulator has to reproduce that and not shortcut it.
+    float mag_g;
+    if (now_ms < air_until_ms_) {
+        mag_g = 0.0f;
+    } else if (now_ms < spike_until_ms_) {
+        mag_g = 4.2f;
+    } else {
+        mag_g = std::sqrt(a.g_lat * a.g_lat + a.g_vert * a.g_vert +
+                          a.g_lon * a.g_lon);
+    }
+    jump_.update(mag_g, now_ms, core::jump::Config{});
+    jump_.publish_into(a);
     slots.attitude.publish(a);
 
     // A receiver, not a checkbox. Four satellites is the arithmetic minimum

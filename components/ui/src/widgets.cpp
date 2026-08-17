@@ -235,14 +235,19 @@ void DeltaBar::set(int32_t delta_ms, bool valid) {
 void DeltaBar::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
     const int16_t mid = bounds.cx();
-    c.draw_vline(mid, bounds.y, bounds.h, color::kGrid);
 
     char buf[16];
     core::units::fmt_delta(buf, sizeof buf, delta_ms_, valid_);
     if (!valid_) {
+        // No centre rule when there is nothing on the scale. An empty axis
+        // with a tick in it reads as an artifact rather than as a reading
+        // of zero, and on the speed screen there is no caption beside it to
+        // say otherwise.
         c.draw_text(mid, bounds.y, buf, color::kDim, 2, Align::Center);
         return;
     }
+
+    c.draw_vline(mid, bounds.y, bounds.h, color::kGrid);
 
     // Full scale is two seconds either way. Past that the bar pins and the
     // number carries the rest — a rider four seconds down does not need a
@@ -571,6 +576,103 @@ void LeanGauge::render(Canvas& c) {
                            lean_deg_ < 0 ? -lean_deg_ : lean_deg_, 0, valid_);
     c.draw_text(cx, static_cast<int16_t>(cy + 6), buf,
                 valid_ ? color::kText : color::kDim, 3, Align::Center);
+}
+
+// --- GBall --------------------------------------------------------------
+
+void GBall::set(float g_lat, float g_lon, bool valid) {
+    // Quantised to 0.02 g, which is under a pixel of dot travel at this
+    // radius. Without it the tile is dirty on every single frame the bike is
+    // moving, and this is the largest widget on the screen — at 3 bytes a
+    // pixel that is 60 kB down the SPI bus for a dot that has not visibly
+    // gone anywhere.
+    const float qx = std::round(g_lat * 50.0f) / 50.0f;
+    const float qy = std::round(g_lon * 50.0f) / 50.0f;
+    const bool a = assign(g_lat_, qx);
+    const bool b = assign(g_lon_, qy);
+    const bool d = assign_t(valid_, valid);
+    if (a || b || d) touch();
+}
+
+void GBall::set_jump(uint32_t airtime_ms, float landing_g, bool show) {
+    const bool a = assign_t(airtime_ms_, airtime_ms);
+    const bool b = assign(landing_g_, landing_g);
+    const bool d = assign_t(jump_, show);
+    if (a || b || d) touch();
+}
+
+void GBall::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+
+    const int16_t cx = bounds.cx();
+
+    if (jump_) {
+        // The jump face. Big enough to read from the air, which is the only
+        // time it is ever up.
+        c.draw_text(cx, static_cast<int16_t>(bounds.y + 10), "AIRTIME",
+                    color::kDim, 1, Align::Center);
+
+        char num[12];
+        core::units::fmt_float(num, sizeof num,
+                               static_cast<float>(airtime_ms_) / 1000.0f, 2);
+        const int16_t nw = c.text_width(num, 5);
+        const int16_t uw = c.text_width("s", 2);
+        const int16_t x0 = static_cast<int16_t>(cx - (nw + 4 + uw) / 2);
+        const int16_t ty = static_cast<int16_t>(bounds.y + 34);
+        c.draw_text(x0, ty, num, color::kWhite, 5, Align::Left);
+        c.draw_text(static_cast<int16_t>(x0 + nw + 4),
+                    static_cast<int16_t>(ty + c.text_height(5) - c.text_height(2)),
+                    "s", color::kDim, 2, Align::Left);
+
+        char land[24];
+        size_t k = core::units::fmt_float(land, sizeof land, landing_g_, 1);
+        if (k + 3 < sizeof land) {
+            land[k++] = ' '; land[k++] = 'g'; land[k] = '\0';
+        }
+        c.draw_text(cx, static_cast<int16_t>(bounds.y + 92), land,
+                    landing_g_ >= 4.0f ? color::kWarn : color::kText, 3,
+                    Align::Center);
+        c.draw_text(cx, static_cast<int16_t>(bounds.y + 124), "LANDING",
+                    color::kDim, 1, Align::Center);
+        return;
+    }
+
+    const int16_t r  = static_cast<int16_t>(bounds.w / 2 - 14);
+    const int16_t cy = static_cast<int16_t>(bounds.y + r + 5);
+
+    // Two rings, at 1 g and at full scale, and a crosshair. The rider is not
+    // reading a value off this — it is a shape, and the shape is the point.
+    c.draw_circle(cx, cy, r, color::kGrid);
+    c.draw_circle(cx, cy, static_cast<int16_t>(r / kFullScaleG), color::kGrid);
+    c.draw_hline(static_cast<int16_t>(cx - r), cy,
+                 static_cast<int16_t>(2 * r + 1), color::kGrid);
+    c.draw_vline(cx, static_cast<int16_t>(cy - r),
+                 static_cast<int16_t>(2 * r + 1), color::kGrid);
+
+    float mag = std::sqrt(g_lat_ * g_lat_ + g_lon_ * g_lon_);
+
+    if (valid_) {
+        // Clamped to the rim rather than allowed off the tile: a dot that
+        // leaves the circle would be drawn over the speed readout.
+        float fx = g_lat_ / kFullScaleG;
+        float fy = g_lon_ / kFullScaleG;
+        const float f = std::sqrt(fx * fx + fy * fy);
+        if (f > 1.0f) { fx /= f; fy /= f; }
+
+        // Braking pushes the dot down, which is where the weight goes.
+        const int16_t dx = static_cast<int16_t>(fx * r);
+        const int16_t dy = static_cast<int16_t>(-fy * r);
+        c.fill_circle(static_cast<int16_t>(cx + dx),
+                      static_cast<int16_t>(cy + dy), 5, color::kAccent);
+    }
+
+    char buf[16];
+    size_t k = core::units::fmt_value(buf, sizeof buf, mag, 2, valid_);
+    if (k + 3 < sizeof buf) {
+        buf[k++] = ' '; buf[k++] = 'g'; buf[k] = '\0';
+    }
+    c.draw_text(cx, static_cast<int16_t>(cy + r + 8), buf,
+                valid_ ? color::kText : color::kDim, 2, Align::Center);
 }
 
 // --- AlertOverlay -------------------------------------------------------

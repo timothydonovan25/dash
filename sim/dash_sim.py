@@ -65,6 +65,9 @@ COMMANDS = [
     ("laparm",    "Arm"),
     ("lapclear",  "Clear laps"),
     ("tripreset", "Reset trip A"),
+    # Drops the accelerometer to zero and then spikes it, so the firmware's
+    # own jump detector decides there was a jump. Nothing tells the dash.
+    ("jump",      "Jump"),
 ]
 
 

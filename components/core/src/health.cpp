@@ -10,6 +10,32 @@ namespace {
 inline uint8_t ix(Dev d) { return static_cast<uint8_t>(d); }
 }  // namespace
 
+namespace {
+// Fault outranks Degraded; everything else is not a problem.
+inline uint8_t rank(DevState s) {
+    if (s == DevState::Fault) return 2;
+    if (s == DevState::Degraded) return 1;
+    return 0;
+}
+}  // namespace
+
+Worst worst(const state::Health& h) {
+    Worst w;
+    uint8_t best = 0;
+    for (uint8_t i = 0; i < state::kDevCount; ++i) {
+        const Dev d = static_cast<Dev>(i);
+        const uint8_t r = rank(h[d].state);
+        if (r == 0) continue;
+        ++w.count;
+        if (r > best) {          // strictly greater, so ties keep the first
+            best = r;
+            w.dev = d;
+            w.state = h[d].state;
+        }
+    }
+    return w;
+}
+
 void Tracker::begin_init(Dev d, uint32_t t_ms) {
     DevHealth& e = h_[d];
     e.state = DevState::Init;

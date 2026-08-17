@@ -59,6 +59,7 @@ private:
     uint32_t fall_start_  = 0;
     uint32_t impact_start_= 0;
     uint32_t landed_airtime_ms_ = 0;
+    uint32_t landed_at_ms_ = 0;      // survives reset(), like the peak g does
     uint32_t airtime_ms_  = 0;
     uint32_t best_ms_     = 0;
     float    peak_g_      = 0.0f;
