@@ -356,28 +356,64 @@ int main() {
         CHECK(s.ink() == silent);
     }
 
-    CASE("a long title is truncated to the block, not painted past it");
+    CASE("a name too long to fit scrolls, and stays inside its own row");
     {
         Screen320x480 s;
-        MediaBlock m;
-        const Rect box{40, 60, 150, 66};
+        MediaRow m;
+        const Rect box{40, 60, 150, MediaRow::kRowH};
         m.set_bounds(box);
-        m.set("A Song Title Far Longer Than The Space Available",
-              "An Album Name That Does Not Fit Either", "Some Artist", true);
+        m.configure(MediaRow::Kind::Song, color::kText);
+
+        const char* kLong = "A Song Title Far Longer Than The Space Available";
+
+        auto ink_outside = [&]() {
+            size_t outside = 0;
+            for (int16_t y = 0; y < kScreenH; ++y) {
+                for (int16_t x = 0; x < kScreenW; ++x) {
+                    if (s.canvas.pixel(x, y) == 0) continue;
+                    if (!box.contains(x, y)) ++outside;
+                }
+            }
+            return outside;
+        };
+
+        // The marquee deliberately draws the string starting off the left of
+        // its window and running off the right. Without a clip that lands on
+        // the g-ball next door, and on a partial update nothing would ever
+        // clean it up — so this is the property that matters, checked all the
+        // way round one cycle rather than at one convenient offset.
+        for (uint32_t t = 0; t < 20000; t += 250) {
+            m.set(kLong, true, t);
+            for (Color& c : s.px) c = 0;
+            m.render(s.canvas);
+            CHECK(ink_outside() == 0);
+        }
+
+        // It really does move: two instants a second apart must differ.
+        m.set(kLong, true, 0);
         for (Color& c : s.px) c = 0;
         m.render(s.canvas);
+        std::vector<Color> at_zero = s.px;
 
-        // Nothing outside the widget's own rectangle. A block that paints
-        // past its bounds would land on the speed readout, and on a partial
-        // update the overspill would never be cleaned up.
-        size_t outside = 0;
-        for (int16_t y = 0; y < kScreenH; ++y) {
-            for (int16_t x = 0; x < kScreenW; ++x) {
-                if (s.canvas.pixel(x, y) == 0) continue;
-                if (!box.contains(x, y)) ++outside;
-            }
-        }
-        CHECK(outside == 0);
+        m.set(kLong, true, 1000);
+        for (Color& c : s.px) c = 0;
+        m.render(s.canvas);
+        CHECK(s.px != at_zero);
+
+        // A name that fits does not scroll, however long the bike has been
+        // running — a static artist name repainting twelve times a second
+        // would be the whole point of the row widget thrown away.
+        m.set("Gojira", true, 0);
+        for (Color& c : s.px) c = 0;
+        m.render(s.canvas);
+        const std::vector<Color> fitted = s.px;
+
+        m.clear_dirty();
+        m.set("Gojira", true, 7000);
+        CHECK(!m.dirty);
+        for (Color& c : s.px) c = 0;
+        m.render(s.canvas);
+        CHECK(s.px == fitted);
     }
 
     CASE("widgets only repaint when their value changes");

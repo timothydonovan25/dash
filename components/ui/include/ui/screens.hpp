@@ -49,10 +49,12 @@ private:
     Label       fault_;
     Label       fault_what_;
     Label       lap_;
-    MediaBlock  media_;
+    MediaRow    song_;
+    MediaRow    album_;
+    MediaRow    artist_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[17] = {};
+    Widget*     list_[19] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

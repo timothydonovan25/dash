@@ -112,13 +112,17 @@ const Font kFont5x7{kGlyphs5x7, 5, 7, 0x20, 0x7E, 6};
 
 const Font& font_5x7() { return kFont5x7; }
 
-int16_t Canvas::text_width(const char* text, uint8_t scale) const {
+int16_t text_width_px(const char* text, uint8_t scale) {
     if (!text || !*text) return 0;
     const Font& f = font_5x7();
     int16_t n = 0;
     for (const char* c = text; *c; ++c) ++n;
     // The last character does not need its trailing gap.
     return static_cast<int16_t>((n * f.advance - (f.advance - f.width)) * scale);
+}
+
+int16_t Canvas::text_width(const char* text, uint8_t scale) const {
+    return text_width_px(text, scale);
 }
 
 int16_t Canvas::text_height(uint8_t scale) const {

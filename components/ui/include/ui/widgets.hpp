@@ -270,32 +270,49 @@ private:
     bool     jump_ = false;
 };
 
-// What is playing: song, album and artist, each behind its icon.
+// One line of what is playing: an icon and a name that scrolls if it is too
+// long for the space.
 //
-// One widget rather than three labels and three background icons, because
-// the icons must disappear along with the text. Chrome painted by a screen
-// is only refreshed on a full repaint, so three icons drawn as background
-// would still be sitting there next to nothing when the music stopped.
-//
-// The text is truncated to the width available. A marquee would fit more,
-// but it would repaint this block on every frame forever, and a scrolling
-// album title is not worth a permanent share of the SPI budget.
-class MediaBlock : public Widget {
+// A row rather than a block of three, because a widget is the unit of
+// redraw and only the rows that overflow need repainting — a scrolling album
+// title should not be dragging a static artist name down the SPI bus with
+// it. The icon lives in the row rather than in the screen's background,
+// because chrome is only redrawn on a full repaint: an icon painted there
+// would still be sitting next to nothing after the music stopped.
+class MediaRow : public Widget {
 public:
+    enum class Kind : uint8_t { Song = 0, Album, Artist };
+
+    void configure(Kind k, Color text_color);
+
     // `valid` is false when nothing has ever arrived, or when the phone has
     // gone away — a dash still showing what was playing forty minutes ago is
     // worse than one showing nothing.
-    void set(const char* title, const char* album, const char* artist,
-             bool valid);
+    //
+    // `now_ms` drives the scroll. A widget has no clock, and the Frame has
+    // the time in it already, so the screen passes it down.
+    void set(const char* text, bool valid, uint32_t now_ms);
+
     void render(Canvas& c) override;
 
-    static constexpr int16_t kRowH = 22;
+    static constexpr int16_t kRowH  = 20;
+    static constexpr uint8_t kScale = 2;
+    static constexpr int16_t kTextX = 21;   // clear of the widest icon
 
 private:
-    TextBuf<40> title_;
-    TextBuf<40> album_;
-    TextBuf<40> artist_;
-    bool        valid_ = false;
+    // Where the text restarts behind itself, so the loop reads as a belt
+    // rather than as a jump.
+    static constexpr int16_t  kGapPx      = 36;
+    static constexpr uint32_t kSpeedPxPerS = 24;   // two characters a second
+    // Movement is quantised to this. At 2 px the scroll still looks smooth
+    // and the row repaints twelve times a second instead of thirty.
+    static constexpr int16_t  kStepPx     = 2;
+
+    TextBuf<60> text_;
+    Kind        kind_    = Kind::Song;
+    Color       color_   = color::kText;
+    bool        valid_   = false;
+    int16_t     offset_  = 0;      // 0 whenever the text fits
 };
 
 // The one widget allowed to draw over whatever screen is up. A tyre losing

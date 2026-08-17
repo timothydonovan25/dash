@@ -34,7 +34,7 @@ template struct TextBuf<16>;
 template struct TextBuf<20>;
 template struct TextBuf<24>;
 template struct TextBuf<28>;
-template struct TextBuf<40>;
+template struct TextBuf<60>;
 
 // --- Label --------------------------------------------------------------
 
@@ -677,72 +677,76 @@ void GBall::render(Canvas& c) {
                 valid_ ? color::kText : color::kDim, 2, Align::Center);
 }
 
-// --- MediaBlock ---------------------------------------------------------
+// --- MediaRow -----------------------------------------------------------
 
 namespace {
 
-// Copies as much of `s` as fits in `avail` pixels, ending in ".." when it had
-// to stop early. Measured with the canvas rather than assumed from a
-// character count, so it stays right if the font ever changes.
-void fit_text(Canvas& c, char* out, size_t n, const char* s, uint8_t scale,
-              int16_t avail) {
-    out[0] = '\0';
-    if (!s || !*s || n == 0) return;
-
-    size_t k = 0;
-    while (s[k] != '\0' && k + 1 < n) {
-        out[k] = s[k];
-        out[k + 1] = '\0';
-        if (c.text_width(out, scale) > avail) {
-            // One too many. Back off far enough to sign the truncation.
-            out[k] = '\0';
-            while (k > 0) {
-                out[k] = '\0';
-                char probe[8] = {'.', '.', '\0'};
-                if (c.text_width(out, scale) + c.text_width(probe, scale) <= avail) {
-                    out[k] = '.';
-                    if (k + 2 < n) { out[k + 1] = '.'; out[k + 2] = '\0'; }
-                    return;
-                }
-                --k;
-            }
-            return;
-        }
-        ++k;
+const icon::Bitmap& icon_for(MediaRow::Kind k) {
+    switch (k) {
+        case MediaRow::Kind::Album:  return icon::kAlbum;
+        case MediaRow::Kind::Artist: return icon::kArtist;
+        case MediaRow::Kind::Song:   break;
     }
-}
-
-void media_row(Canvas& c, const Rect& bounds, int row, const icon::Bitmap& ic,
-               const char* text, Color text_col) {
-    if (!text || !*text) return;
-    const int16_t y = static_cast<int16_t>(bounds.y + row * MediaBlock::kRowH);
-    c.draw_bitmap(bounds.x, y, ic.bits, ic.w, ic.h, color::kDim);
-
-    const int16_t tx = static_cast<int16_t>(bounds.x + 21);
-    char buf[48];
-    fit_text(c, buf, sizeof buf, text, 2,
-             static_cast<int16_t>(bounds.right() - tx));
-    // Centred against the 16 px icon rather than sharing its top edge.
-    c.draw_text(tx, static_cast<int16_t>(y + 1), buf, text_col, 2, Align::Left);
+    return icon::kSong;
 }
 
 }  // namespace
 
-void MediaBlock::set(const char* title, const char* album, const char* artist,
-                     bool valid) {
-    const bool a = title_.set(title ? title : "");
-    const bool b = album_.set(album ? album : "");
-    const bool d = artist_.set(artist ? artist : "");
-    const bool e = assign_t(valid_, valid);
-    if (a || b || d || e) touch();
+void MediaRow::configure(Kind k, Color text_color) {
+    const bool a = assign_t(kind_, k);
+    const bool b = assign_t(color_, text_color);
+    if (a || b) touch();
 }
 
-void MediaBlock::render(Canvas& c) {
+void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
+    bool changed = text_.set(text ? text : "");
+    changed = assign_t(valid_, valid) || changed;
+
+    const int16_t avail = static_cast<int16_t>(bounds.w - kTextX);
+    const int16_t w = text_width_px(text_.s, kScale);
+
+    int16_t off = 0;
+    if (valid_ && w > avail && avail > 0) {
+        const uint32_t cycle = static_cast<uint32_t>(w) + kGapPx;
+        // Split so the multiply cannot overflow a 32-bit millisecond counter
+        // that has been running for a month.
+        uint32_t travelled = (now_ms / 1000u) * kSpeedPxPerS +
+                             ((now_ms % 1000u) * kSpeedPxPerS) / 1000u;
+        travelled %= cycle;
+        off = static_cast<int16_t>((travelled / kStepPx) * kStepPx);
+    }
+    changed = assign_t(offset_, off) || changed;
+
+    if (changed) touch();
+}
+
+void MediaRow::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
-    if (!valid_) return;
-    media_row(c, bounds, 0, icon::kSong,   title_.s,  color::kText);
-    media_row(c, bounds, 1, icon::kAlbum,  album_.s,  color::kDim);
-    media_row(c, bounds, 2, icon::kArtist, artist_.s, color::kDim);
+    if (!valid_ || text_.empty()) return;
+
+    const icon::Bitmap& ic = icon_for(kind_);
+    c.draw_bitmap(bounds.x, bounds.y, ic.bits, ic.w, ic.h, color::kDim);
+
+    const int16_t tx = static_cast<int16_t>(bounds.x + kTextX);
+    const int16_t ty = static_cast<int16_t>(bounds.y + 1);
+    const int16_t avail = static_cast<int16_t>(bounds.w - kTextX);
+    const int16_t w = text_width_px(text_.s, kScale);
+
+    // Everything below draws deliberately wider than the window it is in.
+    const ClipGuard clip(c, Rect{tx, bounds.y, avail, bounds.h});
+
+    if (w <= avail) {
+        c.draw_text(tx, ty, text_.s, color_, kScale, Align::Left);
+        return;
+    }
+
+    // Twice, a cycle apart, so the tail of one pass is followed by the head
+    // of the next and the belt never shows a hole.
+    const int16_t cycle = static_cast<int16_t>(w + kGapPx);
+    c.draw_text(static_cast<int16_t>(tx - offset_), ty, text_.s, color_,
+                kScale, Align::Left);
+    c.draw_text(static_cast<int16_t>(tx - offset_ + cycle), ty, text_.s,
+                color_, kScale, Align::Left);
 }
 
 // --- AlertOverlay -------------------------------------------------------

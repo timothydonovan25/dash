@@ -37,6 +37,9 @@ public:
     void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits, int16_t w,
                      int16_t h, Color c) override;
 
+    void set_clip(const Rect& r) override { clip_ = r; clipped_ = true; }
+    void clear_clip() override { clipped_ = false; }
+
     // The band this canvas represents within the full screen. The render
     // task sets it so a screen can draw in whole-screen coordinates while
     // only one band exists in memory (§7.6: a full frame is 460 kB).
@@ -72,6 +75,8 @@ private:
     size_t  capacity_;
     int16_t ox_ = 0;
     int16_t oy_ = 0;
+    Rect    clip_{};
+    bool    clipped_ = false;
 };
 
 }  // namespace ui

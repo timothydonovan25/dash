@@ -9,6 +9,7 @@ inline int16_t clamp16(int v, int lo, int hi) {
 }  // namespace
 
 void FrameBufferCanvas::put(int16_t x, int16_t y, Color c) {
+    if (clipped_ && !clip_.contains(x, y)) return;
     const int16_t px = static_cast<int16_t>(x - ox_);
     const int16_t py = static_cast<int16_t>(y - oy_);
     // Everything clips here, once. A widget that draws two pixels outside
@@ -32,10 +33,21 @@ void FrameBufferCanvas::fill(Color c) {
 
 void FrameBufferCanvas::fill_rect(const Rect& r, Color c) {
     if (r.empty()) return;
-    const int16_t x0 = clamp16(r.x - ox_, 0, w_);
-    const int16_t y0 = clamp16(r.y - oy_, 0, h_);
-    const int16_t x1 = clamp16(r.right() - ox_, 0, w_);
-    const int16_t y1 = clamp16(r.bottom() - oy_, 0, h_);
+    // The clip is applied here as well as in put(), because draw_text at any
+    // scale above 1 draws its pixels as rectangles and would otherwise walk
+    // straight through it.
+    int16_t rx = r.x, ry = r.y, rr = r.right(), rb = r.bottom();
+    if (clipped_) {
+        if (rx < clip_.x) rx = clip_.x;
+        if (ry < clip_.y) ry = clip_.y;
+        if (rr > clip_.right()) rr = clip_.right();
+        if (rb > clip_.bottom()) rb = clip_.bottom();
+        if (rx >= rr || ry >= rb) return;
+    }
+    const int16_t x0 = clamp16(rx - ox_, 0, w_);
+    const int16_t y0 = clamp16(ry - oy_, 0, h_);
+    const int16_t x1 = clamp16(rr - ox_, 0, w_);
+    const int16_t y1 = clamp16(rb - oy_, 0, h_);
     for (int16_t y = y0; y < y1; ++y)
         for (int16_t x = x0; x < x1; ++x) px_[y * stride_ + x] = c;
 }

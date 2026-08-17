@@ -46,12 +46,18 @@ constexpr Rect kSats      { 28, 266, 120,  10};
 constexpr Rect kHdop      { 28, 286, 120,  10};
 constexpr Rect kClock     {297, 140, 175,  16};
 constexpr Rect kLapVal    {297, 176, 175,  16};
-// Song, album, artist, three rows of MediaBlock::kRowH from here down.
-constexpr Rect kMedia     {297, 238, 179,  66};
-// Under the g-ball rather than beside the media block, which now owns the
-// bottom right corner.
-constexpr Rect kOdo       {150, 254, 142,  10};
-constexpr Rect kTrip      {150, 272, 142,  10};
+// Song, album and artist, starting below the g-ball and running to the right
+// edge. Wider than the reference put it, because real track names are longer
+// than the ones a layout gets mocked up with: at 297 this fitted thirteen
+// characters, which truncated most of what actually plays.
+constexpr Rect kSong      {176, 244, 300, MediaRow::kRowH};
+constexpr Rect kAlbum     {176, 264, 300, MediaRow::kRowH};
+constexpr Rect kArtist    {176, 284, 300, MediaRow::kRowH};
+
+// The odometer and trip meter are the least urgent things here, so they get
+// the strip along the bottom that nothing else wants.
+constexpr Rect kOdo       { 28, 306, 210,  10};
+constexpr Rect kTrip      {262, 306, 210,  10};
 
 // How long the tile shows a jump before going back to being a g-ball. Long
 // enough to read after you have stopped concentrating on landing.
@@ -105,16 +111,23 @@ void SpeedScreen::enter(Canvas&) {
     fault_what_.set_bounds(kFaultWhat);
     fault_what_.configure("", theme::secondary, 1, Align::Left);
     lap_.set_bounds(kLapVal); lap_.configure("", color::kDim, 2, Align::Right);
-    media_.set_bounds(kMedia);
+    song_.set_bounds(kSong);
+    song_.configure(MediaRow::Kind::Song, color::kText);
+    album_.set_bounds(kAlbum);
+    album_.configure(MediaRow::Kind::Album, color::kDim);
+    artist_.set_bounds(kArtist);
+    artist_.configure(MediaRow::Kind::Artist, color::kDim);
+
     odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
-    trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Left);
+    trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
 
     list_[0]  = &bar_up_;   list_[1]  = &bar_across_; list_[2]  = &speed_;
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
     list_[9]  = &hdop_;     list_[10] = &lap_;        list_[11] = &odo_;
     list_[12] = &trip_;     list_[13] = &ball_;       list_[14] = &fault_;
-    list_[15] = &fault_what_; list_[16] = &media_;
+    list_[15] = &fault_what_; list_[16] = &song_;     list_[17] = &album_;
+    list_[18] = &artist_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -191,8 +204,10 @@ void SpeedScreen::update(const Frame& f) {
     // What is playing. `updated_ms` of zero is the same gate the diag screen
     // uses: nothing has ever arrived, so there is no media rather than a
     // song with no name. The whole block including its icons disappears.
-    media_.set(f.media.title, f.media.album, f.media.artist,
-               f.media.updated_ms != 0);
+    const bool playing = f.media.updated_ms != 0;
+    song_.set(f.media.title, playing, f.t_ms);
+    album_.set(f.media.album, playing, f.t_ms);
+    artist_.set(f.media.artist, playing, f.t_ms);
 
     size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
                             f.gnss.fix);
@@ -253,7 +268,7 @@ void SpeedScreen::draw_background(Canvas& c) {
     (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 17}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 19}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //

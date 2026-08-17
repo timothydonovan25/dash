@@ -23,6 +23,12 @@ struct Font {
 
 const Font& font_5x7();
 
+// How wide a string renders, without needing a Canvas to ask. There is one
+// font on this dash, so this is a property of the string and the scale and
+// nothing else — which lets a widget decide whether its text fits before it
+// has been handed anything to draw on.
+int16_t text_width_px(const char* text, uint8_t scale);
+
 class Canvas {
 public:
     virtual ~Canvas() = default;
@@ -70,6 +76,16 @@ public:
     virtual void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
                              int16_t w, int16_t h, Color c) = 0;
 
+    // Confine drawing to a rectangle, in whole-screen coordinates. What this
+    // is for is text that is deliberately larger than the space it is in —
+    // a marquee draws its string starting off the left edge of the window,
+    // and without a clip that string lands on whatever is next door.
+    //
+    // Does not nest: one region at a time. Use ClipGuard rather than pairing
+    // the calls by hand.
+    virtual void set_clip(const Rect& r) = 0;
+    virtual void clear_clip() = 0;
+
     int16_t text_width(const char* text, uint8_t scale = 1) const;
     int16_t text_height(uint8_t scale = 1) const;
 
@@ -80,6 +96,21 @@ public:
     void draw_vline(int16_t x, int16_t y, int16_t h, Color c) {
         fill_rect(Rect{x, y, 1, h}, c);
     }
+};
+
+// Sets a clip for the length of a scope. An early return out of a render
+// that had set a clip by hand would leave every later widget clipped to a
+// rectangle it has never heard of, and that is a bug that looks like the
+// panel is broken.
+class ClipGuard {
+public:
+    ClipGuard(Canvas& c, const Rect& r) : c_(c) { c_.set_clip(r); }
+    ~ClipGuard() { c_.clear_clip(); }
+    ClipGuard(const ClipGuard&) = delete;
+    ClipGuard& operator=(const ClipGuard&) = delete;
+
+private:
+    Canvas& c_;
 };
 
 }  // namespace ui
