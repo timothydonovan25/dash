@@ -37,8 +37,8 @@ private:
     ShiftStrip  shift_;
     Label       gear_;
     Label       clock_;
-    TachSegment bar_up_;
-    TachSegment bar_across_;
+    TachBar     bar_stem_;
+    TachBar     bar_flare_;
     LeanGauge   lean_;
     GBall       ball_;
     Label       sats_;

@@ -322,6 +322,64 @@ int main() {
         CHECK(s.ink() == healthy);
     }
 
+    CASE("the tach marker travels continuously and widens into the flare");
+    {
+        // The outline first: no step anywhere, and the two strips agree
+        // about the width at the row where they meet.
+        for (int16_t y = 0; y + 1 < kScreenH; ++y) {
+            const int d = TachBar::width_at(y) - TachBar::width_at(y + 1);
+            CHECK(d >= 0 && d <= 5);        // at most the flare's own gradient
+        }
+        CHECK(TachBar::width_at(TachBar::kFlareH) == TachBar::kStemW);
+        CHECK(TachBar::width_at(0) == TachBar::kFlareW);
+
+        Screen320x480 s;
+        TachBar stem, flare;
+        stem.set_bounds(Rect{0, TachBar::kFlareH, TachBar::kStemW,
+                             static_cast<int16_t>(kScreenH - TachBar::kFlareH)});
+        stem.configure(TachBar::kFlareH, kScreenH);
+        flare.set_bounds(Rect{0, 0, TachBar::kFlareW, TachBar::kFlareH});
+        flare.configure(0, TachBar::kFlareH);
+
+        int prev_top = -1;
+        for (int i = 0; i <= 400; ++i) {
+            const float frac = static_cast<float>(i) / 400.0f;
+            stem.set(frac);
+            flare.set(frac);
+            for (Color& c : s.px) c = 0;
+            stem.render(s.canvas);
+            flare.render(s.canvas);
+
+            int top = -1, bottom = -1, count = 0;
+            for (int16_t y = 0; y < kScreenH; ++y) {
+                if (s.canvas.pixel(0, y) == color::kTach) {
+                    if (top < 0) top = y;
+                    bottom = y;
+                    ++count;
+                }
+            }
+            CHECK(top >= 0);                       // always somewhere
+            CHECK(bottom - top + 1 == count);      // one run, no gap at the join
+
+            if (prev_top >= 0) {
+                CHECK(top <= prev_top);            // only ever upward
+                CHECK(prev_top - top <= 4);        // and never in a jump
+            }
+            prev_top = top;
+
+            // As wide as the outline at every row it covers, and no wider.
+            // This is what "gets wider in the flare" has to mean if the
+            // marker and the track are to stay the same shape.
+            for (int16_t y = static_cast<int16_t>(top);
+                 y <= static_cast<int16_t>(bottom); ++y) {
+                const int16_t w = TachBar::width_at(y);
+                CHECK(s.canvas.pixel(static_cast<int16_t>(w - 1), y) == color::kTach);
+                CHECK(s.canvas.pixel(w, y) != color::kTach);
+            }
+        }
+        CHECK(prev_top == 0);                      // full scale reaches the top
+    }
+
     CASE("the media block and its icons come and go together");
     {
         Fixture fx;

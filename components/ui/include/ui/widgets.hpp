@@ -199,28 +199,49 @@ private:
     bool  valid_ = false;
 };
 
-// One leg of the tach bar: the L that runs up the left edge of the speed
-// screen and along the top.
+// The tach bar: an outline up the left edge of the speed screen that flares
+// out along the top, with a horizontal marker riding up it as the revs rise.
 //
-// It is a widget rather than something the screen paints because it changes
-// with rpm, and only widgets are tracked for redraw — chrome painted by a
-// screen is refreshed on a full repaint and never in between, which on a
-// partial-update display means it would simply stop moving.
-class TachSegment : public Widget {
+// The marker only ever moves in y. Where the outline flares it simply gets
+// longer — there is no corner to turn, so there is no join to make smooth.
+// The previous version ran a fill up one leg and then along another at right
+// angles to it, and you could see exactly where it changed its mind.
+//
+// It is a widget rather than something the screen paints because it moves,
+// and only widgets are tracked for redraw — chrome painted by a screen is
+// refreshed on a full repaint and never in between, which on a partial
+// update display means it would simply stop.
+class TachBar : public Widget {
 public:
-    enum class Fill : uint8_t { Up = 0, Right };
+    // The rows this instance is responsible for. Two of them cover the bar,
+    // the straight run and the flare, so a marker moving within one does not
+    // repaint the other.
+    void configure(int16_t y_top, int16_t y_bottom);
 
-    // `from` and `to` are this leg's share of the whole bar's travel, so the
-    // two legs together cover 0..1 and the fill crosses the corner smoothly.
-    void configure(Fill dir, float from, float to, bool cut_diagonal);
-    void set(float fraction);      // 0..1 of the whole bar
+    void set(float fraction);      // 0..1 of the rev range
     void render(Canvas& c) override;
 
+    // How wide the bar is at a given row. One function for the track and the
+    // marker both, so the two can never disagree about where the edge is,
+    // and continuous at the join by construction: at y == kFlareH it is
+    // kStemW from either side.
+    static int16_t width_at(int16_t y);
+
+    static constexpr int16_t kStemW   = 25;    // the straight run, all the way down
+    static constexpr int16_t kFlareH  = 25;    // how far down the flare reaches
+    static constexpr int16_t kFlareW  = 135;   // width at the very top
+    static constexpr int16_t kMarkerH = 6;
+
 private:
-    Fill  dir_ = Fill::Up;
-    float from_ = 0.0f, to_ = 1.0f;
-    bool  cut_ = false;
-    float fraction_ = 0.0f;
+    // A pixel of movement is not worth a repaint of the whole strip.
+    static constexpr int16_t kStepPx = 2;
+
+    bool covers(int16_t marker_y) const;
+
+    int16_t y_top_    = 0;
+    int16_t y_bottom_ = 0;
+    // Off the bar entirely, so the first set() always counts as a move.
+    int16_t marker_y_ = -1000;
 };
 
 // The lean gauge on the speed screen: a half annulus with a marker on it and

@@ -17,19 +17,21 @@ namespace u = core::units;
 // biggest tiles and the top half; everything else is reference material
 // around the edges.
 //
-// The tach bar is an L down the left edge and across the top, cut on a
-// diagonal. It fills over 0 to the first shift lamp's rpm, so it is full at
-// the moment lamp one lights: the shift lights say nothing below their own
-// threshold, and this covers exactly that gap and then hands over.
+// The tach bar runs up the left edge and flares out across the top, with a
+// marker that rides up it. Its range is 0 to the first shift lamp's rpm, so
+// the marker reaches the top at the moment lamp one lights: the shift lights
+// say nothing below their own threshold, and this covers exactly that gap
+// and then hands over.
 namespace {
 constexpr Color kFrame = color::kText;
 
-constexpr int16_t kBarTop    = 25;    // thickness of the top run
-constexpr int16_t kBarLeft   = 25;    // thickness of the left run
-constexpr int16_t kBarTopEnd = 135;   // length of the top run
-
-constexpr Rect kBarUp     {  0,  25,  25, 295};
-constexpr Rect kBarAcross {  0,   0, 135,  25};
+// The two strips the tach marker travels through: the straight run, and the
+// flare across the top. Both are drawn by the same TachBar::width_at, so the
+// split is only about how much has to be repainted when the marker moves —
+// it is not a seam in the shape.
+constexpr Rect kTachStem  {0, TachBar::kFlareH, TachBar::kStemW,
+                           kScreenH - TachBar::kFlareH};
+constexpr Rect kTachFlare {0, 0, TachBar::kFlareW, TachBar::kFlareH};
 
 constexpr Rect kRpmTile   { 31,  28, 169, 43};
 constexpr Rect kGearTile  {216,   2,  78, 84};
@@ -39,12 +41,18 @@ constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
 
 constexpr Rect kLean      { 30,  96, 112, 104};
-constexpr Rect kBall      {150,  92, 142, 150};
+// Shares a left edge with the media rows below it, which puts it a little
+// right of where it was and squares the middle column up.
+constexpr Rect kBall      {176,  92, 142, 150};
 constexpr Rect kFault     { 28, 222, 120,  16};
 constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
 constexpr Rect kHdop      { 28, 286, 120,  10};
-constexpr Rect kClock     {297, 140, 175,  16};
+// Right-aligned at the screen edge, and only as wide as it needs to be:
+// fmt_clock is always five characters, 58 px at scale 2. Widget bounds are
+// what gets cleared on a repaint, so a clock reserving the whole right half
+// of the row would erase the g-ball's edge every minute.
+constexpr Rect kClock     {372, 140, 100,  16};
 // Song, album and artist, starting below the g-ball and running to the right
 // edge. Wider than the reference put it, because real track names are longer
 // than the ones a layout gets mocked up with: at 297 this fitted thirteen
@@ -72,8 +80,6 @@ size_t append(char* buf, size_t n, size_t k, const char* s) {
     return k;
 }
 
-// The two legs share one travel: up the left edge, then along the top.
-constexpr float kUpShare = 295.0f / (295.0f + 135.0f);
 }  // namespace
 
 void SpeedScreen::enter(Canvas&) {
@@ -96,10 +102,10 @@ void SpeedScreen::enter(Canvas&) {
     clock_.set_bounds(kClock);
     clock_.configure("--:--", color::kText, 2, Align::Right);
 
-    bar_up_.set_bounds(kBarUp);
-    bar_up_.configure(TachSegment::Fill::Up, 0.0f, kUpShare, false);
-    bar_across_.set_bounds(kBarAcross);
-    bar_across_.configure(TachSegment::Fill::Right, kUpShare, 1.0f, true);
+    bar_stem_.set_bounds(kTachStem);
+    bar_stem_.configure(kTachStem.y, kTachStem.bottom());
+    bar_flare_.set_bounds(kTachFlare);
+    bar_flare_.configure(kTachFlare.y, kTachFlare.bottom());
 
     lean_.set_bounds(kLean);
     ball_.set_bounds(kBall);
@@ -119,7 +125,7 @@ void SpeedScreen::enter(Canvas&) {
     odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
     trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
 
-    list_[0]  = &bar_up_;   list_[1]  = &bar_across_; list_[2]  = &speed_;
+    list_[0]  = &bar_stem_; list_[1]  = &bar_flare_;  list_[2]  = &speed_;
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
     list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
@@ -161,8 +167,8 @@ void SpeedScreen::update(const Frame& f) {
     const uint16_t base = has_ctx() && ctx().settings
                               ? ctx().settings->shift_base_rpm : 6000;
     const float frac = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
-    bar_up_.set(frac);
-    bar_across_.set(frac);
+    bar_stem_.set(frac);
+    bar_flare_.set(frac);
 
     const bool imu_ok = f.health.ok(Dev::Imu);
     lean_.set(f.att.lean_deg, imu_ok);
@@ -254,7 +260,6 @@ void SpeedScreen::draw_background(Canvas& c) {
     c.draw_text(static_cast<int16_t>(kRpmTile.right() - 6),
                 static_cast<int16_t>(kRpmTile.bottom() + 4), "rpm",
                 color::kDim, 1, Align::Right);
-    (void)kBarTop; (void)kBarLeft; (void)kBarTopEnd;
 }
 
 WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }

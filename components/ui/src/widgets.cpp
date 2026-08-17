@@ -495,50 +495,54 @@ void MapView::render(Canvas& c) {
     }
 }
 
-// --- TachSegment --------------------------------------------------------
+// --- TachBar ------------------------------------------------------------
 
-void TachSegment::configure(Fill dir, float from, float to, bool cut_diagonal) {
-    const bool a = assign_t(dir_, dir);
-    const bool b = assign(from_, from);
-    const bool d = assign(to_, to);
-    const bool e = assign_t(cut_, cut_diagonal);
-    if (a || b || d || e) touch();
+int16_t TachBar::width_at(int16_t y) {
+    if (y >= kFlareH) return kStemW;
+    if (y <= 0) return kFlareW;
+    // Linear from kStemW at the bottom of the flare to kFlareW at the top.
+    // At y == kFlareH this is kStemW, which is what the straight run above
+    // returns, so the outline has no step in it anywhere.
+    return static_cast<int16_t>(kStemW +
+                                (kFlareH - y) * (kFlareW - kStemW) / kFlareH);
 }
 
-void TachSegment::set(float fraction) {
+void TachBar::configure(int16_t y_top, int16_t y_bottom) {
+    const bool a = assign_t(y_top_, y_top);
+    const bool b = assign_t(y_bottom_, y_bottom);
+    if (a || b) touch();
+}
+
+bool TachBar::covers(int16_t marker_y) const {
+    return marker_y + kMarkerH > y_top_ && marker_y < y_bottom_;
+}
+
+void TachBar::set(float fraction) {
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
-    // Quantised to the pixel this leg can actually show. Without this the
-    // bar marks itself dirty on every tick of a floating point rpm and
-    // repaints a region that has not visibly changed.
-    const int16_t span = dir_ == Fill::Up ? bounds.h : bounds.w;
-    const float q = span > 0 ? std::round(fraction * span) / span : fraction;
-    if (assign(fraction_, q)) touch();
+
+    // The marker travels the whole height of the panel, so full scale puts
+    // its top edge on the top row rather than somewhere near it.
+    const int16_t travel = static_cast<int16_t>(kScreenH - kMarkerH);
+    int16_t y = static_cast<int16_t>(travel - fraction * travel);
+    y = static_cast<int16_t>((y / kStepPx) * kStepPx);
+    if (y == marker_y_) return;
+
+    // Only the strip the marker is leaving or arriving in has changed. The
+    // other one is still the same rows of unlit track it was before.
+    const bool was = covers(marker_y_);
+    const bool now = covers(y);
+    marker_y_ = y;
+    if (was || now) touch();
 }
 
-void TachSegment::render(Canvas& c) {
-    // The unlit track, tapered where the diagonal cuts it.
-    c.fill_rect(bounds, color::kTachTrack);
-    if (cut_) {
-        c.fill_triangle(135, 0, 234, bounds.bottom(), 27, bounds.bottom(),
-                        color::kBg);
-    }
-
-    // This leg's share of the travel, as a fraction of its own length.
-    float local = 0.0f;
-    if (to_ > from_) local = (fraction_ - from_) / (to_ - from_);
-    if (local <= 0.0f) return;
-    if (local > 1.0f) local = 1.0f;
-
-    // The lit part is not cut by the diagonal: it climbs into the corner the
-    // taper takes away, so the bar squares off as it reaches full.
-    if (dir_ == Fill::Up) {
-        const int16_t lit = static_cast<int16_t>(bounds.h * local);
-        c.fill_rect(Rect{bounds.x, static_cast<int16_t>(bounds.bottom() - lit),
-                         bounds.w, lit}, color::kTach);
-    } else {
-        const int16_t lit = static_cast<int16_t>(bounds.w * local);
-        c.fill_rect(Rect{bounds.x, bounds.y, lit, bounds.h}, color::kTach);
+void TachBar::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    for (int16_t y = y_top_; y < y_bottom_; ++y) {
+        const bool lit = y >= marker_y_ &&
+                         y < static_cast<int16_t>(marker_y_ + kMarkerH);
+        c.fill_rect(Rect{bounds.x, y, width_at(y), 1},
+                    lit ? color::kTach : color::kTachTrack);
     }
 }
 
