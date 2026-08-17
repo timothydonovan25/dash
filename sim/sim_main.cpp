@@ -10,9 +10,10 @@
 // drive it from a shell script and pipe the frames into ffmpeg.
 //
 //   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
-//                                vbat, sats, neutral, ecu, fix, auto, media
+//                                vbat, sats, neutral, ecu, fix, auto
 //        btn <A-E> down|up       real debounce and long-press timing
 //        cmd <lapline|laparm|lapclear|tripreset|jump>
+//        media <title>\t<album>\t<artist>    bare `media` clears it
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac>\n
@@ -102,7 +103,29 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "ecu")     c.ecu_online = v != 0.0f;
     else if (name == "fix")     c.gps_fix = v != 0.0f;
     else if (name == "auto")    c.auto_ride = v != 0.0f;
-    else if (name == "media")   c.media_on = v != 0.0f;
+}
+
+template <size_t N>
+const char* copy_field(char (&dst)[N], const char* src) {
+    size_t i = 0;
+    while (src[i] != '\0' && src[i] != '\t' && i + 1 < N) {
+        dst[i] = src[i];
+        ++i;
+    }
+    dst[i] = '\0';
+    // Skip whatever did not fit, then the separator, so a long title cannot
+    // push the album into the artist's field.
+    while (src[i] != '\0' && src[i] != '\t') ++i;
+    return src[i] == '\t' ? src + i + 1 : src + i;
+}
+
+// `media <title>\t<album>\t<artist>`. Tab separated rather than anything a
+// band might reasonably use: "Song | Remix" is a real track name and "Song
+// <tab> Remix" is not. A bare `media` clears the block.
+void apply_media(sim::Controls& c, const char* rest) {
+    rest = copy_field(c.media_title, rest);
+    rest = copy_field(c.media_album, rest);
+    copy_field(c.media_artist, rest);
 }
 
 }  // namespace
@@ -205,7 +228,13 @@ int main() {
         while (poll_line(line)) {
             char a[32] = {}, b[32] = {};
             float v = 0.0f;
-            if (std::sscanf(line.c_str(), "set %31s %f", a, &v) == 2) {
+            // Before the sscanf forms: this one takes the rest of the line
+            // verbatim, spaces and all, because song titles have spaces in.
+            if (line.rfind("media", 0) == 0) {
+                const char* rest = line.c_str() + 5;
+                if (*rest == ' ') ++rest;
+                apply_media(controls, rest);
+            } else if (std::sscanf(line.c_str(), "set %31s %f", a, &v) == 2) {
                 apply_set(controls, a, v);
             } else if (std::sscanf(line.c_str(), "btn %31s %31s", a, b) == 2) {
                 const int idx = a[0] - 'A';

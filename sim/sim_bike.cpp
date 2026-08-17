@@ -204,14 +204,15 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     g.utc_ms = now_ms;
     slots.gnss.publish(g);
 
-    // What `ble` will publish once it exists. The strings are long enough to
-    // exercise the truncation — "Terra Incognita" does not fit the block, and
-    // finding that out on a laptop is the point of having one.
+    // What `ble` will publish once it exists, taken meanwhile from whatever
+    // is playing on this machine. `updated_ms` stays zero when there is no
+    // title, which is the gate every screen reads: no media, not a song with
+    // no name.
     core::state::Media md;
-    if (c.media_on) {
-        copy_into(md.title,  "In the Forest");
-        copy_into(md.album,  "Terra Incognita");
-        copy_into(md.artist, "Gojira");
+    if (c.media_title[0] != '\0') {
+        copy_into(md.title,  c.media_title);
+        copy_into(md.album,  c.media_album);
+        copy_into(md.artist, c.media_artist);
         md.state = 1;
         md.updated_ms = now_ms;
     }

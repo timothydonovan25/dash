@@ -16,6 +16,7 @@ firmware -- it is the firmware.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tkinter as tk
@@ -58,9 +59,15 @@ TOGGLES = [
     ("neutral", "Neutral",          False),
     ("fix",     "GPS fix",          True),
     ("ecu",     "ECU online",       False),
-    # Stands in for the BLE task, which is not in this build.
-    ("media",   "Music playing",    True),
 ]
+
+# There is no BLE in this build, so nothing on the bike writes the media
+# slot. Until the radio lands the simulator uses whatever is actually
+# playing on this machine, over MPRIS -- which is the useful half of a
+# phone anyway, and gives the block real track names rather than ones
+# chosen to fit it.
+MEDIA_POLL_MS = 1000
+MEDIA_FORMAT = "{{status}}\t{{title}}\t{{album}}\t{{artist}}"
 
 COMMANDS = [
     ("lapline",   "Set finish line here"),
@@ -219,6 +226,25 @@ class App:
             cb.pack(fill="x")
             self.sim.send(f"set {name} {var.get()}")
 
+        # --- what is playing, from this machine --------------------------
+        self.media_var = tk.IntVar(value=1)
+        self.media_last = None
+        have_playerctl = shutil.which("playerctl") is not None
+        cb = tk.Checkbutton(
+            right,
+            text="Music from this machine" if have_playerctl
+            else "Music (needs playerctl)",
+            variable=self.media_var, fg="#e2e8f0", bg="#0d0f14",
+            selectcolor="#161a22", activebackground="#0d0f14",
+            activeforeground="#e2e8f0", anchor="w",
+            state="normal" if have_playerctl else "disabled",
+            command=self.refresh_media)
+        cb.pack(fill="x")
+        if have_playerctl:
+            self.poll_media()
+        else:
+            self.sim.send("media")
+
         tk.Label(right, text="", bg="#0d0f14").pack()
         for cmd, label in COMMANDS:
             tk.Button(right, text=label, bg="#161a22", fg="#e2e8f0",
@@ -228,6 +254,35 @@ class App:
 
         root.protocol("WM_DELETE_WINDOW", self.quit)
         self.pump()
+
+    def poll_media(self):
+        """The timer. Kept separate from the refresh so that clicking the
+        checkbox does not start a second one alongside the first."""
+        self.refresh_media()
+        self.root.after(MEDIA_POLL_MS, self.poll_media)
+
+    def refresh_media(self):
+        """Ask MPRIS what is playing and forward any change to the sim."""
+        line = ""
+        if self.media_var.get():
+            try:
+                r = subprocess.run(
+                    ["playerctl", "metadata", "--format", MEDIA_FORMAT],
+                    capture_output=True, text=True, timeout=1)
+                # Non-zero is the normal "no players found" case, not an
+                # error worth reporting -- most of the time nothing is on.
+                if r.returncode == 0:
+                    status, _, rest = r.stdout.strip("\n").partition("\t")
+                    # A stopped player still reports its last track. That is
+                    # not what is playing, so it is not what the dash shows.
+                    if status != "Stopped":
+                        line = rest
+            except (OSError, subprocess.SubprocessError):
+                self.media_var.set(0)
+
+        if line != self.media_last:
+            self.media_last = line
+            self.sim.send("media " + line if line else "media")
 
     def pump(self):
         frame = self.sim.read_frame()

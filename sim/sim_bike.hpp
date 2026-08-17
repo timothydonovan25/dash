@@ -26,10 +26,15 @@ struct Controls {
     int   sats       = 11;
 
     // There is no BLE in this build, so the media slot has no writer on the
-    // bike yet. The simulator fills it anyway: the speed screen's media
-    // block is laid out now, and a layout that can only be judged after the
-    // radio lands is a layout nobody checks.
-    bool  media_on   = false;
+    // bike yet. The front end fills it from whatever is actually playing on
+    // the machine running the simulator, which is the closest thing to a
+    // real phone available before the radio lands -- and real track names
+    // are the ones that turn out not to fit.
+    //
+    // An empty title means nothing is playing, and the block disappears.
+    char  media_title [60] = {};
+    char  media_album [60] = {};
+    char  media_artist[60] = {};
 
     // Drives the bike round a synthetic circuit at `speed_mph`, so the lap
     // timer, the delta matcher and the map screens have something real to
