@@ -98,8 +98,14 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         lat_ = 42.500000 + y * kFtLat;
         lon_ = -83.100000 + x * kFtLon;
     } else {
+        // Off the circuit the bike still moves: a receiver at 42 mph is not
+        // a receiver sitting at the start line. Without this, every fix was
+        // the same coordinate forever unless "ride the circuit" happened to
+        // be ticked, so course, the maps and the trip meters read as broken
+        // when it was the simulated bike that was parked.
         lean_deg_ = c.lean_deg;
         heading_deg_ = 0.0f;
+        lat_ += static_cast<double>(c.speed_mph * kFtPerSPerMph * dt) * kFtLat;
     }
 
     core::state::Engine e;
@@ -135,14 +141,23 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     a.g_lon = 0.0f;
     slots.attitude.publish(a);
 
+    // A receiver, not a checkbox. Four satellites is the arithmetic minimum
+    // for a 3D fix, and accuracy follows how many are up rather than being a
+    // constant — HDOP was pinned at 0.8, so the accuracy readout showed the
+    // same 13 ft whatever the satellite slider was doing, which is the whole
+    // GPS block on the speed screen sitting there inert.
+    const bool enough = c.sats >= 4;
     core::state::Gnss g;
-    g.fix = c.gps_fix;
+    g.fix = c.gps_fix && enough;
     g.sats = static_cast<uint8_t>(c.sats);
-    g.quality = c.gps_fix ? 1 : 0;
+    g.quality = g.fix ? 1 : 0;
     g.lat = lat_;
     g.lon = lon_;
     g.alt_m = 265.0f;
-    g.hdop = 0.8f;
+    // Roughly inverse: about 0.8 with twelve in view, past 2 down at the
+    // edge of a fix. Close enough that the readout moves for the right
+    // reason; a real HDOP is geometry, not a count.
+    g.hdop = enough ? 9.6f / static_cast<float>(c.sats) : 99.9f;
     g.course_deg = heading_deg_;
     g.speed_mph = c.speed_mph;
     g.utc_ms = now_ms;
