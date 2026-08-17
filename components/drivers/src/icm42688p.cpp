@@ -1,4 +1,5 @@
 #include "drivers/icm42688p.hpp"
+#include "core/attitude/attitude.hpp"
 #include "bsp/pins.hpp"
 
 #include "driver/spi_master.h"
@@ -19,10 +20,18 @@ constexpr uint8_t kAccelConfig0 = 0x50;
 constexpr uint8_t kFifoConfig1  = 0x5F;
 constexpr uint8_t kFifoCountH   = 0x2E;
 constexpr uint8_t kFifoData     = 0x30;
+constexpr uint8_t kIntConfig    = 0x14;
+constexpr uint8_t kIntConfig1   = 0x64;
+constexpr uint8_t kIntSource0   = 0x65;
 constexpr uint8_t kWhoAmI       = 0x75;
 constexpr uint8_t kWhoAmIValue  = 0x47;
 
 constexpr uint8_t kReadBit = 0x80;
+
+// The configured ODR, as a period. If kGyroConfig0 / kAccelConfig0 change
+// away from 200 Hz, this has to move with them — the two are set together
+// below and there is nothing that will notice if they drift apart.
+constexpr uint32_t kSamplePeriodMs = 5;
 
 // One packet of FIFO format 16-byte "packet 3": header, accel xyz, gyro xyz,
 // temperature, timestamp.
@@ -115,6 +124,23 @@ hal::Status Icm42688p::init() {
     s = write_reg(kFifoConfig1, 0x07);      // accel + gyro + temp in the FIFO
     if (!hal::ok(s)) return s;
 
+    // Data-ready on INT1, so the imu task is woken by the part rather than
+    // guessing at 5 ms. INT_ASYNC_RESET has to be cleared from its reset
+    // value for the pin to behave — the datasheet says so in one line and
+    // it is the usual reason a working configuration produces no edges.
+    //
+    // BRINGUP: these three values are read off the register map and have
+    // never seen a real part. A wrong one costs nothing: the service waits
+    // on the notification with a timeout and falls back to polling, which
+    // is exactly what it did before, and the DIAG system screen counts how
+    // often that happens.
+    s = write_reg(kIntConfig1, 0x00);       // clear INT_ASYNC_RESET (bit 4)
+    if (!hal::ok(s)) return s;
+    s = write_reg(kIntConfig, 0x03);        // INT1 push-pull, active high, pulsed
+    if (!hal::ok(s)) return s;
+    s = write_reg(kIntSource0, 0x08);       // UI_DRDY_INT1_EN
+    if (!hal::ok(s)) return s;
+
     // Gyro and accel both in low-noise mode. Written last: the datasheet
     // wants configuration set before the sensors are turned on.
     s = write_reg(kPwrMgmt0, 0x0F);
@@ -139,6 +165,11 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
     s = read_regs(kFifoData, buf, batch * kPacketBytes);
     if (!hal::ok(s)) return s;
 
+    // Back-dated, not stamped with the read time. Every sample in a batch
+    // carrying one timestamp gives core/attitude a run of dt == 0, and it
+    // drops those — so the whole 200 Hz stream collapsed to the poll rate
+    // and aliased the vibration in between. See core::attitude::sample_time_ms,
+    // which is where the arithmetic lives so it can be host-tested.
     const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
     for (size_t i = 0; i < batch; ++i) {
         const uint8_t* p = buf + i * kPacketBytes;
@@ -164,7 +195,8 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         sm.gy_dps = gy - bias_[1];
         sm.gz_dps = gz - bias_[2];
         sm.temp_c = static_cast<int8_t>(p[13]) / 2.07f + 25.0f;
-        sm.t_ms = now_ms;
+        sm.t_ms = core::attitude::sample_time_ms(now_ms, i, batch,
+                                                 kSamplePeriodMs);
         out[count++] = sm;
     }
     return hal::Status::Ok;

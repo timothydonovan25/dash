@@ -30,6 +30,7 @@
 // off this filter. A sign error here reads as a perfectly smooth, perfectly
 // wrong lean angle.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include "core/state/vehicle.hpp"
 
@@ -115,5 +116,25 @@ private:
     uint32_t last_ms_ = 0;
     bool     started_ = false;
 };
+
+// When a sample in a FIFO batch was actually taken.
+//
+// A batch is read all at once, so the obvious thing — stamping every sample
+// with the read time — hands the filter a run of identical timestamps. It
+// drops all but the first of those (dt == 0 is not integrable), which turns
+// a 200 Hz stream into the poll rate and aliases everything in between.
+// On a dirt bike, what lives between those rates is vibration.
+//
+// So the batch is back-dated: the newest sample is at `now_ms` and the ones
+// before it step back by the sample period. `index` is 0 for the oldest.
+//
+// This lives in core/ rather than in the driver because it is arithmetic
+// and the driver is not host-testable — and getting it wrong is silent.
+inline uint32_t sample_time_ms(uint32_t now_ms, size_t index, size_t count,
+                               uint32_t period_ms) {
+    if (count == 0) return now_ms;
+    const size_t back = (count - 1) - (index < count ? index : count - 1);
+    return now_ms - static_cast<uint32_t>(back) * period_ms;
+}
 
 }  // namespace core::attitude

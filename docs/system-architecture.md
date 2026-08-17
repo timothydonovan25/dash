@@ -308,7 +308,7 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | Task | Core | Prio | Rate | Owns |
 |---|---|---|---|---|
 | `ctrl` | 0 | 18 | 500 Hz | tach math, wheel speed, shift-light output |
-| `imu` | 0 | 15 | 200 Hz | ICM-42688-P FIFO, attitude filter, jumps |
+| `imu` | 0 | 15 | 200 Hz, INT1 | ICM-42688-P FIFO, attitude filter, jumps |
 | `gnss` | 0 | 12 | 20 ms poll | NMEA parse, position |
 | `logic` | 0 | 10 | 50 Hz | lap timer, trip, fuel, command drain |
 | `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue |
@@ -318,11 +318,13 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
 | `ble` | 1 | 4 | event | media Feed characteristic, TPMS scan (§11) — **not built** |
 
-The IMU is polled rather than interrupt-driven and the GPS is polled
-rather than reading a UART event queue. Both were measured and both were
-left alone: the wins are 4 ms and 10 ms on paths whose end-to-end latency
-is 5 ms and 140 ms, which is nothing a rider can see. INT1 is wired if
-that ever changes.
+The GPS is polled at 20 ms rather than reading a UART event queue. That
+was measured and left alone: 10 ms on a path whose end-to-end latency is
+140 ms, which is nothing a rider can see.
+
+The IMU is not polled. It blocks on INT1 with a timeout, and the timeout
+is a fallback rather than the design — see §8. PPS on IO18 remains wired
+and unused; `bsp/pins.hpp` says why.
 
 Nine tasks of your own. Each one has a single job you can say in one line.
 Stack sizes and high-water marks go on the DIAG system screen.
@@ -1075,7 +1077,7 @@ appear.
 | Backlight PWM | IO15 |
 | GPS UART RX / TX | IO4 / IO5 |
 | GPS PPS | IO18 — wired, unused |
-| IMU data ready (INT1) | IO8 — wired, unused |
+| IMU data ready (INT1) | IO8 |
 | Tach input | IO17 |
 | Wheel hall front / rear | IO1 / IO2 |
 | Shift-lamp master PWM | IO16 |

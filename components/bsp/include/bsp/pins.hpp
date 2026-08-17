@@ -57,10 +57,11 @@ inline constexpr int kGpsBootBaud    = 9600;
 inline constexpr int kGpsRunBaud     = 57600;
 
 // ── IMU ──────────────────────────────────────────────────────────────
-// Wired, and unused for the same reason as kGpsPps: the imu task polls the
-// FIFO every 5 ms and the interrupt would save about 4 ms on a path whose
-// end-to-end latency is 5. It is here for the day that matters.
-inline constexpr int kImuInt1        = 8;    // data ready
+// Data ready. The imu task blocks on this rather than polling, so a FIFO
+// read gets exactly the samples that have arrived instead of racing the
+// ODR. It falls back to a timeout if no edge comes, and DIAG → System
+// counts how often that happens.
+inline constexpr int kImuInt1        = 8;
 
 // ── Vehicle inputs ───────────────────────────────────────────────────
 // Tach is an inductive pickup wrapped around the ignition lead, via a

@@ -11,4 +11,4 @@ idf_component_register(
          "src/logger_service.cpp"
          "src/storage_service.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES core dash_hal ui bsp drivers esp_timer)
+    REQUIRES core dash_hal ui bsp drivers esp_timer esp_driver_gpio)

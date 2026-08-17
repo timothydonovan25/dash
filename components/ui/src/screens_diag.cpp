@@ -129,7 +129,7 @@ constexpr Rect kSysTable {14, 40, 452, 264};
 
 void SystemScreen::enter(Canvas&) {
     table_.set_bounds(kSysTable);
-    table_.configure(10, 2);
+    table_.configure(11, 2);
     list_[0] = &table_;
 }
 
@@ -178,7 +178,10 @@ void SystemScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, f.elec.v5, 2, f.elec.v5 > 0.0f);
     table_.set_row(9, "5V rail", v);
 
-    table_.set_row_count(10);
+    u::fmt_value(v, sizeof v, static_cast<float>(s->imu_timeouts), 0, true);
+    table_.set_row(10, "IMU int miss", v);
+
+    table_.set_row_count(11);
 }
 
 WidgetList SystemScreen::widgets() { return WidgetList{list_, 1}; }

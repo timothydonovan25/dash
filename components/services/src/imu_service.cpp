@@ -7,6 +7,8 @@
 #include "core/attitude/attitude.hpp"
 #include "core/jump/jump.hpp"
 
+#include "bsp/pins.hpp"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cmath>
@@ -15,6 +17,41 @@ namespace services {
 namespace {
 
 constexpr size_t kBatch = 16;
+
+// How long to wait for a data-ready edge before reading the FIFO anyway.
+// Slightly longer than the 5 ms sample period, so a working interrupt wins
+// the race every time and a dead one costs one sample period of latency and
+// nothing else. This is the whole safety net for the INT1 register values,
+// which have never been checked against a real part.
+constexpr uint32_t kFallbackMs = 8;
+
+// Set once, before the task blocks on it.
+TaskHandle_t g_imu_task = nullptr;
+
+void IRAM_ATTR drdy_isr(void*) {
+    if (!g_imu_task) return;
+    BaseType_t woke = pdFALSE;
+    vTaskNotifyGiveFromISR(g_imu_task, &woke);
+    if (woke) portYIELD_FROM_ISR();
+}
+
+// Returns false if the edge could not be hooked up, which is not fatal —
+// the wait below simply times out at the poll rate instead.
+bool attach_data_ready() {
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << bsp::kImuInt1;
+    io.mode = GPIO_MODE_INPUT;
+    io.intr_type = GPIO_INTR_POSEDGE;      // matches INT1 active high
+    if (gpio_config(&io) != ESP_OK) return false;
+
+    // engine_sense may already have installed it for the tach; either order
+    // has to work, so "already installed" is a success.
+    const esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+
+    return gpio_isr_handler_add(static_cast<gpio_num_t>(bsp::kImuInt1),
+                                drdy_isr, nullptr) == ESP_OK;
+}
 
 void imu_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
@@ -57,7 +94,23 @@ void imu_task(void* arg) {
         }
     }
 
+    g_imu_task = xTaskGetCurrentTaskHandle();
+    const bool have_int = attach_data_ready();
+
     for (;;) {
+        // Woken by the part when it has a sample, or by the timeout if the
+        // interrupt is not arriving. `imu_timeouts` climbing at the sample
+        // rate on the DIAG system screen means INT1 is not working and the
+        // task has quietly gone back to polling.
+        if (have_int) {
+            if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kFallbackMs)) == 0 &&
+                d.system) {
+                ++d.system->imu_timeouts;
+            }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+
         hal::IImu::Sample batch[kBatch];
         size_t n = 0;
         const hal::Status s = d.imu ? d.imu->read_fifo(batch, kBatch, n)
@@ -94,9 +147,6 @@ void imu_task(void* arg) {
                                    static_cast<int32_t>(s), now);
         }
 
-        // 5 ms is the 200 Hz sample period. The FIFO means a late tick costs
-        // latency, not data — which is why this task can sit below `ctrl`.
-        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 

@@ -44,6 +44,9 @@ struct SystemInfo {
     // difference is a pod that glitches versus a cable that is shorted.
     uint16_t pod_recoveries= 0;
     uint16_t pod_stuck     = 0;
+    // Times the imu task fell back to polling because no data-ready edge
+    // arrived. Climbing at the sample rate means INT1 is not working.
+    uint32_t imu_timeouts  = 0;
 };
 
 struct Context {

@@ -203,5 +203,85 @@ int main() {
         CHECK_NEAR(a.yaw_rate_dps, 12.0, 1e-6);
     }
 
+    CASE("a FIFO batch is back-dated so no two samples share a timestamp");
+    {
+        // The newest sample is the one just taken; the rest step back by the
+        // sample period, oldest first.
+        const uint32_t now = 100000;
+        CHECK(sample_time_ms(now, 3, 4, 5) == now);          // newest
+        CHECK(sample_time_ms(now, 2, 4, 5) == now - 5);
+        CHECK(sample_time_ms(now, 1, 4, 5) == now - 10);
+        CHECK(sample_time_ms(now, 0, 4, 5) == now - 15);     // oldest
+
+        // Strictly increasing across a full batch, which is the property the
+        // filter needs: equal neighbours are dropped, and a decreasing pair
+        // reads as an enormous unsigned gap and is dropped too.
+        for (size_t n = 1; n <= 16; ++n) {
+            for (size_t i = 1; i < n; ++i) {
+                CHECK(sample_time_ms(now, i, n, 5) >
+                      sample_time_ms(now, i - 1, n, 5));
+            }
+        }
+
+        // A single sample is simply now.
+        CHECK(sample_time_ms(now, 0, 1, 5) == now);
+        // Unsigned arithmetic across the 49-day wrap stays consistent: the
+        // differences are what the filter reads, and they still come out at
+        // one period apart.
+        const uint32_t near_wrap = 3;
+        CHECK(static_cast<uint32_t>(sample_time_ms(near_wrap, 1, 2, 5) -
+                                    sample_time_ms(near_wrap, 0, 2, 5)) == 5);
+    }
+
+    CASE("every sample in a FIFO batch is integrated, not just the first");
+    {
+        // Why per-sample timestamps matter, and it is not latency.
+        //
+        // A driver that stamps a whole FIFO batch with the time it was read
+        // hands this filter one usable sample and the rest with dt == 0,
+        // which the guard above drops. The 200 Hz stream silently becomes
+        // the poll rate — and on a dirt bike what lives between those two
+        // rates is vibration. Alias it and you integrate whichever phase you
+        // happened to land on.
+        //
+        // Here the roll gyro shakes at +/-60 dps every sample and nets to
+        // zero over each batch of four. Reading all four keeps the bike
+        // upright. Keeping only the first integrates +60 dps forever.
+        Config cfg;
+        auto shake = [](uint32_t t_ms, int k) {
+            Sample s;
+            s.gx_dps = (k % 2 == 0) ? 60.0f : -60.0f;
+            s.gy_dps = 0.0f;
+            s.gz_dps = 0.0f;
+            s.ax_g = 0.0f;
+            s.ay_g = 0.0f;
+            s.az_g = 1.0f;              // upright
+            s.speed_mph = 25.0f;
+            s.t_ms = t_ms;
+            return s;
+        };
+
+        Filter all, first_only;
+        int k = 0;
+        for (uint32_t base = 0; base < 3000; base += 20) {
+            for (int i = 0; i < 4; ++i, ++k) {
+                all.update(shake(base + i * 5, k), cfg);
+            }
+            // What the batched-timestamp driver effectively produced: one
+            // sample per read, carrying the whole interval.
+            first_only.update(shake(base + 15, k - 4), cfg);
+        }
+
+        core::state::Attitude a{}, b{};
+        all.publish_into(a);
+        first_only.publish_into(b);
+
+        // Reading the whole batch, the shake cancels and the bike is upright.
+        CHECK_NEAR(a.lean_deg, 0.0, 2.0);
+        // Reading one in four, it does not. This is the failure the driver
+        // used to produce, asserted so nobody reintroduces it.
+        CHECK(std::fabs(b.lean_deg) > 5.0f);
+    }
+
     return check::report("attitude");
 }
