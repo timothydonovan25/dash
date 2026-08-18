@@ -84,10 +84,12 @@ class PlayerService : MediaSessionService() {
 
         trimmer.enabled = prefs.trimSilence
         player = buildPlayer().apply {
-            // The queue always loops. The middle softkey chooses whether it
-            // loops in order or shuffled, which is all shuffleModeEnabled is.
-            repeatMode = Player.REPEAT_MODE_ALL
-            shuffleModeEnabled = prefs.shuffle
+            // The middle softkey chooses between looping the queue, looping
+            // one track, and shuffling; PlayMode is the pair of properties
+            // that each of those means.
+            val m = prefs.mode
+            repeatMode = m.repeatMode
+            shuffleModeEnabled = m.shuffle
             // handleAudioFocus: without it the music plays straight through an
             // incoming call, which on a phone is not a preference.
             setAudioAttributes(
@@ -251,7 +253,7 @@ class PlayerService : MediaSessionService() {
         loadLibrary()
     }
 
-    fun shuffling(): Boolean = player.shuffleModeEnabled
+    fun mode(): PlayMode = PlayMode.of(player.repeatMode, player.shuffleModeEnabled)
 
     fun trimSilence(): Boolean = trimmer.enabled
 
@@ -511,14 +513,14 @@ class PlayerService : MediaSessionService() {
         }
 
         /**
-         * The middle softkey flips this through the MediaController, so the
-         * change arrives here rather than being handed in. Saving it from the
-         * player means the stored value is whatever the player actually has.
+         * The middle softkey changes these through the MediaController, so the
+         * change arrives here rather than being handed in. Saving from the
+         * player means the stored value is whatever the player actually has,
+         * and both properties have to be watched because a mode is a pair.
          */
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            prefs.shuffle = shuffleModeEnabled
-            notifyUi()
-        }
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = saveMode()
+
+        override fun onRepeatModeChanged(repeatMode: Int) = saveMode()
     }
 
     // ---- the dash --------------------------------------------------------
@@ -548,6 +550,11 @@ class PlayerService : MediaSessionService() {
                 },
             )
         )
+    }
+
+    private fun saveMode() {
+        prefs.mode = mode()
+        notifyUi()
     }
 
     private fun notifyUi() {

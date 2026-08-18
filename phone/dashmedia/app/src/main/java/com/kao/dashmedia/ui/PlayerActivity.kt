@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.kao.dashmedia.DashLink
 import com.kao.dashmedia.Keys
 import com.kao.dashmedia.MediaWatcher
+import com.kao.dashmedia.PlayMode
 import com.kao.dashmedia.PlayerService
 import com.kao.dashmedia.R
 
@@ -82,10 +83,17 @@ abstract class PlayerActivity : AppCompatActivity() {
     protected open fun softLabels(): Triple<String, String, String> =
         Triple(getString(R.string.k_settings), modeLabel(), getString(R.string.k_playing))
 
-    /** REPEAT or SHUFFLE -- what the queue is doing now. */
-    protected fun modeLabel(): String = getString(
-        if (controller?.shuffleModeEnabled == true) R.string.shuffle else R.string.repeat
-    )
+    /** What the queue is doing now, read from the player rather than remembered. */
+    protected fun modeLabel(): String {
+        val c = controller ?: return ""
+        return getString(
+            when (PlayMode.of(c.repeatMode, c.shuffleModeEnabled)) {
+                PlayMode.RepeatAll -> R.string.repeat
+                PlayMode.RepeatOne -> R.string.repeat_one
+                PlayMode.Shuffle -> R.string.shuffle
+            }
+        )
+    }
 
     // ---- chrome ----------------------------------------------------------
 
@@ -137,7 +145,11 @@ abstract class PlayerActivity : AppCompatActivity() {
 
     private fun toggleMode() {
         val c = controller ?: return
-        c.shuffleModeEnabled = !c.shuffleModeEnabled
+        val next = PlayMode.of(c.repeatMode, c.shuffleModeEnabled).next()
+        // Both properties, every time: leaving shuffle on while switching to
+        // repeat-one would come back as shuffle the moment repeat-one is left.
+        c.repeatMode = next.repeatMode
+        c.shuffleModeEnabled = next.shuffle
         drawChrome()
     }
 

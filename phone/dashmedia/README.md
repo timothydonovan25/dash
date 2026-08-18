@@ -75,7 +75,7 @@ keypad the only thing worse than too few controls is controls that move.
 | Key | Everywhere |
 |---|---|
 | left softkey | settings |
-| middle softkey | repeat the current queue, or shuffle it |
+| middle softkey | cycle: repeat the queue → repeat one track → shuffle |
 | right softkey | swap between the library and what is playing |
 
 | Screen | The rest |

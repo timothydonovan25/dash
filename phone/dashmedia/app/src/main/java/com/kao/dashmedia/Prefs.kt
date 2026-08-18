@@ -28,9 +28,16 @@ class Prefs(context: Context) {
         get() = p.getBoolean(K_TRIM, true)
         set(v) = p.edit().putBoolean(K_TRIM, v).apply()
 
-    var shuffle: Boolean
-        get() = p.getBoolean(K_SHUFFLE, false)
-        set(v) = p.edit().putBoolean(K_SHUFFLE, v).apply()
+    /**
+     * What the middle softkey last left the player in.
+     *
+     * Falls back to the old shuffle boolean, which is all the two-state build
+     * stored: an upgrade should not silently forget that shuffle was on.
+     */
+    var mode: PlayMode
+        get() = PlayMode.byName(p.getString(K_MODE, null))
+            ?: if (p.getBoolean(K_SHUFFLE, false)) PlayMode.Shuffle else PlayMode.RepeatAll
+        set(v) = p.edit().putString(K_MODE, v.name).apply()
 
     /** MediaStore id of the track that was playing, or -1. */
     var resumeId: Long
@@ -49,7 +56,8 @@ class Prefs(context: Context) {
         const val K_SOURCE = "source"
         const val K_BOOST = "boost"
         const val K_TRIM = "trim_silence"
-        const val K_SHUFFLE = "shuffle"
+        const val K_SHUFFLE = "shuffle"   // legacy; read only, for the migration
+        const val K_MODE = "mode"
         const val K_ID = "resume_id"
         const val K_POS = "resume_pos"
     }
