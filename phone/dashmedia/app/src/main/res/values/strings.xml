@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">DashMedia</string>
+    <string name="nothing_playing">Nothing playing</string>
+    <string name="playing">Playing</string>
+    <string name="paused">Paused</string>
+    <string name="no_music">No music found on this phone</string>
+    <string name="need_storage">Storage permission needed to read your music</string>
+    <string name="notif_access">Other apps to dash</string>
+    <string name="access_on">On — Spotify and the rest reach the dash</string>
+    <string name="access_off">Off — only DashMedia reaches the dash</string>
+    <string name="grant">Grant notification access</string>
+    <string name="dash_link">Dash link</string>
+    <string name="hint_keys">0 = settings, MENU = now playing</string>
+</resources>
