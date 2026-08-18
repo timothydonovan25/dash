@@ -41,8 +41,10 @@ constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
 
 constexpr Rect kLean      { 30,  96, 112, 104};
-// Shares a left edge with the media rows below it, which puts it a little
-// right of where it was and squares the middle column up.
+// Centred in the middle column, under the gear tile. It used to share a left
+// edge with the media rows; those have since gone left to where the fault
+// column ends, and dragging the ball out from under the gear to follow them
+// would be squaring up the wrong pair.
 constexpr Rect kBall      {176,  92, 142, 150};
 constexpr Rect kFault     { 28, 222, 120,  16};
 constexpr Rect kFaultWhat { 28, 242, 120,  10};
@@ -53,13 +55,21 @@ constexpr Rect kHdop      { 28, 286, 120,  10};
 // what gets cleared on a repaint, so a clock reserving the whole right half
 // of the row would erase the g-ball's edge every minute.
 constexpr Rect kClock     {372, 140, 100,  16};
-// Song, album and artist, starting below the g-ball and running to the right
-// edge. Wider than the reference put it, because real track names are longer
-// than the ones a layout gets mocked up with: at 297 this fitted thirteen
-// characters, which truncated most of what actually plays.
-constexpr Rect kSong      {176, 244, 300, MediaRow::kRowH};
-constexpr Rect kAlbum     {176, 264, 300, MediaRow::kRowH};
-constexpr Rect kArtist    {176, 284, 300, MediaRow::kRowH};
+// Song, album and artist, running to the right edge. Wider than the reference
+// put it, because real track names are longer than the ones a layout gets
+// mocked up with: at 297 this fitted thirteen characters, which truncated most
+// of what actually plays.
+//
+// The left edge is as far left as it can go rather than lined up with the
+// g-ball above: 148 is where the GPS and fault column ends, and these rows are
+// the only thing on the screen with an appetite for width. Four pixels of gap
+// is deliberate — widget bounds are what a repaint clears, so a row that
+// reached 148 would erase the edge of the sats line every time a long title
+// scrolled, and nothing would redraw it. 324 px is 25 characters at scale 2;
+// anything longer still scrolls.
+constexpr Rect kSong      {152, 244, 324, MediaRow::kRowH};
+constexpr Rect kAlbum     {152, 264, 324, MediaRow::kRowH};
+constexpr Rect kArtist    {152, 284, 324, MediaRow::kRowH};
 
 // The odometer and trip meter are the least urgent things here, so they get
 // the strip along the bottom that nothing else wants.
