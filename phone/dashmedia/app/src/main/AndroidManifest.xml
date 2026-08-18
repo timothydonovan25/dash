@@ -38,6 +38,25 @@
         <activity android:name=".ui.QueueActivity" android:exported="false" />
         <activity android:name=".ui.SearchActivity" android:exported="false" />
 
+        <!-- A second launcher entry, so the Programmable Keys screen can bind a
+             side button to it: those keys choose an app, not a keycode. It has
+             no interface and finishes immediately. taskAffinity is empty so it
+             never joins the main task and leaves a stray back stack behind. -->
+        <activity
+            android:name=".ui.PlayPauseActivity"
+            android:exported="true"
+            android:label="@string/play_pause_app"
+            android:theme="@style/Theme.Invisible"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- Playback and the BLE link live in one foreground service; see the
              note in PlayerService.kt for why they are not separate. -->
         <service

@@ -93,6 +93,30 @@ Two of those softkeys are Sonim additions with no constant in `KeyEvent` —
 off the device rather than looked up. `Keys.kt` also matches on scan code, so
 another keypad that reports the same physical key still works.
 
+## The side buttons
+
+The XP3900's two programmable keys do not send a keycode to anything. Settings
+→ Programmable Keys binds each one to an **app**, which is why one of them
+opens DashMedia and the other used to open the torch:
+
+| Key | scan | Bound to |
+|---|---|---|
+| PTT key | 149 | DashMedia — opens the library |
+| ALARM key | 148 | DashMedia's `Play/Pause` entry |
+
+So play/pause on a side button means being an app that toggles playback when
+launched. `PlayPauseActivity` is a second launcher entry with no interface
+that does exactly that and finishes. It costs one extra icon in the app
+drawer, which is the price of the mechanism rather than a choice, and the
+Programmable Keys screen shows both keys as plain "DashMedia" because it
+displays the package label rather than the activity's — the picker itself
+lists them apart.
+
+It dispatches a media key when any app holds a session, so the button governs
+whatever is actually playing rather than only this app, and falls back to
+waking our own player when nothing does — pressing it cold resumes the last
+track instead of doing nothing.
+
 ## Playlists
 
 Two kinds, and the list says which is which:
