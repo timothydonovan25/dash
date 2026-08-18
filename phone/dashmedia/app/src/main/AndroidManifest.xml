@@ -36,6 +36,7 @@
 
         <activity android:name=".ui.NowPlayingActivity" android:exported="false" />
         <activity android:name=".ui.QueueActivity" android:exported="false" />
+        <activity android:name=".ui.SearchActivity" android:exported="false" />
 
         <!-- Playback and the BLE link live in one foreground service; see the
              note in PlayerService.kt for why they are not separate. -->

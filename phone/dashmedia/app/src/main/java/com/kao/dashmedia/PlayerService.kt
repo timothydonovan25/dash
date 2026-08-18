@@ -1,6 +1,7 @@
 package com.kao.dashmedia
 
 import android.os.Handler
+import android.util.Log
 import android.os.Looper
 import android.media.audiofx.BassBoost
 import android.media.audiofx.LoudnessEnhancer
@@ -9,6 +10,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -42,6 +44,8 @@ class PlayerService : MediaSessionService() {
     private val feed = Feed()
     private lateinit var link: DashLink
     private lateinit var prefs: Prefs
+    lateinit var stash: Stash
+        private set
     private var watcher: MediaWatcher? = null
 
 
@@ -76,6 +80,7 @@ class PlayerService : MediaSessionService() {
         super.onCreate()
         instance = this
         prefs = Prefs(this)
+        stash = Stash(this)
 
         trimmer.enabled = prefs.trimSilence
         player = buildPlayer().apply {
@@ -202,6 +207,48 @@ class PlayerService : MediaSessionService() {
         is Source.Artist -> Browse.tracksBy(library, s.name)
         is Source.Album -> Browse.tracksOf(library, s.artist, s.title)
         is Source.Playlist -> Library.playlistTracks(this, s.id, byId)
+        // Ours, so it is a list of ids and nothing needs querying.
+        is Source.Owned -> stash.find(s.id)?.trackIds?.mapNotNull { byId[it] } ?: emptyList()
+        is Source.RecentAdded -> library.sortedByDescending { it.addedSec }.take(AUTO_LIST_MAX)
+        is Source.RecentPlayed -> library
+            .filter { stash.lastPlayed(it.id) > 0 }
+            .sortedByDescending { stash.lastPlayed(it.id) }
+            .take(AUTO_LIST_MAX)
+        is Source.MostPlayed -> library
+            .filter { stash.plays(it.id) > 0 }
+            .sortedByDescending { stash.plays(it.id) }
+            .take(AUTO_LIST_MAX)
+    }
+
+    /** Append after the current track. */
+    fun playNext(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        if (player.mediaItemCount == 0) { playFrom(tracks, 0, Source.All); return }
+        player.addMediaItems(
+            (player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount),
+            items(tracks),
+        )
+        notifyUi()
+    }
+
+    /** Append to the end. */
+    fun addToQueue(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        if (player.mediaItemCount == 0) { playFrom(tracks, 0, Source.All); return }
+        player.addMediaItems(items(tracks))
+        notifyUi()
+    }
+
+    /**
+     * Re-read MediaStore.
+     *
+     * Needed because the library is cached for the life of the process, which
+     * is what makes returning to the app instant and also what stops new music
+     * from ever appearing.
+     */
+    fun rescan() {
+        libraryReady = false
+        loadLibrary()
     }
 
     fun shuffling(): Boolean = player.shuffleModeEnabled
@@ -381,14 +428,58 @@ class PlayerService : MediaSessionService() {
         prefs.saveResume(id, player.currentPosition.coerceAtLeast(0L))
     }
 
+    /** The track already counted as played, so it is counted once. */
+    private var counted = -1L
+
     private val ticker = object : Runnable {
         override fun run() {
-            if (player.isPlaying) saveResume()
+            if (player.isPlaying) {
+                saveResume()
+                // Thirty seconds in is a play; anything less is a skip. Counting
+                // on track start would make a scroll through the library look
+                // like a listening history.
+                val id = currentTrackId()
+                if (id != null && id != counted && player.currentPosition > 30_000) {
+                    counted = id
+                    stash.played(id)
+                }
+            }
             handler.postDelayed(this, 5_000)
         }
     }
 
+    /** What went wrong last, for the UI to show. Cleared on a good play. */
+    @Volatile
+    var lastError: String? = null
+        private set
+
+    private var consecutiveErrors = 0
+
     private val bookkeeping = object : Player.Listener {
+
+        /**
+         * Without this the player stops dead on a bad file and says nothing.
+         *
+         * MediaStore rows outlive the files they point at, so a missing track
+         * is ordinary rather than exceptional, and the useful response is to
+         * move on. Giving up after a few in a row stops a queue of broken
+         * files from spinning forever.
+         */
+        override fun onPlayerError(error: PlaybackException) {
+            val what = player.currentMediaItem?.mediaMetadata?.title ?: "?"
+            consecutiveErrors++
+            lastError = "$what: ${error.errorCodeName}"
+            Log.w(TAG, "playback error on $what (#$consecutiveErrors)", error)
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS || player.mediaItemCount <= 1) {
+                player.pause()
+                consecutiveErrors = 0
+            } else {
+                player.seekToNextMediaItem()
+                player.prepare()
+                player.play()
+            }
+            notifyUi()
+        }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // "Sleep after this track" lands here, at the moment the next one
             // starts. Pausing at position zero means what you come back to is
@@ -399,6 +490,7 @@ class PlayerService : MediaSessionService() {
                 player.pause()
                 player.seekTo(0L)
             }
+            counted = -1L
             saveResume()
             notifyUi()
         }
@@ -409,7 +501,14 @@ class PlayerService : MediaSessionService() {
             applyBoost()
         }
 
-        override fun onIsPlayingChanged(isPlaying: Boolean) = notifyUi()
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // A track that actually plays clears the run of failures.
+            if (isPlaying) {
+                consecutiveErrors = 0
+                lastError = null
+            }
+            notifyUi()
+        }
 
         /**
          * The middle softkey flips this through the MediaController, so the
@@ -457,6 +556,12 @@ class PlayerService : MediaSessionService() {
 
     companion object {
         private const val TAG = "PlayerService"
+
+        /** How many failures in a row before we stop rather than keep skipping. */
+        private const val MAX_CONSECUTIVE_ERRORS = 5
+
+        /** A cap on the automatic lists; nobody scrolls past this on a keypad. */
+        private const val AUTO_LIST_MAX = 100
 
         /**
          * The library, cached for the life of the process rather than the life

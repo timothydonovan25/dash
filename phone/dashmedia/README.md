@@ -48,19 +48,23 @@ python3 tools/dash_media_peripheral.py
 
 | File | What it is |
 |---|---|
-| `Feed.kt` | the wire format and the decision of what is worth sending. Pure Kotlin, and the only file that knows the protocol |
+| `Feed.kt` | the wire format to the dash, and the decision of what is worth sending. Pure Kotlin, and the only file that knows the protocol |
 | `DashLink.kt` | BLE central: scan, connect, MTU, and a serialised write queue |
 | `MediaWatcher.kt` | the active `MediaSession` → `Snapshot`, so Spotify reaches the dash too |
 | `NotifListener.kt` | empty, and required: it is the permission gate for the above |
-| `PlayerService.kt` | ExoPlayer + `MediaSession`, the library cache, and the owner of the link |
-| `Library.kt` | MediaStore → tracks and playlists |
+| `PlayerService.kt` | ExoPlayer + `MediaSession`, the library cache, playback errors, and the owner of the link |
+| `Library.kt` | MediaStore → tracks and read-only playlists |
 | `Browse.kt` | grouping a flat list into artist → album → track |
 | `Source.kt` | what the queue was built from, encoded so it survives a restart |
-| `LeadingSilence.kt` | where a track actually starts. Pure, and tested |
-| `LeadingSilenceProcessor.kt` | the media3 audio processor that acts on it |
+| `Store.kt` / `Stash.kt` | the playlists this app owns and the play counts: format, then filesystem |
+| `Esc.kt` | delimiting user text in a flat string, safely. Used by both of the above |
+| `T9.kt` | keypad search: 4-6-5 finds Gojira |
+| `LeadingSilence.kt` + `LeadingSilenceProcessor.kt` | where a track actually starts, and the media3 processor that acts on it |
+| `Art.kt` | album covers, off the main thread, small cache |
+| `Fmt.kt` | m:ss |
 | `Keys.kt` | the XP3900 keypad, including the two softkeys the SDK has no names for |
 | `Prefs.kt` | the little that outlives the process |
-| `ui/` | browse, now playing, queue |
+| `ui/` | browse, search, now playing, queue |
 
 ## Keys
 
@@ -76,17 +80,29 @@ keypad the only thing worse than too few controls is controls that move.
 
 | Screen | The rest |
 |---|---|
-| Browse | up/down through the list, OK opens or plays, Back goes up a level. At the top of a section, **left/right switch between ARTISTS and PLAYLISTS** |
+| Browse | up/down the list, OK opens or plays, Back goes up a level. At the top of a section, **left/right switch ARTISTS and PLAYLISTS**. **2-9 starts a search**, `0` opens options for the highlighted row, `*` plays next, `#` appends to the queue |
+| Search | 2-9 type, Back deletes a digit before it leaves, OK plays |
 | Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · down opens the queue |
 | Queue | OK plays that entry · `*` move up · `#` move down · `0` remove |
+
+Digits go to search rather than to actions, because search is what you reach
+for most and a keypad phone has trained everyone to expect it.
 
 Two of those softkeys are Sonim additions with no constant in `KeyEvent` —
 `MULTIFUNC_CENTER` is 294 and `MULTIFUNC_RIGHT` is 295 on this handset, read
 off the device rather than looked up. `Keys.kt` also matches on scan code, so
 another keypad that reports the same physical key still works.
 
-The transport commands on Now playing are deliberately the same three the
-reserved control characteristic would carry from the handlebars.
+## Playlists
+
+Two kinds, and the list says which is which:
+
+- **Ours** — created, renamed, reordered and deleted freely, held in app
+  storage as one record per line and written through a temporary file, so a
+  process killed mid-write loses the change rather than the file.
+- **Theirs** — the ones already on the phone, read from MediaStore and
+  **read-only**. An app on API 30 may only modify playlists it created, so
+  editing one means taking an editable copy, which is an explicit action.
 
 ## Known rough edges
 
@@ -95,10 +111,13 @@ reserved control characteristic would carry from the handlebars.
 - **Trim silent starts** resets when the audio sink flushes, which happens on a
   seek and a format change. Two same-format tracks played gaplessly may not
   flush in between, in which case the second lead-in survives.
-- **`MediaStore.Audio.Playlists`** is deprecated from API 31. It works here
-  only because the app targets 30, and it is the first thing that breaks if
-  that is ever raised.
+- **`MediaStore.Audio.Playlists`** is deprecated from API 31. Reading them
+  works here only because the app targets 30. Our own playlists do not depend
+  on it and will outlive it.
 - **AGP 8.5 cannot run a Java compile step on JDK 21** — it fails transforming
   `core-for-system-modules.jar`. There is no Java source in the project today;
   the first one to appear will hit this. It is why the About dialog reads the
   version from the package manager instead of `BuildConfig`.
+- **Not exercised on the device yet**: creating a playlist end to end, and the
+  skip-on-error path. Both have unit tests underneath them; neither button has
+  been pressed on real hardware.

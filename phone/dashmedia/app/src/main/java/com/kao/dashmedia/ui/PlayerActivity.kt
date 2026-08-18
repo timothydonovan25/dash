@@ -154,6 +154,7 @@ abstract class PlayerActivity : AppCompatActivity() {
                 getString(if (svc?.trimSilence() != false) R.string.on else R.string.off),
             ),
             getString(R.string.menu_access, getString(access)),
+            getString(R.string.menu_rescan),
             getString(R.string.menu_about),
         )
         AlertDialog.Builder(this)
@@ -167,7 +168,14 @@ abstract class PlayerActivity : AppCompatActivity() {
                         drawChrome()
                     }
                     3 -> startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    4 -> openAbout()
+                    4 -> {
+                        // The library is cached for the life of the process,
+                        // which is what makes coming back instant and what
+                        // stops new music from ever showing up.
+                        PlayerService.instance?.rescan()
+                        toast(getString(R.string.rescanning))
+                    }
+                    5 -> openAbout()
                 }
             }
             .show()

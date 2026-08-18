@@ -5,11 +5,16 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
+import android.view.View
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import com.kao.dashmedia.Art
+import com.kao.dashmedia.Fmt
 import com.kao.dashmedia.Keys
+import com.kao.dashmedia.PlayerService
 import com.kao.dashmedia.R
 
 /**
@@ -29,6 +34,10 @@ class NowPlayingActivity : PlayerActivity() {
     private lateinit var total: TextView
     private lateinit var bar: ProgressBar
     private lateinit var state: TextView
+    private lateinit var art: ImageView
+
+    /** Which track the cover on screen belongs to, so a late load is ignored. */
+    private var artFor: Long = -1L
 
     private val ui = Handler(Looper.getMainLooper())
 
@@ -77,6 +86,7 @@ class NowPlayingActivity : PlayerActivity() {
         total = findViewById(R.id.total)
         bar = findViewById(R.id.bar)
         state = findViewById(R.id.state)
+        art = findViewById(R.id.art)
     }
 
     override fun onController(c: MediaController) {
@@ -116,7 +126,17 @@ class NowPlayingActivity : PlayerActivity() {
         title.text = m.title ?: getString(R.string.nothing_playing)
         artist.text = m.artist ?: ""
         album.text = m.albumTitle ?: ""
-        state.setText(if (c.isPlaying) R.string.playing else R.string.paused)
+        // A playback error is worth more than the word "Paused", which is what
+        // the player looks like from the outside when a file will not open.
+        val err = PlayerService.instance?.lastError
+        if (err != null) {
+            state.text = err
+            state.setTextColor(getColor(R.color.accent))
+        } else {
+            state.setText(if (c.isPlaying) R.string.playing else R.string.paused)
+            state.setTextColor(getColor(R.color.text))
+        }
+        drawArt()
         drawPosition()
     }
 
@@ -132,9 +152,24 @@ class NowPlayingActivity : PlayerActivity() {
         total.text = if (known) clock(dur) else "--:--"
     }
 
-    private fun clock(ms: Long): String {
-        val s = ms / 1000
-        return "%d:%02d".format(s / 60, s % 60)
+    private fun clock(ms: Long): String = Fmt.clock(ms)
+
+    private fun drawArt() {
+        val id = controller?.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        if (id == artFor && art.drawable != null) return
+        artFor = id
+        val track = PlayerService.library.firstOrNull { it.id == id }
+        if (track == null) { art.visibility = View.GONE; return }
+        Art.load(this, id, track.uri, 144) { bmp ->
+            // The track may have moved on while the file was being decoded.
+            if (artFor != id) return@load
+            if (bmp == null) {
+                art.visibility = View.GONE
+            } else {
+                art.setImageBitmap(bmp)
+                art.visibility = View.VISIBLE
+            }
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

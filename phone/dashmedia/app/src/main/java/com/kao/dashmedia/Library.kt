@@ -12,6 +12,8 @@ data class Track(
     override val artist: String,
     override val album: String,
     val durationMs: Long,
+    /** Seconds since epoch, from MediaStore. Drives "recently added". */
+    val addedSec: Long,
 ) : Tagged
 
 /**
@@ -30,6 +32,7 @@ object Library {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DATE_ADDED,
         )
         val out = ArrayList<Track>(256)
         context.contentResolver.query(
@@ -46,6 +49,7 @@ object Library {
             val arI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val alI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val dI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val addI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
             while (c.moveToNext()) {
                 val id = c.getLong(idI)
                 out.add(
@@ -60,6 +64,7 @@ object Library {
                         artist = clean(c.getString(arI)),
                         album = clean(c.getString(alI)),
                         durationMs = c.getLong(dI),
+                        addedSec = c.getLong(addI),
                     )
                 )
             }

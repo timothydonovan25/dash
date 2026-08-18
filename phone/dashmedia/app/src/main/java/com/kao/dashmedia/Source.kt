@@ -16,13 +16,27 @@ sealed interface Source {
     object All : Source
     data class Artist(val name: String) : Source
     data class Album(val artist: String, val title: String) : Source
+
+    /** A read-only MediaStore playlist, made by some other app. */
     data class Playlist(val id: Long, val name: String) : Source
+
+    /** One of ours, which can be edited. */
+    data class Owned(val id: Long, val name: String) : Source
+
+    /** The automatic lists. Contents depend on when you ask. */
+    object RecentAdded : Source
+    object RecentPlayed : Source
+    object MostPlayed : Source
 
     fun encode(): String = when (this) {
         is All -> "all"
-        is Artist -> join("artist", name)
-        is Album -> join("album", artist, title)
-        is Playlist -> join("playlist", id.toString(), name)
+        is Artist -> Esc.join("artist", name)
+        is Album -> Esc.join("album", artist, title)
+        is Playlist -> Esc.join("playlist", id.toString(), name)
+        is Owned -> Esc.join("owned", id.toString(), name)
+        is RecentAdded -> "recent_added"
+        is RecentPlayed -> "recent_played"
+        is MostPlayed -> "most_played"
     }
 
     /** How a header names it. */
@@ -31,52 +45,26 @@ sealed interface Source {
         is Artist -> Browse.display(name)
         is Album -> Browse.display(title)
         is Playlist -> name
+        is Owned -> name
+        is RecentAdded -> ""
+        is RecentPlayed -> ""
+        is MostPlayed -> ""
     }
 
     companion object {
-        /**
-         * ASCII unit separator: unlikely in a tag, unlike the colon, slash and
-         * pipe that all occur in real names. Unlikely is not the same as
-         * impossible, though, so values are escaped as well -- see [esc].
-         */
-        private const val SEP = "\u001F"
-
-        private fun join(vararg parts: String): String =
-            parts.joinToString(SEP) { esc(it) }
-
-        /**
-         * A playlist name is typed by a person and can contain anything at
-         * all, including this separator -- so the values are escaped rather
-         * than trusted. Without this, a playlist called "artist<sep>Gojira"
-         * came back decoded as "artist", which is the sort of bug that only
-         * ever shows up in someone else's library.
-         */
-        private fun esc(v: String): String =
-            v.replace("\\", "\\\\").replace(SEP, "\\s")
-
-        private fun unesc(v: String): String {
-            val sb = StringBuilder(v.length)
-            var i = 0
-            while (i < v.length) {
-                val c = v[i]
-                if (c == '\\' && i + 1 < v.length) {
-                    when (v[i + 1]) {
-                        '\\' -> { sb.append('\\'); i += 2 }
-                        's' -> { sb.append(SEP); i += 2 }
-                        else -> { sb.append(c); i++ }
-                    }
-                } else {
-                    sb.append(c); i++
-                }
-            }
-            return sb.toString()
-        }
 
         fun decode(s: String?): Source? {
             if (s.isNullOrEmpty()) return null
-            val parts = s.split(SEP).map { unesc(it) }
+            val parts = Esc.split(s)
             return when (parts.getOrNull(0)) {
                 "all" -> All
+                "recent_added" -> RecentAdded
+                "recent_played" -> RecentPlayed
+                "most_played" -> MostPlayed
+                "owned" -> {
+                    val id = parts.getOrNull(1)?.toLongOrNull()
+                    if (id != null) Owned(id, parts.getOrNull(2).orEmpty()) else null
+                }
                 "artist" -> parts.getOrNull(1)?.let { Artist(it) }
                 "album" -> {
                     val a = parts.getOrNull(1)

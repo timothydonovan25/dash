@@ -14,29 +14,53 @@
         android:orientation="vertical"
         android:padding="8dp">
 
-        <TextView
-            android:id="@+id/title"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="18sp"
-            android:textColor="@color/text"
-            android:maxLines="2"
-            android:ellipsize="end" />
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/artist"
-            style="@style/Row.Sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:textSize="14sp"
-            android:textColor="@color/accent" />
+            <!-- Hidden rather than shown as a placeholder box: a lot of this
+                 library has no embedded art, and an empty grey square on every
+                 other track is worse than the text having the width. -->
+            <ImageView
+                android:id="@+id/art"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:layout_marginEnd="8dp"
+                android:scaleType="centerCrop"
+                android:contentDescription="@string/album_art"
+                android:visibility="gone" />
 
-        <TextView
-            android:id="@+id/album"
-            style="@style/Row.Sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="16sp"
+                    android:textColor="@color/text"
+                    android:maxLines="3"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/artist"
+                    style="@style/Row.Sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textSize="13sp"
+                    android:textColor="@color/accent" />
+
+                <TextView
+                    android:id="@+id/album"
+                    style="@style/Row.Sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
 
         <ProgressBar
             android:id="@+id/bar"

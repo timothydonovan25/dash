@@ -11,8 +11,8 @@ import org.junit.Test
  */
 class SourceTest {
 
-    /** The same ASCII unit separator Source uses. Named, so it is visible. */
-    private val sep = "\u001F"
+    /** The separator Esc delimits with. Named, so it is visible. */
+    private val sep = Esc.SEP
 
     private fun round(s: Source): Source? = Source.decode(s.encode())
 

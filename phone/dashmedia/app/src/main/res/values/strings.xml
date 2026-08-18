@@ -6,6 +6,38 @@
     <string name="sec_playlists">PLAYLISTS</string>
     <string name="section_header">\u2039 %1$s \u203a</string>
     <string name="no_playlists">No playlists on this phone</string>
+    <string name="new_playlist">New playlist\u2026</string>
+    <string name="untitled">Untitled</string>
+    <string name="recently_added">Recently added</string>
+    <string name="recently_played">Recently played</string>
+    <string name="most_played">Most played</string>
+    <string name="read_only">%1$s \u00b7 read-only</string>
+    <string name="playlist_empty">Nothing in this playlist yet</string>
+    <string name="delete_q">Delete \u201c%1$s\u201d?</string>
+    <string name="copy_of">%1$s (copy)</string>
+    <string name="imported">Copied \u201c%1$s\u201d \u2014 the copy is editable</string>
+    <string name="added_to">Added to %1$s</string>
+    <string name="opt_rename">Rename</string>
+    <string name="opt_delete">Delete</string>
+    <string name="opt_import">Make an editable copy</string>
+    <string name="opt_next">Play next</string>
+    <string name="opt_queue">Add to queue</string>
+    <string name="opt_add_to">Add to playlist\u2026</string>
+    <string name="opt_up">Move up</string>
+    <string name="opt_down">Move down</string>
+    <string name="opt_remove">Remove from playlist</string>
+    <string name="search_prompt">Press 2\u20139 to search</string>
+    <string name="search_none">Nothing matches</string>
+    <string name="menu_rescan">Rescan library</string>
+    <string name="rescanning">Rescanning\u2026</string>
+    <plurals name="queued_next">
+        <item quantity="one">Playing next</item>
+        <item quantity="other">%d tracks playing next</item>
+    </plurals>
+    <plurals name="queued_end">
+        <item quantity="one">Added to queue</item>
+        <item quantity="other">%d tracks added</item>
+    </plurals>
     <string name="all_tracks">All tracks</string>
     <string name="all_by_artist">All by this artist</string>
     <string name="loading">Reading your music…</string>
@@ -40,6 +72,7 @@
     <string name="menu_boost">Audio boost: %1$s</string>
     <string name="menu_trim">Trim silent starts: %1$s</string>
     <string name="menu_about">About</string>
+    <string name="album_art">Album art</string>
     <string name="sleep_end">After this track</string>
     <string name="boost">Audio boost</string>
     <string name="boost_low">Low</string>
