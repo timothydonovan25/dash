@@ -25,7 +25,7 @@
         android:theme="@style/Theme.DashMedia">
 
         <activity
-            android:name=".ui.LibraryActivity"
+            android:name=".ui.BrowseActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
@@ -35,7 +35,7 @@
         </activity>
 
         <activity android:name=".ui.NowPlayingActivity" android:exported="false" />
-        <activity android:name=".ui.SettingsActivity" android:exported="false" />
+        <activity android:name=".ui.QueueActivity" android:exported="false" />
 
         <!-- Playback and the BLE link live in one foreground service; see the
              note in PlayerService.kt for why they are not separate. -->

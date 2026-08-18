@@ -5,4 +5,8 @@
     <color name="text">#FFFFFFFF</color>
     <color name="dim">#FF9A9A9A</color>
     <color name="accent">#FFFFB000</color>
+    <!-- The chrome strips sit a shade off the background so they read as
+         furniture rather than content. -->
+    <color name="strip">#FF141414</color>
+    <color name="focus">#FF2A2A2A</color>
 </resources>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One row. Focusable and clickable so the D-pad can reach it and the centre
-     key fires it; there is no touchscreen to fall back on. -->
+<!-- One row, used by browse and by the queue. Focusable and clickable so the
+     D-pad can reach it and OK can fire it; there is no touchscreen. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -8,13 +8,13 @@
     android:focusable="true"
     android:clickable="true"
     android:background="?android:attr/selectableItemBackground"
-    android:paddingStart="8dp"
-    android:paddingEnd="8dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
 
     <TextView
-        android:id="@+id/title"
+        android:id="@+id/label"
         style="@style/Row.Title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />

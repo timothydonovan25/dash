@@ -21,7 +21,7 @@ D-pad and keypad, 2 GB RAM. Every decision below comes from that list.
 |---|---|
 | Views and `RecyclerView`, not Compose | 2 GB, Go edition, and the whole UI is a list |
 | `targetSdk 30`, matching the device | Sideloaded, never on Play. Keeps the legacy permission model and pre-34 foreground-service rules — none of which this phone has — so there is nothing to reason about that the device will not actually do |
-| Flat track list, sorted | Artist → album → track is two more D-pad screens between you and a song |
+| Artist → album → track, in two sections | A flat list of 522 songs is one press from the song above it and five hundred from anything else. Left and right switch ARTISTS and PLAYLISTS at the top level |
 | Dark, 16 sp rows, ~7 to a screen | 240×320 read at arm's length, outdoors |
 | One foreground service for playback *and* BLE | Go kills background processes; a `MediaSessionService` is foreground whenever music plays, so the link is alive exactly when it has something to say |
 | No bonding | The characteristic is write-no-response with no auth. Pairing would add a failure mode and protect song titles |
