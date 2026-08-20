@@ -161,15 +161,22 @@ def phone_index() -> dict[tuple[str, str], str]:
     except Exception as e:
         print(f"  could not read the phone's library: {e}")
         return {}
+    # `content query` prints `key=value, key=value` and does not quote or
+    # escape anything, so splitting on ", " truncates every title with a comma
+    # in it -- "Vermilion, Pt. 2" becomes "Vermilion" and stops matching.
+    # Split only where a known column name begins.
+    sep = re.compile(r", (?=(?:_data|title|artist)=)")
     index = {}
     for line in out.splitlines():
         if not line.startswith("Row:"):
             continue
+        # Drop the "Row: N " prefix before the first key.
+        body = re.sub(r"^Row: \d+ ", "", line)
         fields = {}
-        for part in line.split(", "):
-            if "=" in part:
-                k, _, v = part.partition("=")
-                fields[k.split(" ")[-1].strip()] = v.strip()
+        for part in sep.split(body):
+            k, _, v = part.partition("=")
+            if k:
+                fields[k.strip()] = v.strip()
         data, title, artist = fields.get("_data"), fields.get("title"), fields.get("artist")
         if data and title and artist:
             index[(artist.lower(), title.lower())] = data

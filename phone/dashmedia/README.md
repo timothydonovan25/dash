@@ -60,7 +60,7 @@ python3 tools/dash_media_peripheral.py
 | `Esc.kt` | delimiting user text in a flat string, safely. Used by both of the above |
 | `T9.kt` | keypad search: 4-6-5 finds Gojira |
 | `LeadingSilence.kt` + `LeadingSilenceProcessor.kt` | where a track actually starts, and the media3 processor that acts on it |
-| `Art.kt` | album covers, off the main thread, small cache |
+| `Art.kt` | album covers: embedded if the file has any, else a cover file in the folder |
 | `Lrc.kt` | the .lrc format: timestamps, offsets, lookup by position. Pure, tested |
 | `Lyrics.kt` | finding the sidecar next to a track, off the main thread, small cache |
 | `Fmt.kt` | m:ss |
@@ -84,7 +84,7 @@ keypad the only thing worse than too few controls is controls that move.
 |---|---|
 | Browse | up/down the list, OK opens or plays, Back goes up a level. At the top of a section, **left/right switch ARTISTS and PLAYLISTS**. **2-9 starts a search**, `0` opens options for the highlighted row, `*` plays next, `#` appends to the queue |
 | Search | 2-9 type, Back deletes a digit before it leaves, OK plays |
-| Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · **up opens the lyrics**, down the queue |
+| Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · **up opens the lyrics**, down the queue. The line being sung shows under the progress bar |
 | Lyrics | follows the song; up/down reads ahead and it stops chasing until the next line |
 | Queue | OK plays that entry · `*` move up · `#` move down · `0` remove |
 
@@ -156,6 +156,21 @@ navigating Settings on a keypad:
 ```bash
 adb shell appops set --uid com.kao.dashmedia MANAGE_EXTERNAL_STORAGE allow
 ```
+
+## Album art
+
+Embedded art first, then a `cover.jpg` (or `folder.jpg`, `front.jpg`) beside
+the tracks — plenty of rips have no embedded image at all. `tools/fetch_covers.py`
+gets them from the Cover Art Archive and can copy them over:
+
+```bash
+python3 tools/fetch_covers.py --album "The Way of All Flesh" --push
+python3 tools/fetch_covers.py --push        # the whole library
+```
+
+Covers are downscaled before writing. The archive serves 3000×3000 JPEGs of
+7 MB and up; the screen is 240×320, and decoding one of those for a thumbnail
+would cost 36 MB of heap on a 2 GB phone.
 
 ## Known rough edges
 

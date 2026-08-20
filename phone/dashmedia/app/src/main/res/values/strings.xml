@@ -53,7 +53,7 @@
     <string name="nothing_playing">Nothing playing</string>
     <string name="playing">Playing</string>
     <string name="paused">Paused</string>
-    <string name="np_keys">OK play/pause · ◀▶ skip, hold to seek · ▲ lyrics ▼ queue</string>
+    <string name="np_keys">OK play/pause · ◀▶ skip · ▲ lyrics · ▼ queue</string>
 
     <!-- queue -->
     <string name="queue_keys">OK play · * up · # down · 0 remove</string>

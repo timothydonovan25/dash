@@ -12,6 +12,8 @@ import android.widget.TextView
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.kao.dashmedia.Art
+import com.kao.dashmedia.Lrc
+import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.Fmt
 import com.kao.dashmedia.Keys
 import com.kao.dashmedia.PlayerService
@@ -35,6 +37,11 @@ class NowPlayingActivity : PlayerActivity() {
     private lateinit var bar: ProgressBar
     private lateinit var state: TextView
     private lateinit var art: ImageView
+    private lateinit var lyric: TextView
+
+    /** The lyric for the current track, and which track it belongs to. */
+    private var lrc: Lrc = Lrc(emptyList())
+    private var lrcFor: Long = -1L
 
     /** Which track the cover on screen belongs to, so a late load is ignored. */
     private var artFor: Long = -1L
@@ -87,6 +94,7 @@ class NowPlayingActivity : PlayerActivity() {
         bar = findViewById(R.id.bar)
         state = findViewById(R.id.state)
         art = findViewById(R.id.art)
+        lyric = findViewById(R.id.lyric)
     }
 
     override fun onController(c: MediaController) {
@@ -137,6 +145,7 @@ class NowPlayingActivity : PlayerActivity() {
             state.setTextColor(getColor(R.color.text))
         }
         drawArt()
+        loadLyric()
         drawPosition()
     }
 
@@ -148,11 +157,38 @@ class NowPlayingActivity : PlayerActivity() {
         val known = dur > 0
         bar.max = if (known) (dur / 1000).toInt() else 1
         bar.progress = if (known) (pos / 1000).toInt().coerceAtMost(bar.max) else 0
+        drawLyric()
         elapsed.text = clock(pos)
         total.text = if (known) clock(dur) else "--:--"
     }
 
     private fun clock(ms: Long): String = Fmt.clock(ms)
+
+    /** One line of the song, under the bar. The whole thing is up on D-pad up. */
+    private fun loadLyric() {
+        val id = controller?.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        if (id == lrcFor) return
+        lrcFor = id
+        lrc = Lrc(emptyList())
+        lyric.text = ""
+        val track = PlayerService.library.firstOrNull { it.id == id } ?: return
+        Lyrics.load(this, track) { loaded ->
+            if (lrcFor != id) return@load
+            lrc = loaded
+            drawLyric()
+        }
+    }
+
+    private fun drawLyric() {
+        val c = controller ?: return
+        if (lrc.isEmpty) { lyric.visibility = View.GONE; return }
+        val i = lrc.indexAt(c.currentPosition)
+        // Before the first line, and during an instrumental gap, there is
+        // nothing to say -- so it says nothing rather than holding the last
+        // line up long after it was sung.
+        lyric.text = if (i >= 0) lrc.lines[i].text else ""
+        lyric.visibility = View.VISIBLE
+    }
 
     private fun drawArt() {
         val id = controller?.currentMediaItem?.mediaId?.toLongOrNull() ?: return
@@ -160,7 +196,7 @@ class NowPlayingActivity : PlayerActivity() {
         artFor = id
         val track = PlayerService.library.firstOrNull { it.id == id }
         if (track == null) { art.visibility = View.GONE; return }
-        Art.load(this, id, track.uri, 144) { bmp ->
+        Art.load(this, track, 144) { bmp ->
             // The track may have moved on while the file was being decoded.
             if (artFor != id) return@load
             if (bmp == null) {

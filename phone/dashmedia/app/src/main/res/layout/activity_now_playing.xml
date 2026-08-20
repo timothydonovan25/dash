@@ -99,10 +99,19 @@
                 android:textColor="@color/dim" />
         </LinearLayout>
 
-        <View
+        <!-- The line being sung. The whole lyric is one press up from here. -->
+        <TextView
+            android:id="@+id/lyric"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:layout_marginTop="6dp"
+            android:gravity="top|center_horizontal"
+            android:maxLines="3"
+            android:ellipsize="end"
+            android:textSize="13sp"
+            android:textColor="@color/accent"
+            android:visibility="gone" />
 
         <TextView
             android:layout_width="match_parent"
