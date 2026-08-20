@@ -138,9 +138,17 @@ Sidecar `.lrc` files only, read from beside the track — `Song.lrc` next to
 `tools/fetch_lyrics.py` makes the files on a desktop and can copy them over:
 
 ```bash
-python3 tools/fetch_lyrics.py --dry-run     # see what it would do
-python3 tools/fetch_lyrics.py --push        # write them, then copy to the phone
+python3 tools/fetch_lyrics.py --dry-run           # see what it would do
+python3 tools/fetch_lyrics.py --push              # write them, then copy over
+python3 tools/fetch_lyrics.py --verify --push     # and check each against its siblings
 ```
+
+`--verify` asks for a second opinion. lrclib had fifteen records for Gojira's
+*Oroborus*; fourteen agreed, and the one that disagreed carried another song's
+words — but its duration and album matched the file exactly, so the precise
+lookup preferred it over fourteen correct alternatives. Nothing about that
+record looks wrong on its own; it only looks wrong beside its siblings. The
+cost is one extra request per track.
 
 It writes **synced lyrics only**. Plain lyrics have no timestamps, every line
 is dropped by the parser, and the screen would report no lyrics at all — so an

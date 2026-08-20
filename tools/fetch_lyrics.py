@@ -16,6 +16,12 @@ That also applies to .lrc files already on disk: an untimed one is worthless
 to the app, so by default it is refetched and the original kept as `.lrc.bak`.
 `--keep-plain` leaves them alone instead.
 
+--verify asks for a second opinion: it compares the chosen lyric against the
+other records filed under the same track and prefers the majority. That costs
+an extra request per track and catches the case a precise match cannot -- a
+record whose duration and album fit perfectly while carrying another song's
+words. See the note on `consensus`.
+
 What leaves this machine: the artist, title, album and duration of each track,
 sent to lrclib.net. Nothing else, and only for tracks that need looking up.
 """
@@ -23,6 +29,7 @@ sent to lrclib.net. Nothing else, and only for tracks that need looking up.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -41,8 +48,15 @@ UA = "dashmedia-lrc/0.1 (https://github.com/; personal music library)"
 
 AUDIO = {".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wma", ".wav"}
 
+# Below this many records for one track, the database has no opinion worth
+# overriding a precise match with.
+MIN_OPINIONS = 3
+
 # A line that starts with a timestamp is what makes a .lrc worth having.
 TIMED = re.compile(r"^\[\d{1,3}:[0-5]\d", re.MULTILINE)
+
+# One timed line, captured without its timestamp.
+LINE = re.compile(r"^\[\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?\]\s*(.*)$")
 
 
 @dataclass
@@ -107,7 +121,61 @@ def get_json(url: str, timeout: int = 20):
         raise
 
 
-def lookup(t: Track) -> tuple[str | None, str]:
+def fingerprint(lyrics: str) -> str:
+    """Identify a lyric by what is sung, ignoring when.
+
+    Two records of the same song carry the same words on different timings, so
+    hashing the text alone is what groups them; hashing the file would put
+    every record in a group of its own.
+    """
+    words = []
+    for line in lyrics.splitlines():
+        m = LINE.match(line)
+        if m and m.group(1).strip():
+            words.append(re.sub(r"[^a-z0-9 ]", "", m.group(1).lower()))
+    return hashlib.sha1(" ".join(words).encode()).hexdigest()
+
+
+def consensus(chosen: str, results: list, t: Track):
+    """Second opinion on [chosen], from everything else filed under this track.
+
+    The failure this exists for: lrclib had fifteen records for Gojira's
+    Oroborus. Fourteen agreed. The one that disagreed carried a different
+    song's words -- and because it was the only one whose duration and album
+    matched the file exactly, the precise lookup preferred it over fourteen
+    correct alternatives. Nothing about that record looks wrong on its own;
+    it only looks wrong next to its siblings.
+
+    Returns (lyrics, why) when the majority disagrees clearly enough to
+    override, or None to keep what was chosen.
+    """
+    synced = [r for r in results if r.get("syncedLyrics")]
+    if len(synced) < MIN_OPINIONS:
+        return None                     # too few records to have a view
+
+    groups: dict[str, list] = {}
+    for r in synced:
+        groups.setdefault(fingerprint(r["syncedLyrics"]), []).append(r)
+
+    mine = fingerprint(chosen)
+    winner = max(groups, key=lambda k: len(groups[k]))
+    if winner == mine:
+        return None                     # already with the majority
+
+    agreed, dissent = len(groups[winner]), len(groups.get(mine, []))
+    if agreed < MIN_OPINIONS:
+        return None                     # no group is convincing
+    # Only override an actual outlier. A near-even split is a genuine
+    # disagreement about the song, not a bad record, and picking a side by
+    # counting would be worse than leaving the precise match alone.
+    if dissent * 3 > agreed:
+        return None
+
+    pick = min(groups[winner], key=lambda r: abs((r.get("duration") or 0) - t.seconds))
+    return pick["syncedLyrics"], f"{agreed} records agree, {dissent} did not"
+
+
+def lookup(t: Track, verify: bool = False) -> tuple[str | None, str]:
     """Return (synced lyrics, reason). Lyrics is None when there are none."""
     q = urllib.parse.urlencode(
         {
@@ -118,6 +186,7 @@ def lookup(t: Track) -> tuple[str | None, str]:
         }
     )
     hit = get_json(f"{API}/get?{q}")
+    results: list | None = None
 
     if hit is None:
         # The exact match is fussy about album spelling and duration. Searching
@@ -139,6 +208,15 @@ def lookup(t: Track) -> tuple[str | None, str]:
     lyrics = hit.get("syncedLyrics")
     if not lyrics:
         return None, "plain lyrics only"
+
+    if verify:
+        if results is None:
+            qs = urllib.parse.urlencode({"artist_name": t.artist, "track_name": t.title})
+            results = get_json(f"{API}/search?{qs}") or []
+        second = consensus(lyrics, results, t)
+        if second:
+            return second[0], f"corrected ({second[1]})"
+
     return lyrics, "ok"
 
 
@@ -219,6 +297,11 @@ def main() -> int:
     ap.add_argument("--keep-plain", action="store_true",
                     help="leave existing untimed .lrc files alone")
     ap.add_argument("--limit", type=int, default=0, help="stop after N lookups")
+    ap.add_argument("--verify", action="store_true",
+                    help="check each result against the other records for that "
+                         "track and prefer the majority. Costs one extra "
+                         "request per track; catches a record that matches the "
+                         "metadata exactly while carrying the wrong song")
     ap.add_argument("--delay", type=float, default=0.05, help="seconds between requests")
     ap.add_argument("--push", action="store_true", help="also copy results to the phone")
     ap.add_argument("--push-only", action="store_true",
@@ -233,7 +316,7 @@ def main() -> int:
     tracks = scan(args.dir)
     print(f"{len(tracks)} tracks with usable tags\n")
 
-    counts = {"written": 0, "skipped": 0, "replaced": 0}
+    counts = {"written": 0, "skipped": 0, "replaced": 0, "corrected": 0}
     misses: list[tuple[Track, str]] = []
 
     if not args.push_only:
@@ -254,7 +337,7 @@ def main() -> int:
 
             looked_up += 1
             try:
-                lyrics, why = lookup(t)
+                lyrics, why = lookup(t, verify=args.verify)
             except KeyboardInterrupt:
                 print("\ninterrupted")
                 break
@@ -269,7 +352,11 @@ def main() -> int:
                         counts["replaced"] += 1
                     t.lrc.write_text(lyrics, encoding="utf-8")
                 counts["written"] += 1
-                print(f"  ok   {t.artist} - {t.title}")
+                if why.startswith("corrected"):
+                    counts["corrected"] += 1
+                    print(f"  fix  {t.artist} - {t.title}  [{why}]")
+                else:
+                    print(f"  ok   {t.artist} - {t.title}")
             else:
                 misses.append((t, why))
                 print(f"  --   {t.artist} - {t.title}  ({why})")
@@ -285,6 +372,8 @@ def main() -> int:
 
     print("\n--- summary ---")
     print(f"written : {counts['written']}   (replacing {counts['replaced']} untimed files)")
+    if args.verify:
+        print(f"          {counts['corrected']} overruled by consensus")
     print(f"skipped : {counts['skipped']}   (already had synced lyrics)")
     print(f"missing : {len(misses)}")
     if misses:
