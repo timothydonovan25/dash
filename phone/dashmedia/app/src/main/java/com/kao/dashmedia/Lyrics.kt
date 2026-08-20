@@ -73,6 +73,17 @@ object Lyrics {
         return null
     }
 
+    /**
+     * A synchronous read, for the lyric index.
+     *
+     * Never call this from the main thread: it opens and parses a file. The
+     * callback version above exists for everything else.
+     */
+    fun loadBlocking(track: Track): Lrc {
+        if (track.path.isEmpty()) return EMPTY
+        return LrcParser.parse(runCatching { read(track.path) }.getOrNull())
+    }
+
     /** Forget everything, for the rescan in settings. */
     fun clear() {
         cache.evictAll()

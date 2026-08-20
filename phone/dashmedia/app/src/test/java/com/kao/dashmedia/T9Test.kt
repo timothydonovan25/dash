@@ -102,6 +102,37 @@ class T9Test {
     }
 
     @Test
+    fun `a keyed line matches the same things a plain one does`() {
+        // The lyric index keys every line once and matches against that, so it
+        // has to agree with the ordinary matcher or searching lyrics would find
+        // different songs than searching titles.
+        val text = "Everyone is doing their best"
+        val keyed = T9.keyLine(text)
+        assertTrue(T9.keyedMatches("3", keyed))            // everyone, doing -> 3...
+        assertTrue(T9.keyedMatches("38", keyed))           // everyone -> 38379663
+        assertTrue(T9.keyedMatches("2378", keyed))         // best
+        assertFalse(T9.keyedMatches("999", keyed))
+    }
+
+    @Test
+    fun `a keyed line requires every term, as word starts`() {
+        val keyed = T9.keyLine("Everyone is doing their best")
+        // Both terms present, in any order.
+        assertTrue(T9.keyedMatches("2378 3646", keyed))    // best + doing
+        assertTrue(T9.keyedMatches("3646 2378", keyed))
+        // One term absent fails the whole line.
+        assertFalse(T9.keyedMatches("2378 999", keyed))
+        // Mid-word does not count.
+        assertFalse(T9.keyedMatches("478", keyed))
+    }
+
+    @Test
+    fun `an empty query matches no line, unlike an empty search`() {
+        // Nothing typed should not make every lyric in the library a hit.
+        assertFalse(T9.keyedMatches("", T9.keyLine("anything at all")))
+    }
+
+    @Test
     fun `the hint draws the boundary`() {
         assertEquals("ghi mno jkl · abc", T9.hint("465 2"))
     }

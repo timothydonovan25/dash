@@ -17,6 +17,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.kao.dashmedia.DashLink
 import com.kao.dashmedia.Keys
+import com.kao.dashmedia.LyricIndex
 import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.MediaWatcher
 import com.kao.dashmedia.PlayMode
@@ -198,6 +199,7 @@ abstract class PlayerActivity : AppCompatActivity() {
                         // cached the same way and for the same reason.
                         PlayerService.instance?.rescan()
                         Lyrics.clear()
+                        LyricIndex.clear()
                         toast(getString(R.string.rescanning))
                     }
                     7 -> openAbout()

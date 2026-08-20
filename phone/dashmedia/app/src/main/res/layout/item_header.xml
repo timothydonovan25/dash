@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A section divider in the search results. Not focusable: the D-pad walks
+     past it to the next real row rather than stopping on a label. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/header"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/strip"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp"
+    android:textSize="10sp"
+    android:textStyle="bold"
+    android:textAllCaps="true"
+    android:textColor="@color/accent" />

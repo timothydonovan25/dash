@@ -99,6 +99,30 @@ object T9 {
     }
 
     /**
+     * A line of text as one keyed string: " w1 w2 w3 ", each word in digits.
+     *
+     * Searching lyrics means testing the same line against a new query on
+     * every keypress, across every line of every song. Converting the text
+     * each time is the expensive part, so it is done once and kept; matching
+     * then costs an indexOf per term.
+     */
+    fun keyLine(text: String): String =
+        words(text).joinToString(separator = " ", prefix = " ", postfix = " ")
+
+    /**
+     * Does every term in [query] begin a word of [keyed]?
+     *
+     * [keyed] comes from [keyLine]. Because every word is surrounded by
+     * spaces, "does a word start with this term" is exactly "does the string
+     * contain a space followed by the term".
+     */
+    fun keyedMatches(query: String, keyed: String): Boolean {
+        val parts = query.split(' ').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return false
+        return parts.all { keyed.contains(" $it") }
+    }
+
+    /**
      * "465 2" -> "ghi mno jkl · abc", for showing what has been typed.
      *
      * The boundary is drawn rather than dropped: without it the hint for two

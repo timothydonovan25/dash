@@ -29,6 +29,10 @@
     <string name="opt_remove">Remove from playlist</string>
     <string name="search_prompt">Press 2\u20139 to search, 0 for a space</string>
     <string name="search_none">Nothing matches</string>
+    <string name="sec_songs">Songs</string>
+    <string name="sec_playlists_r">Playlists</string>
+    <string name="sec_artists_r">Artists</string>
+    <string name="sec_by_lyric">Songs by lyric</string>
     <string name="menu_rescan">Rescan library</string>
     <string name="rescanning">Rescanning\u2026</string>
     <plurals name="queued_next">

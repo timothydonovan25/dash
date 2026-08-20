@@ -42,6 +42,17 @@ import com.kao.dashmedia.Track
  */
 class BrowseActivity : PlayerActivity() {
 
+    companion object {
+        /**
+         * Open straight at an artist or a playlist, as an encoded [Source].
+         *
+         * Search hands artists and playlists back here rather than growing its
+         * own version of these screens, and Source already knows how to name
+         * one of them in a string -- with tests -- so nothing new is invented.
+         */
+        const val EXTRA_OPEN = "open"
+    }
+
     private class Row(
         val label: String,
         val sub: String,
@@ -75,7 +86,33 @@ class BrowseActivity : PlayerActivity() {
         title = findViewById(R.id.title)
         list.layoutManager = LinearLayoutManager(this)
         list.adapter = Adapter()
+        openFrom(intent)
         ensurePermissions()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openFrom(intent)
+        rebuild()
+    }
+
+    /** Jump to wherever a deep link points, before the first draw. */
+    private fun openFrom(intent: Intent) {
+        val src = Source.decode(intent.getStringExtra(EXTRA_OPEN)) ?: return
+        artist = null; album = null; playlist = null; owned = null
+        when (src) {
+            is Source.Artist -> { section = Section.Artists; artist = src.name }
+            is Source.Owned -> {
+                section = Section.Playlists
+                owned = PlayerService.instance?.stash?.find(src.id)
+            }
+            is Source.Playlist -> {
+                section = Section.Playlists
+                playlist = PlayerService.playlists.firstOrNull { it.id == src.id }
+            }
+            else -> Unit
+        }
     }
 
     override fun onController(c: MediaController) = rebuild()
