@@ -14,3 +14,6 @@ phone/**/build/
 phone/**/.gradle/
 phone/**/local.properties
 __pycache__/
+
+# report written by tools/fetch_lyrics.py
+lyrics-misses.txt

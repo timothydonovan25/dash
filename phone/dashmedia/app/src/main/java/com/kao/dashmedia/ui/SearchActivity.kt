@@ -1,7 +1,12 @@
 package com.kao.dashmedia.ui
 
 import android.content.Intent
+import android.graphics.Typeface
 import android.os.Bundle
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -52,7 +57,13 @@ class SearchActivity : PlayerActivity() {
         class Header(val title: String) : Row
         class Song(val track: Track, val within: List<Track>, val at: Int) : Row
         class Opens(val label: String, val sub: String, val open: Source) : Row
-        class Lyric(val track: Track, val line: String, val within: List<Track>, val at: Int) : Row
+        class Lyric(
+            val track: Track,
+            val line: String,
+            val query: String,
+            val within: List<Track>,
+            val at: Int,
+        ) : Row
     }
 
     private lateinit var query: TextView
@@ -157,7 +168,7 @@ class SearchActivity : PlayerActivity() {
         val tracks = hits.map { it.track }
         val more = ArrayList<Row>(hits.size + 1)
         more.add(Row.Header(getString(R.string.sec_by_lyric)))
-        hits.forEachIndexed { i, h -> more.add(Row.Lyric(h.track, h.line, tracks, i)) }
+        hits.forEachIndexed { i, h -> more.add(Row.Lyric(h.track, h.line, q, tracks, i)) }
         rows = rows + more
         empty.visibility = View.GONE
         list.adapter?.notifyDataSetChanged()
@@ -206,6 +217,30 @@ class SearchActivity : PlayerActivity() {
     }
 
     private fun count(n: Int) = resources.getQuantityString(R.plurals.tracks, n, n)
+
+    /**
+     * Mark the words the query matched.
+     *
+     * Whole words, not matched prefixes: half a word in a different colour
+     * reads as a rendering fault rather than an answer. The ranges come from
+     * [T9.matchRanges], which indexes the original text -- folding for accents
+     * changes a string's length, so indices taken from folded text would point
+     * at the wrong characters.
+     */
+    private fun highlight(line: String, q: String): CharSequence {
+        val ranges = T9.matchRanges(q, line)
+        if (ranges.isEmpty()) return line
+        val out = SpannableString(line)
+        val colour = getColor(R.color.accent)
+        for (r in ranges) {
+            val end = r.last + 1
+            out.setSpan(ForegroundColorSpan(colour), r.first, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            out.setSpan(StyleSpan(Typeface.BOLD), r.first, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return out
+    }
 
     private fun showEmpty(msg: Int) {
         empty.setText(msg)
@@ -278,12 +313,14 @@ class SearchActivity : PlayerActivity() {
                     val (label, sub) = when (r) {
                         is Row.Song -> r.track.title to
                             "${Browse.display(r.track.artist)}  ${Fmt.clock(r.track.durationMs)}"
-                        is Row.Opens -> r.label to r.sub
+                        is Row.Opens -> r.label to (r.sub as CharSequence)
                         // The line that matched, under the song it came from:
                         // "this song" is not an answer to "the one that goes
-                        // like this".
-                        is Row.Lyric -> r.track.title to r.line
-                        is Row.Header -> "" to ""
+                        // like this". The words that matched are marked, so it
+                        // is clear which part of the line answered the query
+                        // rather than leaving it to be re-read.
+                        is Row.Lyric -> r.track.title to highlight(r.line, r.query)
+                        is Row.Header -> "" to ("" as CharSequence)
                     }
                     h.label.text = label
                     h.sub.text = sub

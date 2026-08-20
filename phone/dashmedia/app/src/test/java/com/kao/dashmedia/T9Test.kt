@@ -138,6 +138,58 @@ class T9Test {
     }
 
     @Test
+    fun `match ranges point at whole words in the original text`() {
+        // 9255 is w-a-l-k. The range must cover the word, not the prefix.
+        val text = "walking down the road"
+        val r = T9.matchRanges("9255", text)
+        assertEquals(1, r.size)
+        assertEquals("walking", text.substring(r[0].first, r[0].last + 1))
+    }
+
+    @Test
+    fun `every term contributes a range`() {
+        val text = "walking down the road"
+        val r = T9.matchRanges("9255 3696", text)   // walk..., down
+        assertEquals(2, r.size)
+        assertEquals("walking", text.substring(r[0].first, r[0].last + 1))
+        assertEquals("down", text.substring(r[1].first, r[1].last + 1))
+    }
+
+    @Test
+    fun `a term that matches nothing contributes no range`() {
+        assertEquals(emptyList<IntRange>(), T9.matchRanges("999", "walking down the road"))
+    }
+
+    @Test
+    fun `an empty query highlights nothing`() {
+        // Otherwise opening the screen would light up every line at once.
+        assertEquals(emptyList<IntRange>(), T9.matchRanges("", "walking down the road"))
+    }
+
+    @Test
+    fun `ranges survive accents, which change length when folded`() {
+        // The folded form of this text is longer than the original, so an
+        // index taken from folded text would point at the wrong character.
+        val text = "Mötley walking"
+        val r = T9.matchRanges("6685", text)        // motl...
+        assertEquals(1, r.size)
+        assertEquals("Mötley", text.substring(r[0].first, r[0].last + 1))
+    }
+
+    @Test
+    fun `punctuation between words is not swept into a range`() {
+        val text = "stop, walking away"
+        val r = T9.matchRanges("9255", text)
+        assertEquals("walking", text.substring(r[0].first, r[0].last + 1))
+    }
+
+    @Test
+    fun `the same word twice is highlighted twice`() {
+        val text = "walking and walking"
+        assertEquals(2, T9.matchRanges("9255", text).size)
+    }
+
+    @Test
     fun `words handles empty and symbol-only text`() {
         assertEquals(emptyList<String>(), T9.words(""))
         assertEquals(emptyList<String>(), T9.words("--- !!! ---"))

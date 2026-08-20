@@ -99,6 +99,49 @@ object T9 {
     }
 
     /**
+     * The digit a single character sits on, folding accents as it goes.
+     *
+     * Per character rather than per string because [fold] normalises, which
+     * changes a string's length -- so an index into folded text does not point
+     * at the same place in the original, and highlighting needs indices that
+     * do.
+     */
+    private fun keyOf(c: Char): Char? {
+        if (c.isDigit()) return c
+        val folded = Normalizer.normalize(c.lowercaseChar().toString(), Normalizer.Form.NFD)
+            .replace(DIACRITICS, "")
+        return KEYS[folded.firstOrNull() ?: return null]
+    }
+
+    /**
+     * Where in [text] the words begun by [query]'s terms are.
+     *
+     * Ranges are into the original string, so they can be used to mark up the
+     * text that is actually on screen. Whole words are returned rather than
+     * matched prefixes: half a highlighted word looks like a rendering fault,
+     * not an answer.
+     */
+    fun matchRanges(query: String, text: String): List<IntRange> {
+        val parts = query.split(' ').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return emptyList()
+        val out = ArrayList<IntRange>(4)
+        var i = 0
+        while (i < text.length) {
+            if (keyOf(text[i]) == null) { i++; continue }
+            val start = i
+            val word = StringBuilder()
+            while (i < text.length) {
+                val k = keyOf(text[i]) ?: break
+                word.append(k)
+                i++
+            }
+            val w = word.toString()
+            if (parts.any { w.startsWith(it) }) out.add(start until i)
+        }
+        return out
+    }
+
+    /**
      * A line of text as one keyed string: " w1 w2 w3 ", each word in digits.
      *
      * Searching lyrics means testing the same line against a new query on
