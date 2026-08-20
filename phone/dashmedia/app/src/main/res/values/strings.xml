@@ -81,6 +81,7 @@
     <string name="timing_later">%1$s s later</string>
     <string name="menu_files">All files access (for lyrics): %1$s</string>
     <string name="lyrics">Lyrics</string>
+    <string name="lyrics_keys">▲▼ scroll · OK jump to that line</string>
     <string name="lyrics_none">No .lrc file beside this track</string>
     <string name="lyrics_no_access">Needs all-files access. Settings \u2192 All files access, or press 0.</string>
     <string name="about_files">All files access: %1$s</string>

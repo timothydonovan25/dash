@@ -29,9 +29,19 @@ import com.kao.dashmedia.R
  * search on that tick -- often enough that the polling interval is not itself
  * mistaken for the lyric being late.
  *
- * Following is suspended while you scroll by hand and resumes when the song
- * moves on, because a list that yanks itself back every half second is
- * unusable if you wanted to read ahead.
+ * Up and down move a selection through the lines and OK jumps playback to the
+ * selected one, which is the fastest way back to a verse you want again.
+ *
+ * The selection is drawn rather than held by the views: the rows are not
+ * focusable, and a RecyclerView with nothing focusable in it does not scroll
+ * on a D-pad at all -- so the screen owns the selection, exactly as the queue
+ * screen does.
+ *
+ * Following the song is suspended the moment you move the selection, and
+ * resumes when you either jump the song to a line with OK or scroll back onto
+ * the line being sung. It deliberately does not resume on its own: a list that
+ * takes itself back every few seconds cannot be read ahead of, which is most
+ * of why you would open this screen while something is playing.
  */
 class LyricsActivity : PlayerActivity() {
 
@@ -40,10 +50,16 @@ class LyricsActivity : PlayerActivity() {
     private lateinit var title: TextView
 
     private var lrc: Lrc = Lrc(emptyList())
+
+    /** The line the song is on. */
     private var current = -1
+
+    /** The line the D-pad is on. Follows [current] until you move it. */
+    private var selected = -1
+
     private var loadedFor = -1L
 
-    /** Set while the user is scrolling; cleared when the line changes. */
+    /** False while you are reading elsewhere; true again on the next line. */
     private var following = true
 
     private val ui = Handler(Looper.getMainLooper())
@@ -104,6 +120,7 @@ class LyricsActivity : PlayerActivity() {
         loadedFor = id
         lrc = Lrc(emptyList())
         current = -1
+        selected = -1
         list.adapter?.notifyDataSetChanged()
 
         val track = PlayerService.library.firstOrNull { it.id == id }
@@ -133,14 +150,43 @@ class LyricsActivity : PlayerActivity() {
         if (at == current) return
         val previous = current
         current = at
-        // A new line is the moment to take the list back, however far the
-        // reader wandered.
-        following = true
         if (previous >= 0) list.adapter?.notifyItemChanged(previous)
-        if (at >= 0) {
-            list.adapter?.notifyItemChanged(at)
+        if (at < 0) return
+        list.adapter?.notifyItemChanged(at)
+        // Only take the list back if the reader has not gone elsewhere.
+        if (following) {
+            selected = at
             centre(at)
         }
+    }
+
+    private fun move(delta: Int) {
+        if (lrc.isEmpty) return
+        val was = selected
+        selected = (if (was < 0) current.coerceAtLeast(0) else was + delta)
+            .coerceIn(0, lrc.lines.size - 1)
+        if (selected == was) return
+        // Reading elsewhere stops the chase; scrolling back onto the line being
+        // sung is the other way to rejoin it, without having to seek.
+        following = selected == current
+        if (was >= 0) list.adapter?.notifyItemChanged(was)
+        list.adapter?.notifyItemChanged(selected)
+        (list.layoutManager as? LinearLayoutManager)
+            ?.scrollToPositionWithOffset(selected, list.height / 3)
+    }
+
+    /** Jump the song to the selected line. */
+    private fun seekToSelected() {
+        val c = controller ?: return
+        val line = lrc.lines.getOrNull(selected) ?: return
+        // The display asks for the line at `position + offset`, so landing on
+        // this line means seeking to its time *minus* the correction --
+        // otherwise a corrected lyric jumps to the wrong place by exactly the
+        // amount of the correction.
+        val to = (line.timeMs - Prefs(this).lyricOffsetMs).coerceAtLeast(0L)
+        c.seekTo(to)
+        following = true
+        follow()
     }
 
     /** Put the current line a third of the way down rather than at the top. */
@@ -152,16 +198,11 @@ class LyricsActivity : PlayerActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                // Reading ahead: stop dragging the list back until the song
-                // reaches the next line.
-                following = false
-                return super.onKeyDown(keyCode, event)
-            }
+            KeyEvent.KEYCODE_DPAD_UP -> { move(-1); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN -> { move(1); return true }
         }
-        val c = controller ?: return super.onKeyDown(keyCode, event)
         if (Keys.isSelect(event)) {
-            if (c.isPlaying) c.pause() else c.play()
+            seekToSelected()
             return true
         }
         // Nowhere else to grant it from: the system screen is the only way.
@@ -183,9 +224,16 @@ class LyricsActivity : PlayerActivity() {
             // An instrumental gap is a real entry, and showing it blank is
             // what makes the highlight visibly leave the previous line.
             holder.text.text = line.text
-            val now = position == current
-            holder.text.setTextColor(getColor(if (now) R.color.accent else R.color.dim))
-            holder.text.textSize = if (now) 15f else 13f
+            // Two different things, drawn differently: the line the song is on,
+            // and the line the D-pad is on. They are usually the same, and the
+            // whole point of this screen is the moments when they are not.
+            val singing = position == current
+            holder.text.setTextColor(getColor(if (singing) R.color.accent else R.color.dim))
+            holder.text.textSize = if (singing) 15f else 13f
+            holder.itemView.setBackgroundResource(
+                if (position == selected && !following) R.color.focus
+                else android.R.color.transparent
+            )
         }
     }
 
