@@ -14,6 +14,15 @@ data class Track(
     val durationMs: Long,
     /** Seconds since epoch, from MediaStore. Drives "recently added". */
     val addedSec: Long,
+    /**
+     * The file's path on disk.
+     *
+     * DATA is deprecated and scoped storage is the reason, but a .lrc sitting
+     * beside the mp3 is not a media file and cannot be reached through
+     * MediaStore at all -- so with all-files access granted, the path is the
+     * only way to find it.
+     */
+    val path: String,
 ) : Tagged
 
 /**
@@ -33,6 +42,7 @@ object Library {
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.DATE_ADDED,
+            @Suppress("DEPRECATION") MediaStore.Audio.Media.DATA,
         )
         val out = ArrayList<Track>(256)
         context.contentResolver.query(
@@ -50,6 +60,8 @@ object Library {
             val alI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val dI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val addI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            @Suppress("DEPRECATION")
+            val pathI = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
             while (c.moveToNext()) {
                 val id = c.getLong(idI)
                 out.add(
@@ -65,6 +77,7 @@ object Library {
                         album = clean(c.getString(alI)),
                         durationMs = c.getLong(dI),
                         addedSec = c.getLong(addI),
+                        path = c.getString(pathI) ?: "",
                     )
                 )
             }

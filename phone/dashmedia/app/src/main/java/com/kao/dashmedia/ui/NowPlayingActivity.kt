@@ -180,6 +180,12 @@ class NowPlayingActivity : PlayerActivity() {
             startActivity(Intent(this, QueueActivity::class.java))
             return true
         }
+        // Up for words, down for what is coming. Both before the controller
+        // check: a key that does nothing reads as a broken app.
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            startActivity(Intent(this, LyricsActivity::class.java))
+            return true
+        }
         val c = controller ?: return super.onKeyDown(keyCode, event)
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {

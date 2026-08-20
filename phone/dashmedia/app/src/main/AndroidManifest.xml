@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- A .lrc beside an mp3 is not a media file, so MediaStore will not hand
+         one over whatever else is granted. This is the permission that lets
+         the player read the lyrics sitting next to the music. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -37,6 +41,7 @@
         <activity android:name=".ui.NowPlayingActivity" android:exported="false" />
         <activity android:name=".ui.QueueActivity" android:exported="false" />
         <activity android:name=".ui.SearchActivity" android:exported="false" />
+        <activity android:name=".ui.LyricsActivity" android:exported="false" />
 
         <!-- A second launcher entry, so the Programmable Keys screen can bind a
              side button to it: those keys choose an app, not a keycode. It has

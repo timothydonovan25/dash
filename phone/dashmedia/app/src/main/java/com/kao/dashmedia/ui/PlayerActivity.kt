@@ -17,6 +17,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.kao.dashmedia.DashLink
 import com.kao.dashmedia.Keys
+import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.MediaWatcher
 import com.kao.dashmedia.PlayMode
 import com.kao.dashmedia.PlayerService
@@ -166,6 +167,10 @@ abstract class PlayerActivity : AppCompatActivity() {
                 getString(if (svc?.trimSilence() != false) R.string.on else R.string.off),
             ),
             getString(R.string.menu_access, getString(access)),
+            getString(
+                R.string.menu_files,
+                getString(if (Lyrics.canRead()) R.string.on else R.string.off),
+            ),
             getString(R.string.menu_rescan),
             getString(R.string.menu_about),
         )
@@ -180,14 +185,19 @@ abstract class PlayerActivity : AppCompatActivity() {
                         drawChrome()
                     }
                     3 -> startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    4 -> {
+                    4 -> startActivity(
+                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    )
+                    5 -> {
                         // The library is cached for the life of the process,
                         // which is what makes coming back instant and what
-                        // stops new music from ever showing up.
+                        // stops new music from ever showing up. Lyrics are
+                        // cached the same way and for the same reason.
                         PlayerService.instance?.rescan()
+                        Lyrics.clear()
                         toast(getString(R.string.rescanning))
                     }
-                    5 -> openAbout()
+                    6 -> openAbout()
                 }
             }
             .show()
@@ -279,6 +289,8 @@ abstract class PlayerActivity : AppCompatActivity() {
             append("\n")
             append(getString(R.string.about_location,
                 granted(Manifest.permission.ACCESS_FINE_LOCATION)))
+            append("\n")
+            append(getString(R.string.about_files, if (Lyrics.canRead()) yes else no))
             append("\n")
             append(getString(R.string.about_notif,
                 if (MediaWatcher.hasAccess(this@PlayerActivity)) yes else no))

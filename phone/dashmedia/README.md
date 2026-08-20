@@ -61,6 +61,8 @@ python3 tools/dash_media_peripheral.py
 | `T9.kt` | keypad search: 4-6-5 finds Gojira |
 | `LeadingSilence.kt` + `LeadingSilenceProcessor.kt` | where a track actually starts, and the media3 processor that acts on it |
 | `Art.kt` | album covers, off the main thread, small cache |
+| `Lrc.kt` | the .lrc format: timestamps, offsets, lookup by position. Pure, tested |
+| `Lyrics.kt` | finding the sidecar next to a track, off the main thread, small cache |
 | `Fmt.kt` | m:ss |
 | `Keys.kt` | the XP3900 keypad, including the two softkeys the SDK has no names for |
 | `Prefs.kt` | the little that outlives the process |
@@ -82,7 +84,8 @@ keypad the only thing worse than too few controls is controls that move.
 |---|---|
 | Browse | up/down the list, OK opens or plays, Back goes up a level. At the top of a section, **left/right switch ARTISTS and PLAYLISTS**. **2-9 starts a search**, `0` opens options for the highlighted row, `*` plays next, `#` appends to the queue |
 | Search | 2-9 type, Back deletes a digit before it leaves, OK plays |
-| Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · down opens the queue |
+| Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · **up opens the lyrics**, down the queue |
+| Lyrics | follows the song; up/down reads ahead and it stops chasing until the next line |
 | Queue | OK plays that entry · `*` move up · `#` move down · `0` remove |
 
 Digits go to search rather than to actions, because search is what you reach
@@ -128,6 +131,22 @@ Two kinds, and the list says which is which:
   **read-only**. An app on API 30 may only modify playlists it created, so
   editing one means taking an editable copy, which is an explicit action.
 
+## Lyrics
+
+Sidecar `.lrc` files only, read from beside the track — `Song.lrc` next to
+`Song.mp3`, or the `Song.mp3.lrc` some taggers write. Nothing is fetched; the
+files are made elsewhere and copied over with the music.
+
+A `.lrc` is **not a media file**, so MediaStore will not hand one over no
+matter what is granted through it. That is why the app asks for all-files
+access, and why it reads the track's path directly. Without the grant the
+lyrics screen says so rather than looking empty. To grant it without
+navigating Settings on a keypad:
+
+```bash
+adb shell appops set --uid com.kao.dashmedia MANAGE_EXTERNAL_STORAGE allow
+```
+
 ## Known rough edges
 
 - **Audio boost** is a system `AudioEffect`, and any handset may refuse it. A
@@ -145,3 +164,7 @@ Two kinds, and the list says which is which:
 - **Not exercised on the device yet**: creating a playlist end to end, and the
   skip-on-error path. Both have unit tests underneath them; neither button has
   been pressed on real hardware.
+- **The side buttons do nothing with the flip shut.** The keys fire and the
+  kernel reports them, but no key in `gpio-keys.kl` carries the `WAKE` flag, so
+  Android discards them while the device is asleep. Not fixable from an app; a
+  headset media button works, because that reaches the session directly.
