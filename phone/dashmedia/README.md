@@ -150,8 +150,13 @@ untimed `.lrc` already on disk is refetched, with the original kept as
 A `.lrc` is **not a media file**, so MediaStore will not hand one over no
 matter what is granted through it. That is why the app asks for all-files
 access, and why it reads the track's path directly. Without the grant the
-lyrics screen says so rather than looking empty. To grant it without
-navigating Settings on a keypad:
+lyrics screen says so rather than looking empty. If the words feel late, **Settings → Lyric timing** shifts them, in words
+rather than signs — "0.2 s earlier" leaves no doubt which way it goes. It is
+one value for the whole library, because the usual cause is the player rather
+than any individual file. A file's own `[offset:]` tag means the same thing in
+the same direction and the two add up.
+
+To grant all-files access without navigating Settings on a keypad:
 
 ```bash
 adb shell appops set --uid com.kao.dashmedia MANAGE_EXTERNAL_STORAGE allow

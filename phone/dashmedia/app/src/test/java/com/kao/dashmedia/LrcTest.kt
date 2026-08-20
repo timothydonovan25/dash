@@ -150,6 +150,36 @@ class LrcTest {
     }
 
     @Test
+    fun `a positive correction shows lines earlier`() {
+        // What you reach for when the words feel late: at 9.8s, a 300ms
+        // correction is already showing the line timed at 10s.
+        assertEquals(-1, song.indexAt(9_800))
+        assertEquals(0, song.indexAt(9_800, offsetMs = 300))
+    }
+
+    @Test
+    fun `a negative correction holds lines back`() {
+        assertEquals(0, song.indexAt(10_000))
+        assertEquals(-1, song.indexAt(10_000, offsetMs = -300))
+    }
+
+    @Test
+    fun `the correction means the same as a file's own offset tag`() {
+        // [offset:+500] shifts the file's timestamps earlier; a +500
+        // correction at lookup does the same to the same song. One word, one
+        // meaning, whichever end it arrives from.
+        val fromFile = LrcParser.parse("[offset:+500]\n[00:10.00]a")
+        val fromSetting = LrcParser.parse("[00:10.00]a")
+        assertEquals(0, fromFile.indexAt(9_500))
+        assertEquals(0, fromSetting.indexAt(9_500, offsetMs = 500))
+    }
+
+    @Test
+    fun `a correction cannot look before the start of the lyric`() {
+        assertEquals(-1, song.indexAt(0, offsetMs = -5_000))
+    }
+
+    @Test
     fun `lookup on an empty lyric does not explode`() {
         assertEquals(-1, LrcParser.parse("").indexAt(1_000))
     }

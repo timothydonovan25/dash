@@ -21,17 +21,23 @@ data class Lrc(
      * Index of the line that should be showing at [positionMs], or -1 before
      * the first one.
      *
+     * [offsetMs] corrects timing that is out: **positive shows lines earlier**,
+     * which is the correction for lyrics that feel late. It is the same sense
+     * as a file's own `[offset:]` tag, deliberately -- one meaning for one
+     * word, whichever end it comes from.
+     *
      * Binary search rather than a scan: this is called on every progress tick,
      * and a linear walk of a long lyric would be work done sixty times a
      * minute for no reason.
      */
-    fun indexAt(positionMs: Long): Int {
+    fun indexAt(positionMs: Long, offsetMs: Int = 0): Int {
+        val at = positionMs + offsetMs
         var lo = 0
         var hi = lines.size - 1
         var found = -1
         while (lo <= hi) {
             val mid = (lo + hi) ushr 1
-            if (lines[mid].timeMs <= positionMs) {
+            if (lines[mid].timeMs <= at) {
                 found = mid
                 lo = mid + 1
             } else {

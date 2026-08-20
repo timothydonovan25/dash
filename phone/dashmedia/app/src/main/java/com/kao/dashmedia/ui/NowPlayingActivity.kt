@@ -17,6 +17,7 @@ import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.Fmt
 import com.kao.dashmedia.Keys
 import com.kao.dashmedia.PlayerService
+import com.kao.dashmedia.Prefs
 import com.kao.dashmedia.R
 
 /**
@@ -79,7 +80,10 @@ class NowPlayingActivity : PlayerActivity() {
     private val tick = object : Runnable {
         override fun run() {
             drawPosition()
-            ui.postDelayed(this, 500)
+            // Four times a second. At twice a second a line could arrive half
+            // a second late on its own, which reads as the lyric lagging when
+            // it is really the polling.
+            ui.postDelayed(this, 250)
         }
     }
 
@@ -182,7 +186,7 @@ class NowPlayingActivity : PlayerActivity() {
     private fun drawLyric() {
         val c = controller ?: return
         if (lrc.isEmpty) { lyric.visibility = View.GONE; return }
-        val i = lrc.indexAt(c.currentPosition)
+        val i = lrc.indexAt(c.currentPosition, Prefs(this).lyricOffsetMs)
         // Before the first line, and during an instrumental gap, there is
         // nothing to say -- so it says nothing rather than holding the last
         // line up long after it was sung.

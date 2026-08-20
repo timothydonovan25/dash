@@ -18,15 +18,16 @@ import com.kao.dashmedia.Keys
 import com.kao.dashmedia.Lrc
 import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.PlayerService
+import com.kao.dashmedia.Prefs
 import com.kao.dashmedia.R
 
 /**
  * Lyrics that follow the song.
  *
  * Reached with D-pad up from Now Playing, mirroring the queue on down. The
- * position is already polled twice a second for the progress bar, so keeping
- * the highlight in step is a binary search on that same tick rather than any
- * new machinery.
+ * position is polled five times a second and the current line found by binary
+ * search on that tick -- often enough that the polling interval is not itself
+ * mistaken for the lyric being late.
  *
  * Following is suspended while you scroll by hand and resumes when the song
  * moves on, because a list that yanks itself back every half second is
@@ -50,7 +51,7 @@ class LyricsActivity : PlayerActivity() {
     private val tick = object : Runnable {
         override fun run() {
             follow()
-            ui.postDelayed(this, 400)
+            ui.postDelayed(this, 200)
         }
     }
 
@@ -128,7 +129,7 @@ class LyricsActivity : PlayerActivity() {
     private fun follow() {
         val c = controller ?: return
         if (lrc.isEmpty) return
-        val at = lrc.indexAt(c.currentPosition)
+        val at = lrc.indexAt(c.currentPosition, Prefs(this).lyricOffsetMs)
         if (at == current) return
         val previous = current
         current = at

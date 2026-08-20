@@ -74,6 +74,11 @@
     <string name="menu_boost">Audio boost: %1$s</string>
     <string name="menu_trim">Trim silent starts: %1$s</string>
     <string name="menu_about">About</string>
+    <string name="menu_lyric_timing">Lyric timing: %1$s</string>
+    <string name="menu_lyric_timing_title">Lyric timing</string>
+    <string name="timing_in_time">In time</string>
+    <string name="timing_earlier">%1$s s earlier</string>
+    <string name="timing_later">%1$s s later</string>
     <string name="menu_files">All files access (for lyrics): %1$s</string>
     <string name="lyrics">Lyrics</string>
     <string name="lyrics_none">No .lrc file beside this track</string>

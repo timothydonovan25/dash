@@ -20,6 +20,7 @@ import com.kao.dashmedia.Keys
 import com.kao.dashmedia.Lyrics
 import com.kao.dashmedia.MediaWatcher
 import com.kao.dashmedia.PlayMode
+import com.kao.dashmedia.Prefs
 import com.kao.dashmedia.PlayerService
 import com.kao.dashmedia.R
 
@@ -167,6 +168,7 @@ abstract class PlayerActivity : AppCompatActivity() {
                 getString(if (svc?.trimSilence() != false) R.string.on else R.string.off),
             ),
             getString(R.string.menu_access, getString(access)),
+            getString(R.string.menu_lyric_timing, timingSummary()),
             getString(
                 R.string.menu_files,
                 getString(if (Lyrics.canRead()) R.string.on else R.string.off),
@@ -185,10 +187,11 @@ abstract class PlayerActivity : AppCompatActivity() {
                         drawChrome()
                     }
                     3 -> startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    4 -> startActivity(
+                    4 -> openLyricTiming()
+                    5 -> startActivity(
                         Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
                     )
-                    5 -> {
+                    6 -> {
                         // The library is cached for the life of the process,
                         // which is what makes coming back instant and what
                         // stops new music from ever showing up. Lyrics are
@@ -197,7 +200,7 @@ abstract class PlayerActivity : AppCompatActivity() {
                         Lyrics.clear()
                         toast(getString(R.string.rescanning))
                     }
-                    6 -> openAbout()
+                    7 -> openAbout()
                 }
             }
             .show()
@@ -229,6 +232,46 @@ abstract class PlayerActivity : AppCompatActivity() {
                     1 -> svc?.setSleepAtEndOfTrack()
                     else -> svc?.setSleepTimer(intArrayOf(0, 0, 15, 30, 60)[which])
                 }
+                drawChrome()
+            }
+            .show()
+    }
+
+    /**
+     * Lyric timing, in words rather than signs.
+     *
+     * "+0.3" is ambiguous -- earlier or later? -- and the answer matters when
+     * you are nudging by ear, so the menu says which. Steps are fine near zero
+     * because that is where the correction usually lands: the screens poll the
+     * position a few times a second, so a small lag is expected and a large one
+     * means the file is wrong, not the player.
+     */
+    private val timingSteps = intArrayOf(-500, -250, -100, 0, 100, 200, 300, 500, 750, 1000)
+
+    private fun timingLabel(ms: Int): String = when {
+        ms == 0 -> getString(R.string.timing_in_time)
+        ms > 0 -> getString(R.string.timing_earlier, seconds(ms))
+        else -> getString(R.string.timing_later, seconds(-ms))
+    }
+
+    /** 250 -> "0.25", 100 -> "0.1", 1000 -> "1". No trailing noughts. */
+    private fun seconds(ms: Int): String =
+        "%.2f".format(ms / 1000f).trimEnd('0').trimEnd('.')
+
+    private fun timingSummary(): String =
+        timingLabel(Prefs(this).lyricOffsetMs)
+
+    private fun openLyricTiming() {
+        val prefs = Prefs(this)
+        val current = timingSteps.indexOfFirst { it == prefs.lyricOffsetMs }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.menu_lyric_timing_title)
+            .setSingleChoiceItems(
+                timingSteps.map { timingLabel(it) }.toTypedArray(),
+                current,
+            ) { dialog, which ->
+                prefs.lyricOffsetMs = timingSteps[which]
+                dialog.dismiss()
                 drawChrome()
             }
             .show()

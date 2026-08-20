@@ -23,6 +23,15 @@ class Prefs(context: Context) {
         get() = p.getInt(K_BOOST, 0)
         set(v) = p.edit().putInt(K_BOOST, v).apply()
 
+    /**
+     * Lyric timing correction in milliseconds; positive shows lines earlier.
+     * One value for the whole library -- the usual cause is the player and the
+     * screen, not the individual file.
+     */
+    var lyricOffsetMs: Int
+        get() = p.getInt(K_LYRIC_OFFSET, 0)
+        set(v) = p.edit().putInt(K_LYRIC_OFFSET, v).apply()
+
     /** Trim the silence at the start of a track. Only the start. */
     var trimSilence: Boolean
         get() = p.getBoolean(K_TRIM, true)
@@ -56,6 +65,7 @@ class Prefs(context: Context) {
         const val K_SOURCE = "source"
         const val K_BOOST = "boost"
         const val K_TRIM = "trim_silence"
+        const val K_LYRIC_OFFSET = "lyric_offset"
         const val K_SHUFFLE = "shuffle"   // legacy; read only, for the migration
         const val K_MODE = "mode"
         const val K_ID = "resume_id"
