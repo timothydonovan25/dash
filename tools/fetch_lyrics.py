@@ -212,7 +212,7 @@ def main() -> int:
     ap.add_argument("--keep-plain", action="store_true",
                     help="leave existing untimed .lrc files alone")
     ap.add_argument("--limit", type=int, default=0, help="stop after N lookups")
-    ap.add_argument("--delay", type=float, default=0.35, help="seconds between requests")
+    ap.add_argument("--delay", type=float, default=0.05, help="seconds between requests")
     ap.add_argument("--push", action="store_true", help="also copy results to the phone")
     ap.add_argument("--push-only", action="store_true",
                     help="skip fetching; only copy existing .lrc files to the phone")
@@ -290,6 +290,15 @@ def main() -> int:
             print(f"          listed in {report}")
     if args.dry_run:
         print("\n(dry run: nothing was written)")
+    elif not (args.push or args.push_only):
+        # The failure this prevents: a full fetch that looks like a success,
+        # while the phone still has nothing and the player reports no lyrics
+        # for every track you try.
+        on_disk = counts["written"] + counts["skipped"]
+        if on_disk:
+            print(f"\nNothing was copied to the phone. {on_disk} .lrc files are")
+            print("on this machine only. To send them:")
+            print("    python3 tools/fetch_lyrics.py --push-only")
     return 0
 
 
