@@ -134,8 +134,18 @@ Two kinds, and the list says which is which:
 ## Lyrics
 
 Sidecar `.lrc` files only, read from beside the track — `Song.lrc` next to
-`Song.mp3`, or the `Song.mp3.lrc` some taggers write. Nothing is fetched; the
-files are made elsewhere and copied over with the music.
+`Song.mp3`, or the `Song.mp3.lrc` some taggers write. The app fetches nothing;
+`tools/fetch_lyrics.py` makes the files on a desktop and can copy them over:
+
+```bash
+python3 tools/fetch_lyrics.py --dry-run     # see what it would do
+python3 tools/fetch_lyrics.py --push        # write them, then copy to the phone
+```
+
+It writes **synced lyrics only**. Plain lyrics have no timestamps, every line
+is dropped by the parser, and the screen would report no lyrics at all — so an
+untimed `.lrc` already on disk is refetched, with the original kept as
+`.lrc.bak`.
 
 A `.lrc` is **not a media file**, so MediaStore will not hand one over no
 matter what is granted through it. That is why the app asks for all-files
