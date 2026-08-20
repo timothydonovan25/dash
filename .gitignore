@@ -13,3 +13,4 @@ dash_log.csv
 phone/**/build/
 phone/**/.gradle/
 phone/**/local.properties
+__pycache__/
