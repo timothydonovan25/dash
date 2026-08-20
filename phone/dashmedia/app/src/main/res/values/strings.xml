@@ -27,7 +27,7 @@
     <string name="opt_up">Move up</string>
     <string name="opt_down">Move down</string>
     <string name="opt_remove">Remove from playlist</string>
-    <string name="search_prompt">Press 2\u20139 to search</string>
+    <string name="search_prompt">Press 2\u20139 to search, 0 for a space</string>
     <string name="search_none">Nothing matches</string>
     <string name="menu_rescan">Rescan library</string>
     <string name="rescanning">Rescanning\u2026</string>

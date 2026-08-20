@@ -65,7 +65,17 @@ class SearchActivity : PlayerActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
+        if (keyCode == KeyEvent.KEYCODE_0) {
+            // 0 is space, as it has been on every keypad. It costs the ability
+            // to search for a literal zero -- no more finding "2004" by its
+            // year -- which is the trade every phone has always made.
+            if (digits.isNotEmpty() && !digits.endsWith(" ")) {
+                digits += " "
+                search()
+            }
+            return true
+        }
+        if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
             digits += ('0' + (keyCode - KeyEvent.KEYCODE_0))
             search()
             return true

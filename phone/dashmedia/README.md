@@ -83,7 +83,7 @@ keypad the only thing worse than too few controls is controls that move.
 | Screen | The rest |
 |---|---|
 | Browse | up/down the list, OK opens or plays, Back goes up a level. At the top of a section, **left/right switch ARTISTS and PLAYLISTS**. **2-9 starts a search**, `0` opens options for the highlighted row, `*` plays next, `#` appends to the queue |
-| Search | 2-9 type, Back deletes a digit before it leaves, OK plays |
+| Search | 2-9 type, **0 is a space**, Back deletes a character before it leaves, OK plays. Every term must begin some word, in the title, artist or album |
 | Now playing | OK play/pause · left/right tap to skip, **hold to scrub** (8× for two seconds, then 32×) · **up opens the lyrics**, down the queue. The line being sung shows under the progress bar |
 | Lyrics | follows the song; up/down reads ahead and it stops chasing until the next line |
 | Queue | OK plays that entry · `*` move up · `#` move down · `0` remove |

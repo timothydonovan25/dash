@@ -73,6 +73,40 @@ class T9Test {
     }
 
     @Test
+    fun `a space narrows the search instead of starting a new one`() {
+        // 0 is the space key. 465 is g-o-j, 2 is a-b-c.
+        assertTrue(T9.matchesAny("465", "Backbone", "Gojira", "From Mars To Sirius"))
+        assertTrue(T9.matchesAny("465 222", "Backbone", "Gojira", "From Mars To Sirius"))
+        // Both terms must land somewhere; 999 lands nowhere.
+        assertFalse(T9.matchesAny("465 999", "Backbone", "Gojira", "From Mars To Sirius"))
+    }
+
+    @Test
+    fun `terms may come from different fields`() {
+        // The search people actually type: artist then title. Requiring one
+        // field to satisfy both would fail it.
+        assertTrue(T9.matchesAny("465 222", "Backbone", "Gojira", "From Mars"))
+    }
+
+    @Test
+    fun `terms need not be in order or adjacent`() {
+        assertTrue(T9.matches("747487 6277", "From Mars To Sirius"))
+        assertTrue(T9.matches("3766 747487", "From Mars To Sirius"))
+    }
+
+    @Test
+    fun `a trailing space changes nothing until something follows it`() {
+        // Typing 0 then thinking about it should not empty the results.
+        assertTrue(T9.matches("465 ", "Gojira"))
+        assertTrue(T9.matches(" ", "anything"))
+    }
+
+    @Test
+    fun `the hint draws the boundary`() {
+        assertEquals("ghi mno jkl · abc", T9.hint("465 2"))
+    }
+
+    @Test
     fun `words handles empty and symbol-only text`() {
         assertEquals(emptyList<String>(), T9.words(""))
         assertEquals(emptyList<String>(), T9.words("--- !!! ---"))

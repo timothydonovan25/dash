@@ -72,23 +72,38 @@ object T9 {
     }
 
     /**
-     * Does [query] -- a string of digits -- match [text]?
+     * Does [query] match [text]?
      *
-     * True for an empty query: no search typed yet is not the same as no
-     * results.
+     * The query is digits, and 0 is a space separating terms. Every term has
+     * to begin some word; they need not be adjacent or in order, which is what
+     * makes typing a second word narrow the search rather than start a new one.
+     *
+     * True for an empty query: nothing typed yet is not the same as nothing
+     * found.
      */
-    fun matches(query: String, text: String): Boolean {
-        if (query.isEmpty()) return true
-        return words(text).any { it.startsWith(query) }
-    }
+    fun matches(query: String, text: String): Boolean = matchesAny(query, text)
 
-    /** Match against several fields at once: title, artist, album. */
+    /**
+     * The same, over title, artist and album together.
+     *
+     * Deliberately one haystack rather than three separate ones: "465 2" is
+     * how you ask for Gojira's Backbone, and those two words live in different
+     * fields. Requiring each term to be satisfied by the same field would fail
+     * exactly the search people actually type.
+     */
     fun matchesAny(query: String, vararg fields: String): Boolean {
-        if (query.isEmpty()) return true
-        return fields.any { matches(query, it) }
+        val parts = query.split(' ').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return true
+        val words = fields.flatMap { words(it) }
+        return parts.all { part -> words.any { it.startsWith(part) } }
     }
 
-    /** "465" -> "ghi mno jkl", for showing what has been typed. */
+    /**
+     * "465 2" -> "ghi mno jkl · abc", for showing what has been typed.
+     *
+     * The boundary is drawn rather than dropped: without it the hint for two
+     * words looks exactly like the hint for one long one.
+     */
     fun hint(query: String): String =
-        query.mapNotNull { LETTERS[it] }.joinToString(" ")
+        query.mapNotNull { if (it == ' ') "·" else LETTERS[it] }.joinToString(" ")
 }
