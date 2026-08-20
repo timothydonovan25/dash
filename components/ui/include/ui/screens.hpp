@@ -26,6 +26,10 @@ public:
     // No title bar: this screen is read at speed and wants every pixel.
     bool wants_title() const override { return false; }
     WidgetList widgets() override;
+    // This is the screen the panel budget is decided on, so it is the one
+    // worth naming: the wire-cost report is read to find out which widget
+    // to make cheaper.
+    const char* widget_name(size_t i) const override;
 
 private:
     // Everything on this screen that moves is a widget, including the tach

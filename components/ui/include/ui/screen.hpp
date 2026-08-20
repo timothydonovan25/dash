@@ -90,6 +90,11 @@ public:
 
     virtual WidgetList widgets() = 0;
 
+    // A name for widget `i`, for diagnostics — the wire-cost report names
+    // the widget eating the frame budget rather than pointing at an index.
+    // Optional: a screen that has not bothered gets `w0`, `w1` and so on.
+    virtual const char* widget_name(size_t) const { return nullptr; }
+
     // How many focusable rows this screen has right now. nav needs it to
     // wrap the cursor, and it changes with the data on some screens.
     virtual uint8_t focus_count() const { return 0; }

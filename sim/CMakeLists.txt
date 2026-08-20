@@ -47,3 +47,8 @@ target_link_libraries(logic PUBLIC core ui halstub)
 
 add_executable(dash_sim sim_main.cpp sim_bike.cpp)
 target_link_libraries(dash_sim PRIVATE logic ui core halstub)
+
+# What each screen costs on the wire. Not a test — a report you read when
+# deciding which widget to make cheaper. See ui/wire_cost.hpp.
+add_executable(wire_report wire_report.cpp)
+target_link_libraries(wire_report PRIVATE ui core halstub)

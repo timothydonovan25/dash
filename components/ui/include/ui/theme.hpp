@@ -41,11 +41,12 @@ inline constexpr uint8_t heading = 3;
 inline constexpr uint8_t large   = 5;
 inline constexpr uint8_t hero    = 9;   // the speed a rider reads at a glance
 
-// What a shift lamp looks like at each position along the strip: green
-// through amber to red, in the same order as the lamps on the handlebar, so
-// the screen and the bike never disagree.
+// What a shift lamp looks like at each position along the strip. Every lamp
+// fitted to the PCB is red, so the strip is red end to end: position is the
+// only thing that varies, and the screen says the same thing the bar does.
 inline constexpr Color shift_lamp(int index) {
-    return index >= 5 ? alarm : (index >= 3 ? warning : nominal);
+    (void)index;
+    return alarm;
 }
 
 }  // namespace ui::theme

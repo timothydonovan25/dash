@@ -29,9 +29,9 @@ SIM = os.path.join(os.path.dirname(HERE), "build-sim", "dash_sim")
 # the right-hand third of the dash.
 SCALE = 1
 
-# Green, amber, red across the strip -- the same order as the lamps on the
-# handlebar, so the window and the bike agree at a glance.
-LAMP_COLOURS = ["#40c878"] * 3 + ["#ffb020"] * 2 + ["#ff4038"] * 3
+# Red end to end -- every lamp fitted to the PCB is red, so the window shows
+# what the bar shows and the count of lit lamps is the whole reading.
+LAMP_COLOURS = ["#ff4038"] * 8
 LAMP_OFF = "#161a22"
 
 BUTTONS = [
@@ -117,7 +117,7 @@ class Sim:
             buf += c
 
     def read_frame(self):
-        """Returns (ppm_bytes, lamp_mask, flash, mode, screen) or None."""
+        """Returns (ppm_bytes, lamp_mask, flash, mode, screen, wire) or None."""
         while True:
             line = self._read_line()
             if line is None:
@@ -128,6 +128,9 @@ class Sim:
         lamps = int(parts[1])
         flash = parts[2] == "1"
         mode, screen = parts[3], parts[4]
+        # key=value tail, so the simulator can add a field without this
+        # having to know about it.
+        tail = dict(p.split("=", 1) for p in parts[5:] if "=" in p)
 
         magic = self._read_line()          # P6
         dims = self._read_line()           # 320 480
@@ -139,7 +142,7 @@ class Sim:
         if data is None:
             return None
         header = f"P6\n{w} {h}\n255\n".encode()
-        return header + data, lamps, flash, mode, screen
+        return header + data, lamps, flash, mode, screen, tail
 
     def close(self):
         self.send("quit")
@@ -162,9 +165,12 @@ class App:
         left.grid(row=0, column=0, padx=12, pady=12, sticky="n")
 
         # --- shift lamps, above the panel as they are on the bar ---------
+        # Flush with the panel's left edge rather than centred over it: the
+        # strip is narrower than the panel, and a centred one reads as a
+        # thing floating above the dash instead of a fixture on the bar.
         self.lamps = []
         strip = tk.Frame(left, bg="#0d0f14")
-        strip.pack(pady=(0, 8))
+        strip.pack(anchor="w", pady=(0, 8))
         for i in range(8):
             lamp = tk.Canvas(strip, width=30, height=18, bg=LAMP_OFF,
                              highlightthickness=1,
@@ -289,7 +295,7 @@ class App:
         if frame is None:
             self.status.config(text="simulator exited")
             return
-        ppm, lamps, flash, mode, screen = frame
+        ppm, lamps, flash, mode, screen, tail = frame
 
         self.photo = tk.PhotoImage(data=ppm)
         # Follow whatever the simulator actually sent, so a change of
@@ -310,7 +316,23 @@ class App:
                 on = bool(lamps & (1 << i))
             lamp.configure(bg=LAMP_COLOURS[i] if on else LAMP_OFF)
 
-        self.status.config(text=f"{mode} / {screen}")
+        # What this frame would have cost the real panel. The laptop will
+        # repaint anything at any rate; the bike will not, and 33.3 ms is
+        # the whole of a 30 Hz frame. Amber past that, red past a full
+        # repaint's worth.
+        ms = float(tail.get("wire", 0.0))
+        over = int(tail.get("over", 0))
+        colour = "#788496"
+        if ms > 33.3:
+            colour = "#ffb020"
+        if ms > 92.0 or over:
+            colour = "#ff4038"
+        text = (f"{mode} / {screen}   wire {ms:5.1f} ms"
+                f"   {tail.get('px', '0')} px in {tail.get('tx', '0')} tx"
+                f"   peak {float(tail.get('peak', 0.0)):.1f} ms")
+        if over:
+            text += f"   {over} transfers over the bus limit"
+        self.status.config(text=text, fg=colour)
         self.root.after(1, self.pump)
 
     def quit(self):

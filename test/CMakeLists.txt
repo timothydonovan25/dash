@@ -55,14 +55,14 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear ui)
+          attitude jump nmea input tach log delta gear wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
-foreach(t ui)
+foreach(t ui wire)
     target_link_libraries(test_${t} PRIVATE ui hal)
 endforeach()
 

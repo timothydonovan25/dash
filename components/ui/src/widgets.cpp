@@ -1,6 +1,7 @@
 #include "ui/widgets.hpp"
 #include "core/units/units.hpp"
 #include "ui/icons.hpp"
+#include "ui/theme.hpp"
 #include <cmath>
 
 namespace ui {
@@ -215,11 +216,10 @@ void ShiftStrip::render(Canvas& c) {
     const int16_t w = static_cast<int16_t>((bounds.w - gap * (n - 1)) / n);
     for (int16_t i = 0; i < n; ++i) {
         const bool lit = flash_ ? true : ((mask_ >> i) & 1u) != 0;
-        // Green, amber, red across the strip: the same order as the lamps on
-        // the bar, so the screen and the bike agree at a glance.
-        Color c_on = color::kGood;
-        if (i >= 5) c_on = color::kAlarm;
-        else if (i >= 3) c_on = color::kWarn;
+        // One colour for the whole strip, from theme::shift_lamp, because the
+        // lamps on the board are all red: how many are lit is the reading, not
+        // what colour they are.
+        const Color c_on = theme::shift_lamp(i);
         const Rect r{static_cast<int16_t>(bounds.x + i * (w + gap)), bounds.y,
                      w, bounds.h};
         c.fill_rect(r, lit ? c_on : color::kPanel);

@@ -18,6 +18,7 @@
 // dismissed, and at boot — anything where the panel's contents are unknown.
 #include "services/services.hpp"
 #include "ui/app.hpp"
+#include "ui/blit_plan.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "bsp/pins.hpp"
 
@@ -65,27 +66,24 @@ private:
 // framebuffer the size of the screen.
 hal::Status blit_widget(Deps& d, ui::FrameBufferCanvas& canvas, ui::Color* buf,
                         ui::Widget& w) {
-    ui::Rect r = w.bounds;
-    if (r.x < 0) { r.w = static_cast<int16_t>(r.w + r.x); r.x = 0; }
-    if (r.y < 0) { r.h = static_cast<int16_t>(r.h + r.y); r.y = 0; }
-    if (r.right() > ui::kScreenW) r.w = static_cast<int16_t>(ui::kScreenW - r.x);
-    if (r.bottom() > ui::kScreenH) r.h = static_cast<int16_t>(ui::kScreenH - r.y);
-    if (r.empty()) return hal::Status::Ok;
-
-    const int16_t rows = canvas.rows_for(r.w);
-    if (rows <= 0) return hal::Status::Unsupported;
+    // The clip and the strip split are in ui/blit_plan.hpp so that the
+    // wire-cost model prices exactly what this sends, rather than its own
+    // idea of it.
+    ui::Rect strips[ui::kMaxStrips];
+    const int n = ui::plan_strips(w.bounds, kBandPixels, strips, ui::kMaxStrips);
+    if (n == 0) return hal::Status::Ok;
+    if (n < 0)  return hal::Status::Unsupported;
 
     hal::Status s = hal::Status::Ok;
-    for (int16_t y = r.y; y < r.bottom(); y = static_cast<int16_t>(y + rows)) {
-        const int16_t h = static_cast<int16_t>(
-            y + rows > r.bottom() ? r.bottom() - y : rows);
-        if (!canvas.set_window(r.x, y, r.w, h)) return hal::Status::Unsupported;
+    for (int i = 0; i < n; ++i) {
+        const ui::Rect& r = strips[i];
+        if (!canvas.set_window(r.x, r.y, r.w, r.h)) return hal::Status::Unsupported;
         w.render(canvas);
         if (d.panel) {
             s = d.panel->blit(static_cast<uint16_t>(r.x),
-                              static_cast<uint16_t>(y),
+                              static_cast<uint16_t>(r.y),
                               static_cast<uint16_t>(r.w),
-                              static_cast<uint16_t>(h), buf);
+                              static_cast<uint16_t>(r.h), buf);
             if (!hal::ok(s)) return s;
         }
     }

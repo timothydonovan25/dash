@@ -5,6 +5,7 @@
 // panel driver; in the tests it is an array, which is how a screen's layout
 // can be asserted without a screen.
 #pragma once
+#include "ui/blit_plan.hpp"
 #include "ui/canvas.hpp"
 #include <cstddef>
 
@@ -56,12 +57,10 @@ public:
         return true;
     }
 
-    // How many rows of a `w`-wide region fit in the buffer at once.
-    int16_t rows_for(int16_t w) const {
-        if (w <= 0) return 0;
-        const size_t r = capacity_ / static_cast<size_t>(w);
-        return r > 32767 ? 32767 : static_cast<int16_t>(r);
-    }
+    // How many rows of a `w`-wide region fit in the buffer at once. The
+    // arithmetic is in blit_plan.hpp because the wire-cost model needs the
+    // same answer without holding a canvas.
+    int16_t rows_for(int16_t w) const { return ui::rows_for(w, capacity_); }
 
     Color pixel(int16_t x, int16_t y) const;
 

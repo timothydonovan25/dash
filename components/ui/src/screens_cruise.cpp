@@ -274,6 +274,16 @@ void SpeedScreen::draw_background(Canvas& c) {
 
 WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
 
+const char* SpeedScreen::widget_name(size_t i) const {
+    // Same order as list_ above.
+    static const char* kNames[18] = {
+        "tach stem", "tach flare", "speed", "rpm", "shift", "gear",
+        "clock", "lean", "sats", "hdop", "odo", "trip",
+        "g-ball", "fault", "fault what", "song", "album", "artist",
+    };
+    return i < 18 ? kNames[i] : nullptr;
+}
+
 // --- MinimalScreen ------------------------------------------------------
 //
 // One number, as large as 480x320 allows, and the clock along the bottom.

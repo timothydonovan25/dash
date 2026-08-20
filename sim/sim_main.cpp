@@ -28,6 +28,7 @@
 #include "services/logic_tick.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
+#include "ui/wire_cost.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -43,6 +44,15 @@ namespace {
 
 constexpr uint32_t kTickMs  = 20;    // 50 Hz, the logic rate
 constexpr uint32_t kFrameMs = 50;    // 20 Hz to the window
+
+// The panel budget, modelled rather than drawn. The window here is a laptop
+// and will happily repaint everything at any rate asked of it, which is
+// exactly the thing that would let a screen quietly become unaffordable on
+// the bike. So every frame is also priced: same band geometry as
+// render_service, same strip split, same bus limit as bsp/buses.cpp.
+constexpr int16_t kBandLines  = 40;
+constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
+constexpr uint32_t kBusLimitBytes = 320u * 40u * 3u;
 
 class DequeSource final : public services::ICommandSource,
                           public ui::ICommandSink {
@@ -200,6 +210,10 @@ int main() {
     ui::FrameBufferCanvas canvas(px.data(), ui::kScreenW, ui::kScreenH);
     app.begin(canvas);
 
+    ui::wire::Panel wire_panel;
+    wire_panel.bus_limit_bytes = kBusLimitBytes;
+    ui::wire::Model wire(wire_panel, kBandPixels, kBandLines);
+
     sim::Bike     bike;
     sim::Controls controls;
     core::input::Decoder  buttons;
@@ -330,7 +344,25 @@ int main() {
         app.set_lap_history(lap_history.ms, lap_history.count,
                             lap_history.best_ms);
         app.update(core::state::snapshot(slots, now));
+
+        // Price the frame before rendering it: `update` is what sets the
+        // dirty flags and `render` is what clears them, so this is the one
+        // moment the real set of moved widgets exists. The decision mirrors
+        // render_service's — full repaint or dirty widgets, nothing else.
+        if (app.needs_full_repaint()) {
+            wire.full_repaint();
+        } else {
+            for (ui::Widget* w : app.current().widgets()) {
+                if (w && w->dirty) wire.region(w->bounds);
+            }
+            if (app.alert().active()) wire.region(app.alert().bounds);
+        }
+        const ui::wire::Cost cost = wire.end_frame();
+
+        // The window is one canvas, not eight bands, so it repaints whole.
+        // What was just costed is what the panel would have sent.
         app.render(canvas, true);
+        app.clear_full_repaint();
 
         for (size_t i = 0; i < px.size(); ++i) {
             const ui::Color c = px[i];
@@ -344,11 +376,15 @@ int main() {
         // and how far the matcher thinks the bike is from the reference.
         const core::state::Lap lapv = slots.lap.get();
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
-                    "ref=%zu match=%.1f\n",
+                    "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
+                    "over=%u\n",
                     lamp_mask, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
-                    delta.reference_points(), delta.last_match_ft());
+                    delta.reference_points(), delta.last_match_ft(),
+                    static_cast<double>(cost.ms()), cost.pixels, cost.transfers,
+                    static_cast<double>(wire.peak().ms()),
+                    wire.total().oversized);
         std::printf("P6\n%d %d\n255\n", ui::kScreenW, ui::kScreenH);
         std::fwrite(rgb.data(), 1, rgb.size(), stdout);
         std::fflush(stdout);
