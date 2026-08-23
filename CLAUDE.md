@@ -88,9 +88,13 @@ components/services/   the tasks that glue drivers to core
 components/ui/         canvas, widgets, screens, render task
 test/                  host build, plain CMake + ctest
 docs/                  architecture, hardware reviews, bring-up
-phone/dashmedia/       the Android companion app. Gradle/Kotlin, not IDF
 tools/                 host-side helpers, e.g. the BLE peripheral stand-in
 ```
+
+The Android companion app is **not in this repo.** It lives in `~/phone-app`,
+its own Gradle/Kotlin tree, because nothing here builds it and the only thing
+the two share is the §11.1 GATT contract in `docs/system-architecture.md`.
+That document is still the contract, and it stays here.
 
 The architecture document calls the interface component `hal/`. It is
 `dash_hal/` on disk because **ESP-IDF has its own component called `hal`**,
@@ -218,11 +222,11 @@ storage, keeper on core 1.
 - **BLE** (`services/ble/`, `core/tpms/`) — step 9 of the build order, after
   the real-time path works, so a change in shift-light timing has one
   suspect. `sdkconfig.defaults` already pins the controller and host to
-  core 1 for when it lands. The *phone* half is written —
-  `phone/dashmedia/`, designed in `docs/phone-media-app.md` — along with
-  `tools/dash_media_peripheral.py`, a laptop peripheral speaking §11.1 so
-  the app has a working counterpart and the dash will later have a
-  known-good client. Neither end has talked to the other.
+  core 1 for when it lands. The *phone* half is written, in its own repo at
+  `~/phone-app` — along with `tools/dash_media_peripheral.py`, which stayed
+  here: a laptop peripheral speaking §11.1 so the app has a working
+  counterpart and the dash will later have a known-good client. Neither end
+  has talked to the other.
 - **CAN / `engine_service`** — the board has no transceiver (§10.1).
   `NullEngine` is wired in and every screen renders `--` for the ECU.
 - **USB mass storage** (§9.3) — the ownership seam is in

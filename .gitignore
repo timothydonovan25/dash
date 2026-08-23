@@ -8,12 +8,4 @@ compile_commands.json
 .cache/
 build-sim/
 dash_log.csv
-
-# phone/dashmedia — Android/Gradle build output
-phone/**/build/
-phone/**/.gradle/
-phone/**/local.properties
 __pycache__/
-
-# report written by tools/fetch_lyrics.py
-lyrics-misses.txt
