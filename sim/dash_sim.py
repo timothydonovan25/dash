@@ -15,19 +15,96 @@ firmware -- it is the firmware.
     python3 sim/dash_sim.py
 """
 
+import io
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tkinter as tk
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SIM = os.path.join(os.path.dirname(HERE), "build-sim", "dash_sim")
+from PIL import Image
 
-# Taken from the first frame's PPM header rather than hardcoded. The panel
-# is landscape now, and a front end that assumes otherwise silently crops
-# the right-hand third of the dash.
-SCALE = 1
+HERE = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    # Running from a PyInstaller bundle: the native sim binary was added
+    # alongside this script and unpacked next to it, not built into
+    # build-sim/ next door -- there is no source tree here at all. Named
+    # dash_sim_core rather than dash_sim: PyInstaller's frozen archive
+    # already has an entry called "dash_sim" for this very module, and a
+    # same-named embedded binary collides with it silently -- the app
+    # just exits immediately with no error.
+    SIM = os.path.join(sys._MEIPASS, "dash_sim_core")
+else:
+    SIM = os.path.join(os.path.dirname(HERE), "build-sim", "dash_sim")
+
+# The ILI9488 module's active glass area, from its datasheet (320 RGB x 480,
+# 玻璃显示区 48.96 x 73.44 mm) -- not the 480x320 the firmware renders at.
+# The canvas is sized to this in real millimetres so the window shows the
+# panel at the size it actually is on the bike, not at whatever a 1:1 pixel
+# mapping happens to come out to on this monitor.
+PANEL_W_MM = 73.44
+PANEL_H_MM = 48.96
+
+# xrandr's EDID-reported size, and Tk's screen-mm fallback below it, both
+# came out roughly half of what the panel needed to look right on the
+# monitor this was actually tuned against -- some combination of a
+# desktop scaling factor neither of them knows about and EDID values that
+# just aren't trustworthy. Rather than chase that per-machine, apply the
+# correction as a flat multiplier; DASH_SIM_PX_PER_MM below still bypasses
+# it entirely for anyone who wants to dial in an exact number instead.
+SIZE_CALIBRATION = 1.5
+
+
+def _detect_px_per_mm(root):
+    """Pixels per millimetre for the monitor actually showing the window.
+
+    Tk's own winfo_screenmmwidth is the X server's screen-wide notion of
+    physical size, which on a multi-monitor setup is the combined desktop,
+    not any one panel -- dividing by it undersizes everything. xrandr
+    reports each output's size from its EDID instead, so prefer that and
+    match it to the monitor the window's top-left corner is actually on.
+    Falls back to Tk's figure, then to 1:1 pixels, if xrandr is unavailable
+    (e.g. Wayland) or its geometry can't be parsed. SIZE_CALIBRATION is
+    applied on top of either -- see above.
+    """
+    override = os.environ.get("DASH_SIM_PX_PER_MM")
+    if override:
+        try:
+            v = float(override)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+
+    try:
+        root.update_idletasks()
+        win_x, win_y = root.winfo_rootx(), root.winfo_rooty()
+        out = subprocess.run(["xrandr", "--current"], capture_output=True,
+                             text=True, timeout=2).stdout
+        best = None
+        for line in out.splitlines():
+            m = re.search(
+                r"connected\s+(?:primary\s+)?(\d+)x(\d+)\+(\d+)\+(\d+).*?"
+                r"(\d+)mm x (\d+)mm", line)
+            if not m:
+                continue
+            pw, ph, ox, oy, mw, mh = (int(g) for g in m.groups())
+            if mw <= 0:
+                continue
+            on_this_monitor = (ox <= win_x < ox + pw and oy <= win_y < oy + ph)
+            rank = (on_this_monitor, "primary" in line)
+            if best is None or rank > best[0]:
+                best = (rank, pw / mw)
+        if best:
+            return best[1] * SIZE_CALIBRATION
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    px_per_mm = root.winfo_fpixels("1m")
+    if 0.5 <= px_per_mm <= 20:
+        return px_per_mm * SIZE_CALIBRATION
+    return 1.0 * SIZE_CALIBRATION
 
 # Red end to end -- every lamp fitted to the PCB is red, so the window shows
 # what the bar shows and the count of lit lamps is the whole reading.
@@ -157,9 +234,19 @@ class App:
         self.sim = sim
         self.root = root
         self.blink = False
-        self.size = (0, 0)
+        self.native_size = (0, 0)
         root.title("dash — simulator")
         root.configure(bg="#0d0f14")
+
+        # Real pixels, not whatever the display's DPI scaling would hand
+        # tkinter otherwise -- winfo_fpixels("1m") below needs to be reading
+        # the screen's actual pixel density, not one Tk has already fudged.
+        root.tk.call("tk", "scaling", 1.0)
+
+        px_per_mm = _detect_px_per_mm(root)
+        self.target_size = (round(PANEL_W_MM * px_per_mm),
+                             round(PANEL_H_MM * px_per_mm))
+        self._resize_to = self.target_size
 
         left = tk.Frame(root, bg="#0d0f14")
         left.grid(row=0, column=0, padx=12, pady=12, sticky="n")
@@ -178,34 +265,53 @@ class App:
             lamp.grid(row=0, column=i, padx=2)
             self.lamps.append(lamp)
 
-        # --- the panel ---------------------------------------------------
-        self.canvas = tk.Canvas(left, width=480 * SCALE, height=320 * SCALE,
+        # --- the panel, with the button pod to its right ------------------
+        # On the bike the pod is on the handlebar, not under the panel, so
+        # the sim's buttons sit beside the screen rather than below it.
+        panel_row = tk.Frame(left, bg="#0d0f14")
+        panel_row.pack(anchor="w")
+
+        tw, th = self.target_size
+        self.canvas = tk.Canvas(panel_row, width=tw, height=th,
                                 bg="black", highlightthickness=1,
                                 highlightbackground="#2c3440")
-        self.canvas.pack()
+        self.canvas.grid(row=0, column=0)
         self.photo = None
         self.image_id = self.canvas.create_image(0, 0, anchor="nw")
 
-        self.status = tk.Label(left, text="", fg="#7884" "96", bg="#0d0f14",
-                               font=("TkFixedFont", 9))
-        self.status.pack(pady=(6, 0))
-
         # --- buttons -----------------------------------------------------
-        pad = tk.Frame(left, bg="#0d0f14")
-        pad.pack(pady=10)
+        pad = tk.Frame(panel_row, bg="#0d0f14")
+        pad.grid(row=0, column=1, padx=(10, 0), sticky="n")
         for i, (key, what) in enumerate(BUTTONS):
             b = tk.Button(pad, text=f"{key}\n{what}", width=6, height=2,
                           bg="#161a22", fg="#e2e8f0",
                           activebackground="#38aaff",
                           highlightbackground="#2c3440")
-            b.grid(row=0, column=i, padx=3)
+            b.grid(row=i, column=0, pady=3)
             # Press and release are sent separately so the firmware's own
             # debounce and long-press timing decide what the press was.
             b.bind("<ButtonPress-1>", lambda e, k=key: self.sim.send(f"btn {k} down"))
             b.bind("<ButtonRelease-1>", lambda e, k=key: self.sim.send(f"btn {k} up"))
-        tk.Label(pad, text="hold for a long press", fg="#788496",
-                 bg="#0d0f14", font=("TkDefaultFont", 8)).grid(
-                     row=1, column=0, columnspan=5, pady=(4, 0))
+        tk.Label(pad, text="hold for a\nlong press", fg="#788496",
+                 bg="#0d0f14", font=("TkDefaultFont", 8),
+                 justify="center").grid(row=len(BUTTONS), column=0, pady=(6, 0))
+
+        # Pinned to the panel row's own (fixed) width via a propagate-off
+        # frame, not left to size itself to whatever the status text
+        # happens to be this frame. A wraplength alone still lets a short
+        # line's own natural width leak through as the request, which
+        # rounds differently frame to frame and shows up as the sliders
+        # jittering sideways by a pixel.
+        panel_row.update_idletasks()
+        status_box = tk.Frame(left, bg="#0d0f14",
+                              width=panel_row.winfo_reqwidth(), height=34)
+        status_box.pack_propagate(False)
+        status_box.pack(fill="x", pady=(6, 0))
+        self.status = tk.Label(status_box, text="", fg="#7884" "96",
+                               bg="#0d0f14", font=("TkFixedFont", 9),
+                               justify="left", anchor="nw",
+                               wraplength=panel_row.winfo_reqwidth())
+        self.status.pack(fill="both", expand=True)
 
         # --- controls ----------------------------------------------------
         right = tk.Frame(root, bg="#0d0f14")
@@ -297,13 +403,25 @@ class App:
             return
         ppm, lamps, flash, mode, screen, tail = frame
 
-        self.photo = tk.PhotoImage(data=ppm)
-        # Follow whatever the simulator actually sent, so a change of
-        # orientation in the firmware needs no change here.
-        w, h = self.photo.width(), self.photo.height()
-        if (w, h) != self.size:
-            self.size = (w, h)
-            self.canvas.config(width=w * SCALE, height=h * SCALE)
+        frame = Image.open(io.BytesIO(ppm))
+        w, h = frame.size
+        if (w, h) != self.native_size:
+            self.native_size = (w, h)
+            tw, th = self.target_size
+            # The physical size is measured landscape; if the firmware
+            # ever sends a portrait frame, swap it rather than stretch a
+            # landscape panel's mm into a portrait box.
+            if (w < h) != (tw < th):
+                tw, th = th, tw
+            self._resize_to = (tw, th)
+            self.canvas.config(width=tw, height=th)
+        frame = frame.resize(self._resize_to, Image.LANCZOS)
+        # tk.PhotoImage over ImageTk: the latter needs the separate
+        # python3-pil.imagetk package, and re-encoding to PPM is cheap at
+        # this resolution.
+        buf = io.BytesIO()
+        frame.save(buf, format="PPM")
+        self.photo = tk.PhotoImage(data=buf.getvalue())
         self.canvas.itemconfig(self.image_id, image=self.photo)
 
         # Over the limit, everything flashes -- the caller owns the blink
