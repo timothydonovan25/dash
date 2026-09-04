@@ -133,18 +133,31 @@ int gap_event(struct ble_gap_event* event, void* arg);
 
 void start_advertising() {
     struct ble_gap_adv_params adv_params = {};
-    struct ble_hs_adv_fields fields = {};
     const char* name = ble_svc_gap_device_name();
 
+    // The phone app scans with a service-UUID filter (§11.1 — it has no
+    // other way to tell a dash apart from any other BLE peripheral in
+    // range), so the 128-bit service UUID has to be in the *advertising*
+    // data, not just discoverable after a GATT connect. A 128-bit UUID
+    // plus flags leaves no room for the name in the same 31-byte legacy
+    // packet, so the name goes in the scan response instead — the
+    // ScanFilter still matches on the primary packet's UUID either way.
+    struct ble_hs_adv_fields fields = {};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.tx_pwr_lvl_is_present = 1;
-    fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
-    fields.name = reinterpret_cast<const uint8_t*>(name);
-    fields.name_len = static_cast<uint8_t>(std::strlen(name));
-    fields.name_is_complete = 1;
-
+    fields.uuids128 = &kSvcUuid;
+    fields.num_uuids128 = 1;
+    fields.uuids128_is_complete = 1;
     if (ble_gap_adv_set_fields(&fields) != 0) {
         ESP_LOGE(kTag, "adv_set_fields failed");
+        return;
+    }
+
+    struct ble_hs_adv_fields rsp_fields = {};
+    rsp_fields.name = reinterpret_cast<const uint8_t*>(name);
+    rsp_fields.name_len = static_cast<uint8_t>(std::strlen(name));
+    rsp_fields.name_is_complete = 1;
+    if (ble_gap_adv_rsp_set_fields(&rsp_fields) != 0) {
+        ESP_LOGE(kTag, "adv_rsp_set_fields failed");
         return;
     }
 
