@@ -34,6 +34,8 @@
 
 #include "ui/geometry.hpp"
 
+#include <algorithm>
+
 namespace demo {
 namespace {
 
@@ -59,6 +61,35 @@ constexpr int kScaleNum = 3;
 constexpr int kScaleDen = 2;   // 3/2 = 1.5x
 constexpr int kMarginX = (kViewW - ui::kScreenW * kScaleNum / kScaleDen) / 2;   // 40
 constexpr int kMarginY = (kViewH - ui::kScreenH * kScaleNum / kScaleDen) / 2;   // 0
+
+// Button zones: five bands stacked top-to-bottom (A-E, matching sim/
+// dash_sim.py's BUTTONS list and column layout), touch-sensitive across a
+// 200px-wide strip on the right (see touch_buttons.cpp's kZoneWidth, which
+// has to agree with this). Only the part of that strip actually outside
+// the picture — view x in [kViewW-kMarginX, kViewW), the same right margin
+// blit() never writes to — gets divider lines drawn into it, since
+// anything further left is inside the UI's own drawing and would be
+// painted over on the next frame anyway.
+constexpr int kButtonCount = 5;
+constexpr int kBandH = kViewH / kButtonCount;   // 96
+
+// Maps a view-space pixel (post-rotation coordinate frame, same one
+// blit()'s callers think in) to an index into the native rotated
+// framebuffer, or -1 if it falls outside the panel. Shared by blit() and
+// the one-time margin decoration below so both transforms can't drift
+// apart.
+int native_index(int view_row, int view_col) {
+    int nr, nc;
+    if (kRotateCw) {
+        nr = (kNativeRows - 1) - view_col;
+        nc = view_row;
+    } else {
+        nr = view_col;
+        nc = (kNativeCols - 1) - view_row;
+    }
+    if (nr < 0 || nr >= kNativeRows || nc < 0 || nc >= kNativeCols) return -1;
+    return nr * kNativeCols + nc;
+}
 
 constexpr ledc_timer_t   kBacklightTimer = LEDC_TIMER_0;
 constexpr ledc_channel_t kBacklightChan  = LEDC_CHANNEL_0;
@@ -260,6 +291,22 @@ hal::Status P4Panel::init() {
     }
     fb_ = static_cast<uint16_t*>(fb);
 
+    // The margins are never touched by blit() (only the centered UI
+    // rectangle is), so whatever the DPI panel's memory happened to hold at
+    // power-on would otherwise show through as noise. Black it out once,
+    // then mark the four boundaries between the five touch zones (see the
+    // constants above) — only across the actual margin width, since a line
+    // drawn further into the picture area would just get painted over on
+    // the next frame.
+    std::fill(fb_, fb_ + static_cast<size_t>(kNativeRows) * kNativeCols, 0);
+    for (int band = 1; band < kButtonCount; ++band) {
+        const int view_row = band * kBandH;
+        for (int view_col = kViewW - kMarginX; view_col < kViewW; ++view_col) {
+            const int idx = native_index(view_row, view_col);
+            if (idx >= 0) fb_[idx] = 0xFFFF;
+        }
+    }
+
     const auto bl_gpio = static_cast<gpio_num_t>(p4pins::kPanelBacklight);
     gpio_reset_pin(bl_gpio);
     gpio_set_direction(bl_gpio, GPIO_MODE_OUTPUT);
@@ -325,20 +372,12 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
             if (sx > x + w - 1) sx = x + w - 1;
             const int view_col = kMarginX + dvx;
 
-            int nr, nc;
-            if (kRotateCw) {
-                nr = (kNativeRows - 1) - view_col;
-                nc = view_row;
-            } else {
-                nr = view_col;
-                nc = (kNativeCols - 1) - view_row;
-            }
-            if (nr < 0 || nr >= kNativeRows || nc < 0 || nc >= kNativeCols) {
-                continue;   // shouldn't happen with a correct margin, but a
-                            // stray write into someone else's PSRAM is far
-                            // worse than a dropped pixel
-            }
-            fb_[static_cast<size_t>(nr) * kNativeCols + nc] = src[sx - x];
+            const int idx = native_index(view_row, view_col);
+            if (idx < 0) continue;   // shouldn't happen with a correct
+                                      // margin, but a stray write into
+                                      // someone else's PSRAM is far worse
+                                      // than a dropped pixel
+            fb_[idx] = src[sx - x];
         }
     }
     return hal::Status::Ok;

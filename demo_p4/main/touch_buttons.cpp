@@ -19,7 +19,13 @@ constexpr const char* kTag = "touch_buttons";
 // once the module is physically rotated to landscape).
 constexpr int kViewW = 800;
 constexpr int kViewH = 480;
-constexpr int kMarginX = 160;             // must match p4_panel.cpp
+// A 200px-wide strip along the right edge, right-justified — wide enough
+// to actually hit reliably (the picture's own 40px margin was too thin to
+// find by feel). This overlaps the picture itself (which only leaves a
+// 40px margin on that side), so only the outer 40px of it gets divider
+// lines drawn — see p4_panel.cpp's kMarginX and the comment where it draws
+// them — but the touch zone extends further left than the visible lines.
+constexpr int kZoneWidth = 200;
 constexpr int kButtonCount = 5;
 constexpr int kBandH = kViewH / kButtonCount;
 
@@ -41,7 +47,14 @@ hal::Status TouchButtons::init() {
         return hal::Status::IoError;
     }
 
+    // The GT911 has two possible I2C addresses, chosen by the level on its
+    // INT pin at the moment RST releases (its datasheet's address-select
+    // procedure). ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG() defaults to the
+    // primary address (0x5D); that address NACKed every transaction on
+    // this board, so this tries the backup address (0x14) instead.
     esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    io_config.dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP;
+
     esp_lcd_panel_io_handle_t io = nullptr;
     if (esp_lcd_new_panel_io_i2c(g_i2c_bus, &io_config, &io) != ESP_OK) {
         ESP_LOGE(kTag, "esp_lcd_new_panel_io_i2c failed");
@@ -49,13 +62,31 @@ hal::Status TouchButtons::init() {
     }
     io_ = io;
 
+    // Without this, esp_lcd_touch_gt911.c logs "I2C address initialization
+    // procedure skipped - using default GT9xx setup" (seen verbatim in our
+    // boot log) and never actually drives the INT/RST address-select pulse
+    // at all — it just leaves the chip however it powered up. Passing this
+    // struct via driver_data is what turns that procedure on and tells it
+    // which address to latch.
+    static esp_lcd_touch_io_gt911_config_t gt911_addr_cfg = {};
+    gt911_addr_cfg.dev_addr = io_config.dev_addr;
+
     esp_lcd_touch_config_t tp_cfg = {};
-    tp_cfg.x_max = kViewW;
-    tp_cfg.y_max = kViewH;
+    // x_max/y_max look like they should be the final (post-swap) view
+    // size, but esp_lcd_touch.c applies mirror_x/mirror_y to the RAW axes
+    // (x[i] = x_max - x[i]) *before* swap_xy exchanges x and y — so these
+    // have to be the panel's native raw resolution, not the view size.
+    // Setting them to the view size (800x480) had mirror_y computing
+    // 480 - raw_y against a raw y that natively goes up to 800, underflowing
+    // to ~65500 whenever a tap landed above raw_y=480 — which then landed in
+    // the *x* output after the swap, confirmed by logging raw coordinates.
+    tp_cfg.x_max = p4pins::kPanelNativeW;   // 480, native raw x
+    tp_cfg.y_max = p4pins::kPanelNativeH;   // 800, native raw y
     tp_cfg.rst_gpio_num = static_cast<gpio_num_t>(p4pins::kTouchRst);
     tp_cfg.int_gpio_num = static_cast<gpio_num_t>(p4pins::kTouchInt);
     tp_cfg.levels.reset = 0;
     tp_cfg.levels.interrupt = 0;
+    tp_cfg.driver_data = &gt911_addr_cfg;
     // The touch chip reports in the panel's native portrait frame; these
     // flags are the first thing to try flipping if taps land on the wrong
     // zone once the picture itself is confirmed right-side up.
@@ -86,7 +117,7 @@ hal::Status TouchButtons::read_mask(uint8_t& mask_out) {
     esp_lcd_touch_get_coordinates(tp, xs, ys, strength, &count, 5);
 
     for (uint8_t i = 0; i < count; ++i) {
-        if (xs[i] >= kMarginX) continue;   // outside the button strip
+        if (xs[i] < kViewW - kZoneWidth) continue;   // outside the button strip
         int band = ys[i] / kBandH;
         if (band < 0) band = 0;
         if (band >= kButtonCount) band = kButtonCount - 1;

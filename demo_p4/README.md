@@ -8,9 +8,9 @@ PCB is still at fab. It exists so the UI can be shown off without real bike
 hardware; it is not a step toward running on the real board, and it never
 becomes one.
 
-**Status: the display works**, confirmed on real hardware — the dashboard
-UI renders correctly, scaled 1.5x. Touch does not work yet. See
-`docs/bringup-p4-demo.md` for what that took and what's still open.
+**Status: fully working**, confirmed on real hardware — the dashboard UI
+renders correctly (scaled 1.5x), and all five on-screen button zones
+respond to touch. See `docs/bringup-p4-demo.md` for what that took.
 
 It depends on `../components/core`, `../components/ui` and
 `../components/dash_hal` unmodified, and reuses `services::logic_tick`,
@@ -27,9 +27,8 @@ New code, all under `main/`:
   directly rather than through the generic vendor component — see
   `docs/bringup-p4-demo.md` for why).
 - `touch_buttons.{hpp,cpp}` — reads a GT911 touch controller and turns taps
-  on five on-screen zones into the same raw button mask
-  `core::input::Decoder` already knows how to debounce. Not working yet —
-  the chip doesn't answer on I2C; see `docs/bringup-p4-demo.md`.
+  on five right-edge zones (A-E, top to bottom) into the same raw button
+  mask `core::input::Decoder` already knows how to debounce.
 - `demo_render.{hpp,cpp}` — the render loop, simplified from the real
   `render_service.cpp` because this panel has no SPI wire budget to protect.
 - `demo_bike_task.{hpp,cpp}` — drives `sim::Bike` and `services::logic_tick`
