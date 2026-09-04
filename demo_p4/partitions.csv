@@ -2,3 +2,8 @@
 nvs,        data, nvs,      0x9000,   0x6000
 phy_init,   data, phy,      0xf000,   0x1000
 factory,    app,  factory,  0x10000,  0x600000
+# Holds demo_p4/c6_cp's built firmware, so the P4 can push it to the C6 over
+# the existing SDIO link (esp_hosted's partition-OTA API, see
+# main/ota_slave.cpp) instead of needing a UART adapter wired to the C6's
+# own header. Populated by `idf.py flash` — see main/CMakeLists.txt.
+slave_fw,   data, 0x40,     0x610000, 0x100000

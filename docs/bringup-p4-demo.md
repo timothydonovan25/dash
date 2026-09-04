@@ -120,9 +120,9 @@ newer API than the registry actually resolves:
 with `CONFIG_ESP_HOSTED_CP_WIFI=n` since this demo has no use for Wi-Fi —
 just the BT controller half.
 
-**Both sides build and the P4 side is flashed and boots.** The boot log
-shows the SDIO transport coming up and identifying the C6 correctly, but
-`esp_hosted_bt_controller_init()` fails:
+**First boot after the P4-side build: the SDIO transport comes up and
+identifies the C6 correctly, but `esp_hosted_bt_controller_init()`
+fails:**
 
 ```
 I transport: Identified slave [esp32c6]
@@ -133,13 +133,44 @@ I ble_media: C6 coprocessor firmware: 2.3.2
 E ble_media: esp_hosted_bt_controller_init failed
 ```
 
-The C6 on this board still has whatever firmware it shipped with (2.3.x,
-does not speak the same ESP-Hosted RPC version as our 2.12.x host build)
-— it has never been reflashed with `demo_p4/c6_cp/`'s output. This board
-exposes only one USB-serial port (`/dev/ttyACM0`, the P4's), so the C6
-can't be reflashed over USB the way the P4 is — it needs a USB-TTL adapter
-wired directly to its UART0/boot/reset pins on the board's Expand-IO
-header (JP1), with the P4 held in reset (or its own reset line to the C6,
-GPIO54, disabled) so it doesn't reset the C6 mid-flash. That's the one
-remaining step to a working BLE link — it's a physical wiring job, not a
-software one.
+The C6 on this board shipped with 2.3.x, which doesn't speak the same
+ESP-Hosted RPC version as our 2.12.x host build. This board exposes only
+one USB-serial port (`/dev/ttyACM0`, the P4's), so the obvious fix — a
+USB-TTL adapter wired to the C6's own UART0/boot/reset pins on the
+Expand-IO header (JP1) — needs hardware nobody had on hand.
+
+**Not needed, it turns out.** `esp_hosted_ota.h` (referenced right in
+`esp_hosted.h`'s own comment block) exposes a partition-OTA path: the
+co-processor's firmware can be pushed to it over the SDIO link that's
+already up, no UART involved. `main/ota_slave.cpp` implements it, adapted
+from the vendor's
+`examples/host_performs_slave_ota/components/ota_partition/`:
+
+1. A `slave_fw` data partition (`partitions.csv`, subtype `0x40`, 1 MB)
+   holds `demo_p4/c6_cp`'s built `network_adapter.bin` — flashed there
+   with `esptool.py write_flash --force <offset> network_adapter.bin`,
+   `--force` because esptool's own image-type check rejects a C6 image on
+   a P4 target at a raw data offset, correctly, since it isn't one.
+2. `ota_slave_if_needed()` runs from `ble_media_start()`, right after
+   `esp_hosted_connect_to_slave()` and before
+   `esp_hosted_bt_controller_init()`. It reads the co-processor's
+   reported version; if older than 2.12, it walks the partition's ESP
+   app-image header to find the real image size (so it doesn't send
+   trailing `0xFF` erase-state as firmware), streams it to the C6 in
+   1500-byte chunks via `esp_hosted_slave_ota_begin/write/end()`, then
+   `esp_hosted_slave_ota_activate()` — which reboots the C6 — and
+   finally `esp_restart()`s the P4 itself so both sides come up in sync.
+
+Confirmed end to end on real hardware: the C6 came up reporting 2.3.2,
+the OTA push ran automatically at boot, and the *next* boot log shows
+`C6 coprocessor firmware: 2.12.8`, `ota_slave: C6 firmware 2.12.8 already
+current`, `ble_media: started`, and NimBLE advertising as `CRF250F-Dash`.
+The one remaining unknown is the far end — nothing has connected to it
+yet, since testing that needs the phone.
+
+The CMake side has a known gap: `esptool_py_flash_to_partition(flash
+"slave_fw" ...)` in `main/CMakeLists.txt` doesn't actually land the image
+in `flasher_args.json` (some ordering issue with when the `flash` target
+exists relative to `main`'s own `CMakeLists.txt` being processed) — it's
+there as intent/documentation, but the working path is the explicit
+two-step `esptool.py write_flash` above, not `idf.py flash`.

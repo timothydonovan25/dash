@@ -1,4 +1,5 @@
 #include "ble_media.hpp"
+#include "ota_slave.hpp"
 
 #include "esp_hosted.h"
 #include "esp_hosted_misc.h"
@@ -219,6 +220,14 @@ void ble_media_start() {
     } else {
         ESP_LOGW(kTag, "could not read C6 coprocessor firmware version");
     }
+
+    // If the C6's firmware is older than this host expects, push the
+    // firmware built alongside this project (demo_p4/c6_cp) to it over the
+    // same SDIO link and restart — see ota_slave.cpp. Returns immediately
+    // (no-op) once the C6 is already current; restarts the host itself if
+    // it just performed an upgrade, so nothing below runs against a stale
+    // co-processor.
+    ota_slave_if_needed();
 
     if (esp_hosted_bt_controller_init() != ESP_OK) {
         ESP_LOGE(kTag, "esp_hosted_bt_controller_init failed");
