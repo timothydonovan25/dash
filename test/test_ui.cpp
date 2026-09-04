@@ -418,6 +418,63 @@ int main() {
         CHECK(prev_top == 0);                      // full scale reaches the top
     }
 
+    CASE("the tach bar marks every 1000 rpm over the marker, not under it");
+    {
+        Screen320x480 s;
+        TachBar stem, flare;
+        stem.set_bounds(Rect{0, TachBar::kFlareH, TachBar::kStemW,
+                             static_cast<int16_t>(kScreenH - TachBar::kFlareH)});
+        stem.configure(TachBar::kFlareH, kScreenH);
+        flare.set_bounds(Rect{0, 0, TachBar::kFlareW, TachBar::kFlareH});
+        flare.configure(0, TachBar::kFlareH);
+
+        constexpr uint16_t kBase = 6000;   // six marks: 1000..5000
+        stem.set_scale(kBase);
+        flare.set_scale(kBase);
+
+        // Full needle, right at the top of the range, so every mark sits
+        // somewhere the marker itself would otherwise cover.
+        stem.set(1.0f);
+        flare.set(1.0f);
+        for (Color& c : s.px) c = 0;
+        stem.render(s.canvas);
+        flare.render(s.canvas);
+
+        const int16_t travel = static_cast<int16_t>(kScreenH - TachBar::kMarkerH);
+        int marks_found = 0;
+        for (uint32_t rpm = 1000; rpm < kBase; rpm += 1000) {
+            const float frac = static_cast<float>(rpm) / kBase;
+            const auto y = static_cast<int16_t>(travel - frac * travel);
+            // Every row of the mark's thickness, not just its top one: a
+            // partial overwrite would still count as "drawn" by a
+            // single-row check. width_at() is recomputed per row rather
+            // than reused from the top one since these six-thousand-rpm
+            // marks land low enough on the stem to make no difference here,
+            // but a mark that ever lands in the flare shouldn't silently
+            // start checking the wrong column.
+            for (int16_t dy = 0; dy < TachBar::kTickH; ++dy) {
+                const auto row = static_cast<int16_t>(y + dy);
+                const int16_t w = TachBar::width_at(row);
+                CHECK(s.canvas.pixel(static_cast<int16_t>(w / 2), row) == color::kWhite);
+            }
+            ++marks_found;
+        }
+        CHECK(marks_found == 5);   // 1000, 2000, 3000, 4000, 5000
+
+        // A base of 0 (no shift point configured) draws no marks and
+        // doesn't crash walking off the end of the tick table.
+        TachBar none;
+        none.set_bounds(Rect{0, 0, TachBar::kStemW, kScreenH});
+        none.configure(0, kScreenH);
+        none.set_scale(0);
+        none.set(0.5f);
+        for (Color& c : s.px) c = 0;
+        none.render(s.canvas);
+        for (int16_t y = 0; y < kScreenH; ++y) {
+            CHECK(s.canvas.pixel(0, y) != color::kWhite);
+        }
+    }
+
     CASE("the media block and its icons come and go together");
     {
         Fixture fx;

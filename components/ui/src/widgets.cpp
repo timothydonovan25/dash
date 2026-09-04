@@ -536,6 +536,21 @@ void TachBar::set(float fraction) {
     if (was || now) touch();
 }
 
+void TachBar::set_scale(uint16_t base_rpm) {
+    if (base_rpm == base_rpm_) return;
+    base_rpm_ = base_rpm;
+
+    const int16_t travel = static_cast<int16_t>(kScreenH - kMarkerH);
+    tick_count_ = 0;
+    for (uint32_t rpm = 1000; rpm < base_rpm && tick_count_ < kMaxTicks;
+         rpm += 1000) {
+        const float frac = static_cast<float>(rpm) / base_rpm;
+        tick_y_[tick_count_++] =
+            static_cast<int16_t>(travel - frac * travel);
+    }
+    touch();
+}
+
 void TachBar::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
     for (int16_t y = y_top_; y < y_bottom_; ++y) {
@@ -543,6 +558,14 @@ void TachBar::render(Canvas& c) {
                          y < static_cast<int16_t>(marker_y_ + kMarkerH);
         c.fill_rect(Rect{bounds.x, y, width_at(y), 1},
                     lit ? color::kTach : color::kTachTrack);
+    }
+    // Drawn after the marker, not before: a mark this widget's row range
+    // owns must stay visible even when the marker is riding over it.
+    for (uint8_t i = 0; i < tick_count_; ++i) {
+        for (int16_t y = tick_y_[i]; y < tick_y_[i] + kTickH; ++y) {
+            if (y < y_top_ || y >= y_bottom_) continue;
+            c.fill_rect(Rect{bounds.x, y, width_at(y), 1}, color::kWhite);
+        }
     }
 }
 

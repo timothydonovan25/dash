@@ -219,6 +219,15 @@ public:
     void configure(int16_t y_top, int16_t y_bottom);
 
     void set(float fraction);      // 0..1 of the rev range
+
+    // A 1px mark at every 1000 rpm up to `base_rpm` (the same full-scale
+    // value `fraction` in set() is measured against), drawn over the
+    // marker rather than under it — a rider glancing at the bar mid-shift
+    // needs the thousands, not just the lit fraction, and a mark that
+    // vanished under the marker at the exact moment it mattered would be
+    // worse than not having it.
+    void set_scale(uint16_t base_rpm);
+
     void render(Canvas& c) override;
 
     // How wide the bar is at a given row. One function for the track and the
@@ -233,6 +242,7 @@ public:
     // flare cannot grow past it without the two overlapping.
     static constexpr int16_t kFlareW  = 135;
     static constexpr int16_t kMarkerH = 12;
+    static constexpr int16_t kTickH   = 1;     // thickness of each 1000-rpm mark
 
 private:
     // A pixel of movement is not worth a repaint of the whole strip.
@@ -240,8 +250,15 @@ private:
 
     bool covers(int16_t marker_y) const;
 
+    // 12000 rpm (the top of shift_base_rpm's configurable range) is 12
+    // marks; a couple of spares cost nothing.
+    static constexpr size_t kMaxTicks = 16;
+
     int16_t y_top_    = 0;
     int16_t y_bottom_ = 0;
+    uint16_t base_rpm_ = 0;
+    int16_t  tick_y_[kMaxTicks] = {};
+    uint8_t  tick_count_ = 0;
     // Off the bar entirely, so the first set() always counts as a move.
     int16_t marker_y_ = -1000;
 };

@@ -179,6 +179,8 @@ void SpeedScreen::update(const Frame& f) {
     const float frac = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
     bar_stem_.set(frac);
     bar_flare_.set(frac);
+    bar_stem_.set_scale(base);
+    bar_flare_.set_scale(base);
 
     const bool imu_ok = f.health.ok(Dev::Imu);
     lean_.set(f.att.lean_deg, imu_ok);

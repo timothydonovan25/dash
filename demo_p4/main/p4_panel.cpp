@@ -33,6 +33,7 @@
 #include "freertos/task.h"
 
 #include "ui/geometry.hpp"
+#include "ui/framebuffer_canvas.hpp"
 
 #include <algorithm>
 
@@ -304,6 +305,33 @@ hal::Status P4Panel::init() {
         for (int view_col = kViewW - kMarginX; view_col < kViewW; ++view_col) {
             const int idx = native_index(view_row, view_col);
             if (idx >= 0) fb_[idx] = 0xFFFF;
+        }
+    }
+
+    // A-E in each zone, small (the dash's own 5x7 font at scale 1, same
+    // one ui/ draws everything else with), rendered upright into a scratch
+    // buffer and copied in pixel by pixel through the same view->native
+    // transform — reusing the real font instead of hand-drawing letters
+    // sideways into the rotated buffer directly.
+    {
+        ui::Color glyph[8 * 8] = {};
+        ui::FrameBufferCanvas glyph_canvas(glyph, 8, 8);
+        const ui::Font& font = ui::font_5x7();
+        for (int band = 0; band < kButtonCount; ++band) {
+            glyph_canvas.fill(0);
+            const char label[2] = {static_cast<char>('A' + band), 0};
+            glyph_canvas.draw_text(0, 0, label, 0xFFFF, 1, ui::Align::Left);
+
+            const int row0 = band * kBandH + (kBandH - font.height) / 2;
+            const int col0 = (kViewW - kMarginX) + (kMarginX - font.width) / 2;
+            for (int gy = 0; gy < font.height; ++gy) {
+                for (int gx = 0; gx < font.width; ++gx) {
+                    const ui::Color px = glyph[gy * 8 + gx];
+                    if (!px) continue;
+                    const int idx = native_index(row0 + gy, col0 + gx);
+                    if (idx >= 0) fb_[idx] = px;
+                }
+            }
         }
     }
 
