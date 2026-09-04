@@ -4,11 +4,11 @@
 #include "core/shift/shift.hpp"
 #include "core/gear/gear.hpp"
 #include "core/config/config.hpp"
+#include "ble_media.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cmath>
-#include <cstring>
 
 namespace demo {
 namespace {
@@ -51,18 +51,7 @@ void bike_task(void* arg) {
 
     sim::Bike bike;
     bike.reset();
-    sim::Controls controls;
-
-    // Nothing plays it — there's no BLE on this build yet (see
-    // docs/bringup-p4-demo.md) — but the media block reads real fields the
-    // same way it would from a phone, and an empty title means the block
-    // never appears at all (sim::Controls's own doc comment).
-    std::strncpy(controls.media_title, "Backbone",
-                sizeof(controls.media_title) - 1);
-    std::strncpy(controls.media_album, "From Mars to Sirius",
-                sizeof(controls.media_album) - 1);
-    std::strncpy(controls.media_artist, "Gojira",
-                sizeof(controls.media_artist) - 1);
+    sim::Controls controls;   // media_* fields stay empty — see below
 
     services::LogicState logic;
     services::logic_restore(d, logic);
@@ -76,6 +65,13 @@ void bike_task(void* arg) {
         now += kTickMs;
         animate(controls, now);
         bike.step(*d.slots, controls, now, kTickMs);
+        // sim::Bike publishes Media itself from Controls.media_* (the
+        // desktop sim's only way to fake a phone), which would otherwise
+        // fight the real one here every tick. controls.media_title is left
+        // empty above so that publish is always a no-op clear, and this is
+        // the actual, single write — ble_media.cpp's own callback never
+        // touches the slot directly, only this cache (rule 2: one writer).
+        d.slots->media.publish(demo::ble_media_snapshot());
 
         // Set once the bike has a fix to set it against (auto_ride/gps_fix
         // are always on here, so this fires on the very first tick), then

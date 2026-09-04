@@ -22,5 +22,54 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_COMPILER_CXX_RTTI=n
 
-# No BLE, no CAN, no SD, no radio in this build — see demo_p4/README.md.
-# The C6 companion chip on this board is unused here.
+# No CAN, no SD in this build — see demo_p4/README.md.
+
+# BLE, over the ESP32-C6 co-processor: the P4 itself has no radio, so
+# NimBLE runs here as the "host" and the actual controller runs on the C6,
+# reached over SDIO via ESP-Hosted's VHCI transport. See ble_media.cpp,
+# demo_p4/c6_cp/ (the C6's own firmware), and docs/bringup-p4-demo.md.
+#
+# The top-level gate (a plain menuconfig bool, off by default). The whole
+# "ESP-Hosted config" submenu below — interface, SDIO pins, CP target —
+# depends on this and silently no-ops without it, which cost real time to
+# track down: leaving it unset produced a build that compiled clean but
+# had picked SPI and an ESP32-H2 coprocessor target, neither of which
+# exist on this board, entirely by un-gated choice defaults.
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
+
+# Everything below is explicit rather than left to defaults, after the
+# above experience — the choice defaults in this component don't reliably
+# favor this board's actual chips. CLK18/CMD19/D0-3=14/15/16/17, C6
+# reset=GPIO54 active-HIGH: confirmed against this exact board's published
+# field notes (docs/bringup-p4-demo.md), and they also happen to be this
+# component's own generic-ESP32P4 SDIO defaults once slot 1 is selected —
+# but selected explicitly, not trusted to fall out of a choice default.
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+# The _PRIV_..._SLOT_1 names are the ones with an actual prompt (settable);
+# ESP_HOSTED_SDIO_PIN_CLK/CMD/D0/D1/D2/D3 are computed-only aliases that
+# just read whichever slot's PRIV value applies, and assigning them
+# directly would be silently overridden by that computation.
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1=18
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1=19
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=14
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=15
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=16
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=17
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+
+# NimBLE host stack; no local controller (the C6 supplies it).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n

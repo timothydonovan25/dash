@@ -6,4 +6,13 @@
 dependencies:
   espressif/esp_lcd_touch_gt911: "*"
   espressif/esp_lcd_touch: "*"
-  idf: ">=5.3"
+  # BLE, over the ESP32-C6 co-processor (no radio on the P4 itself) — see
+  # ble_media.cpp and demo_p4/c6_cp/. esp_wifi_remote is a real dependency
+  # despite the misleading name and this project having no Wi-Fi: it's
+  # where esp_hosted's coprocessor-target selection (SLAVE_IDF_TARGET_*)
+  # actually lives, without which the ESP32-C6 choice is invisible and
+  # the whole "ESP-Hosted config" submenu silently falls back to values
+  # meant for a different coprocessor entirely.
+  espressif/esp_hosted: "*"
+  espressif/esp_wifi_remote: ">=1.3.1"
+  idf: ">=5.5"

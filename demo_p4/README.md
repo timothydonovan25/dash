@@ -8,9 +8,15 @@ PCB is still at fab. It exists so the UI can be shown off without real bike
 hardware; it is not a step toward running on the real board, and it never
 becomes one.
 
-**Status: fully working**, confirmed on real hardware — the dashboard UI
-renders correctly (scaled 1.5x), and all five on-screen button zones
-respond to touch. See `docs/bringup-p4-demo.md` for what that took.
+**Status: display, touch, and the simulated ride are fully working**,
+confirmed on real hardware — the dashboard UI renders correctly (scaled
+1.5x), all five on-screen button zones respond to touch, and the demo
+runs the built-in circuit with live lean/g-force and a working lap
+timer/delta. **BLE (§11.1 Dash Media) builds and boots on the P4 side but
+does not yet link to the C6** — the board's C6 still runs its stock
+firmware, which is a version behind what our host expects, and reflashing
+it needs a USB-TTL adapter wired to its own UART header rather than the
+board's single USB port. See `docs/bringup-p4-demo.md` for the full story.
 
 It depends on `../components/core`, `../components/ui` and
 `../components/dash_hal` unmodified, and reuses `services::logic_tick`,

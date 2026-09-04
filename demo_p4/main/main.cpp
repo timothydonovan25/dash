@@ -7,6 +7,7 @@
 #include "services/logic_tick.hpp"
 #include "demo_render.hpp"
 #include "demo_bike_task.hpp"
+#include "ble_media.hpp"
 #include "p4_panel.hpp"
 #include "touch_buttons.hpp"
 #include "drivers/clock.hpp"
@@ -112,4 +113,10 @@ extern "C" void app_main(void) {
     demo::start_demo_bike(g_deps, g_commands);
     xTaskCreatePinnedToCore(touch_input_task, "touch", 3072, nullptr, 9,
                             nullptr, 1);
+
+    // Last: the render/bike tasks are already running and useful on their
+    // own, and this is the one piece of the board that talks to another
+    // chip (the C6, over SDIO) rather than just local peripherals — if
+    // bring-up here goes wrong, the dashboard itself should already be up.
+    demo::ble_media_start();
 }

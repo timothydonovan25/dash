@@ -89,3 +89,57 @@ If the zone width, line position, or button order ever need to change,
 `p4_panel.cpp` have to move together — they're deliberately duplicated
 rather than shared across a header, matching how the rest of this file
 already duplicated the view geometry.
+
+## BLE, over the C6
+
+The P4 has no radio of its own; NimBLE runs on the P4 as the ESP-Hosted
+"host" and the actual BT controller runs on the C6, reached over a 4-bit
+SDIO link (`ble_media.cpp`, `demo_p4/c6_cp/`, wired last in `main.cpp`
+since it's the one piece that talks to another chip). Two real surprises,
+both found by reading the locally-fetched `managed_components/` sources
+directly rather than trusting the package's remote docs, which describe a
+newer API than the registry actually resolves:
+
+1. **The registry's `espressif/esp_hosted: "*"` resolves to an API older
+   than the GitHub `main` branch documents.** The docs describe
+   `esp_hosted_bt_host_stack_setup()`; the resolved package (reporting
+   itself as "2.12.8" at CP-build time) only has
+   `esp_hosted_bt_controller_init()`/`_enable()`, found by grepping the
+   fetched `managed_components/espressif__esp_hosted/examples/
+   host_nimble_bleprph_host_only_vhci/` example rather than the README.
+2. **`espressif/esp_wifi_remote` is a load-bearing dependency despite the
+   name** — it's where `esp_hosted`'s `SLAVE_IDF_TARGET_ESP32C6` Kconfig
+   symbol is defined, and without it the CP target and transport silently
+   default to an ESP32-H2/SPI combination that doesn't exist on this
+   board, with no error, just wrong defaults. `CONFIG_ESP_HOSTED_ENABLED`
+   itself is gated the same way (`depends on ESP_WIFI_REMOTE_...`) and
+   must also be set explicitly.
+
+`demo_p4/c6_cp/` is Espressif's own `slave`/`network_adapter` example
+(copied wholesale from the managed component, not hand-written), built
+with `CONFIG_ESP_HOSTED_CP_WIFI=n` since this demo has no use for Wi-Fi —
+just the BT controller half.
+
+**Both sides build and the P4 side is flashed and boots.** The boot log
+shows the SDIO transport coming up and identifying the C6 correctly, but
+`esp_hosted_bt_controller_init()` fails:
+
+```
+I transport: Identified slave [esp32c6]
+I transport: capabilities: 0xd
+I transport: 	 * WLAN / HCI over SDIO / BLE only
+W transport: Version mismatch: Host [2.12.0] > Co-proc [2.3.0] ==> Upgrade co-proc to avoid RPC timeouts
+I ble_media: C6 coprocessor firmware: 2.3.2
+E ble_media: esp_hosted_bt_controller_init failed
+```
+
+The C6 on this board still has whatever firmware it shipped with (2.3.x,
+does not speak the same ESP-Hosted RPC version as our 2.12.x host build)
+— it has never been reflashed with `demo_p4/c6_cp/`'s output. This board
+exposes only one USB-serial port (`/dev/ttyACM0`, the P4's), so the C6
+can't be reflashed over USB the way the P4 is — it needs a USB-TTL adapter
+wired directly to its UART0/boot/reset pins on the board's Expand-IO
+header (JP1), with the P4 held in reset (or its own reset line to the C6,
+GPIO54, disabled) so it doesn't reset the C6 mid-flash. That's the one
+remaining step to a working BLE link — it's a physical wiring job, not a
+software one.
