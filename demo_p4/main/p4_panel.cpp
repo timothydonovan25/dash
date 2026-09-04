@@ -1,4 +1,16 @@
-// See p4_panel.hpp — this whole file is unverified against real hardware.
+// See p4_panel.hpp — this whole file targets one specific real board
+// (Guition JC4880P443C_I_W) and follows the bring-up recipe confirmed
+// working for it in elik745i/ESP32-2432S024C-Remote
+// (src/jc4880p443_bringup_main.cpp, boards/jc4880p443c_i_w.json) rather
+// than the generic esp_lcd_st7701 vendor driver this file used at first.
+// That component's own init path (`esp_lcd_new_panel_st7701` +
+// `esp_lcd_panel_init`) hung indefinitely on this hardware even after
+// fixing the DSI PHY power sequencing and matching every parameter to a
+// same-chip reference — the missing piece turned out to be that this
+// panel has a real hardware reset line (GPIO5) that has to be pulsed
+// before it will answer anything, which the generic driver never learned
+// about because we had it configured as GPIO_NUM_NC. See
+// docs/bringup-p4-demo.md.
 //
 // The DPI panel gives us a real framebuffer in memory that the DSI
 // peripheral scans out continuously; there is no bus transaction to push a
@@ -13,11 +25,12 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
-#include "esp_lcd_st7701.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "ui/geometry.hpp"
 
@@ -33,12 +46,19 @@ constexpr bool kRotateCw = true;
 constexpr int kNativeRows = p4pins::kPanelNativeH;   // 800
 constexpr int kNativeCols = p4pins::kPanelNativeW;   // 480
 
-// The UI's 480x320 canvas, centered in the 800(w) x 480(h) view you get
-// once the module is physically rotated 90 degrees into the landscape case.
+// The UI's 480x320 canvas, scaled 1.5x to 720x480 and centered in the
+// 800(w) x 480(h) view you get once the module is physically rotated 90
+// degrees into the landscape case. 1.5x fills the view's height exactly
+// (320*1.5=480) with only side margins left, and — unlike stretching
+// independently per axis to fill all 800x480 — doesn't distort circles
+// into ovals or squash the bitmap font, since it scales both axes by the
+// same factor. See the plan behind this folder for the reasoning.
 constexpr int kViewW = kNativeRows;   // 800
 constexpr int kViewH = kNativeCols;   // 480
-constexpr int kMarginX = (kViewW - ui::kScreenW) / 2;   // 160
-constexpr int kMarginY = (kViewH - ui::kScreenH) / 2;   // 80
+constexpr int kScaleNum = 3;
+constexpr int kScaleDen = 2;   // 3/2 = 1.5x
+constexpr int kMarginX = (kViewW - ui::kScreenW * kScaleNum / kScaleDen) / 2;   // 40
+constexpr int kMarginY = (kViewH - ui::kScreenH * kScaleNum / kScaleDen) / 2;   // 0
 
 constexpr ledc_timer_t   kBacklightTimer = LEDC_TIMER_0;
 constexpr ledc_channel_t kBacklightChan  = LEDC_CHANNEL_0;
@@ -46,16 +66,114 @@ constexpr ledc_mode_t    kBacklightMode  = LEDC_LOW_SPEED_MODE;
 constexpr uint32_t       kBacklightBits  = 10;   // 0-1023
 
 // VDD_MIPI_DPHY needs 2.5V from one of the chip's internal LDO channels
-// before the DSI peripheral does anything at all — this isn't a per-board
-// pin, it's fixed silicon wiring on every ESP32-P4, and Espressif's own
-// examples and BSPs (esp-idf's peripherals/lcd/mipi_dsi example; the
-// esp32_p4_function_ev_board BSP a matching board's published firmware
-// uses) all acquire the same channel. Missing this is exactly why every
-// DSI transaction hung forever regardless of lane count or bit rate: the
-// bus "existed" in software but had no power, so nothing ever happened on
-// the wire for the status registers to react to.
-constexpr int      kDsiPhyLdoChan = 3;
-constexpr int      kDsiPhyLdoMv   = 2500;
+// before the DSI peripheral does anything at all — fixed silicon wiring on
+// every ESP32-P4, confirmed by both Espressif's own mipi_dsi example and
+// the jc4880p443c_i_w bring-up sketch (same channel and voltage in both).
+constexpr int kDsiPhyLdoChan = 3;
+constexpr int kDsiPhyLdoMv   = 2500;
+
+// The panel's own init command table — copied from
+// src/jc4880p443_bringup_main.cpp's PANEL_INIT_CMDS, which is specific to
+// this physical panel's gamma/timing registers, not a generic ST7701
+// default. Sent as raw DBI parameter writes rather than through a vendor
+// panel driver's own init() — see the file comment for why.
+struct InitCmd {
+    uint8_t cmd;
+    const uint8_t* data;
+    size_t len;
+    uint16_t delay_ms;
+};
+
+const uint8_t kFF13[] = {0x77, 0x01, 0x00, 0x00, 0x13};
+const uint8_t kEF08[] = {0x08};
+const uint8_t kFF10[] = {0x77, 0x01, 0x00, 0x00, 0x10};
+const uint8_t kC0[]   = {0x63, 0x00};
+const uint8_t kC1[]   = {0x0D, 0x02};
+const uint8_t kC2[]   = {0x10, 0x08};
+const uint8_t kCC[]   = {0x10};
+const uint8_t kB0Gamma[] = {0x80, 0x09, 0x53, 0x0C, 0xD0, 0x07, 0x0C, 0x09, 0x09, 0x28, 0x06, 0xD4, 0x13, 0x69, 0x2B, 0x71};
+const uint8_t kB1Gamma[] = {0x80, 0x94, 0x5A, 0x10, 0xD3, 0x06, 0x0A, 0x08, 0x08, 0x25, 0x03, 0xD3, 0x12, 0x66, 0x6A, 0x0D};
+const uint8_t kFF11[] = {0x77, 0x01, 0x00, 0x00, 0x11};
+const uint8_t kB0[]   = {0x5D};
+const uint8_t kB1[]   = {0x58};
+const uint8_t kB2[]   = {0x87};
+const uint8_t kB3[]   = {0x80};
+const uint8_t kB5[]   = {0x4E};
+const uint8_t kB7[]   = {0x85};
+const uint8_t kB8[]   = {0x21};
+const uint8_t kB9[]   = {0x10, 0x1F};
+const uint8_t kBB[]   = {0x03};
+const uint8_t kBC[]   = {0x00};
+const uint8_t kC178[] = {0x78};
+const uint8_t kC278[] = {0x78};
+const uint8_t kD0[]   = {0x88};
+const uint8_t kE0[]   = {0x00, 0x3A, 0x02};
+const uint8_t kE1[]   = {0x04, 0xA0, 0x00, 0xA0, 0x05, 0xA0, 0x00, 0xA0, 0x00, 0x40, 0x40};
+const uint8_t kE2[]   = {0x30, 0x00, 0x40, 0x40, 0x32, 0xA0, 0x00, 0xA0, 0x00, 0xA0, 0x00, 0xA0, 0x00};
+const uint8_t kE3[]   = {0x00, 0x00, 0x33, 0x33};
+const uint8_t kE4[]   = {0x44, 0x44};
+const uint8_t kE5[]   = {0x09, 0x2E, 0xA0, 0xA0, 0x0B, 0x30, 0xA0, 0xA0, 0x05, 0x2A, 0xA0, 0xA0, 0x07, 0x2C, 0xA0, 0xA0};
+const uint8_t kE6[]   = {0x00, 0x00, 0x33, 0x33};
+const uint8_t kE7[]   = {0x44, 0x44};
+const uint8_t kE8[]   = {0x08, 0x2D, 0xA0, 0xA0, 0x0A, 0x2F, 0xA0, 0xA0, 0x04, 0x29, 0xA0, 0xA0, 0x06, 0x2B, 0xA0, 0xA0};
+const uint8_t kEB[]   = {0x00, 0x00, 0x4E, 0x4E, 0x00, 0x00, 0x00};
+const uint8_t kEC[]   = {0x08, 0x01};
+const uint8_t kED[]   = {0xB0, 0x2B, 0x98, 0xA4, 0x56, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xF7, 0x65, 0x4A, 0x89, 0xB2, 0x0B};
+const uint8_t kEF[]   = {0x08, 0x08, 0x08, 0x45, 0x3F, 0x54};
+const uint8_t kFF00[] = {0x77, 0x01, 0x00, 0x00, 0x00};
+const uint8_t kNop[]  = {0x00};
+
+const InitCmd kInitCmds[] = {
+    {0xFF, kFF13, sizeof(kFF13), 0},
+    {0xEF, kEF08, sizeof(kEF08), 0},
+    {0xFF, kFF10, sizeof(kFF10), 0},
+    {0xC0, kC0, sizeof(kC0), 0},
+    {0xC1, kC1, sizeof(kC1), 0},
+    {0xC2, kC2, sizeof(kC2), 0},
+    {0xCC, kCC, sizeof(kCC), 0},
+    {0xB0, kB0Gamma, sizeof(kB0Gamma), 0},
+    {0xB1, kB1Gamma, sizeof(kB1Gamma), 0},
+    {0xFF, kFF11, sizeof(kFF11), 0},
+    {0xB0, kB0, sizeof(kB0), 0},
+    {0xB1, kB1, sizeof(kB1), 0},
+    {0xB2, kB2, sizeof(kB2), 0},
+    {0xB3, kB3, sizeof(kB3), 0},
+    {0xB5, kB5, sizeof(kB5), 0},
+    {0xB7, kB7, sizeof(kB7), 0},
+    {0xB8, kB8, sizeof(kB8), 0},
+    {0xB9, kB9, sizeof(kB9), 0},
+    {0xBB, kBB, sizeof(kBB), 0},
+    {0xBC, kBC, sizeof(kBC), 0},
+    {0xC1, kC178, sizeof(kC178), 0},
+    {0xC2, kC278, sizeof(kC278), 0},
+    {0xD0, kD0, sizeof(kD0), 0},
+    {0xE0, kE0, sizeof(kE0), 0},
+    {0xE1, kE1, sizeof(kE1), 0},
+    {0xE2, kE2, sizeof(kE2), 0},
+    {0xE3, kE3, sizeof(kE3), 0},
+    {0xE4, kE4, sizeof(kE4), 0},
+    {0xE5, kE5, sizeof(kE5), 0},
+    {0xE6, kE6, sizeof(kE6), 0},
+    {0xE7, kE7, sizeof(kE7), 0},
+    {0xE8, kE8, sizeof(kE8), 0},
+    {0xEB, kEB, sizeof(kEB), 0},
+    {0xEC, kEC, sizeof(kEC), 0},
+    {0xED, kED, sizeof(kED), 0},
+    {0xEF, kEF, sizeof(kEF), 0},
+    {0xFF, kFF00, sizeof(kFF00), 0},
+    {0x11, kNop, sizeof(kNop), 120},   // sleep out
+    {0x29, kNop, sizeof(kNop), 20},    // display on
+};
+
+void pulse_panel_reset() {
+    const auto rst = static_cast<gpio_num_t>(p4pins::kPanelReset);
+    gpio_reset_pin(rst);
+    gpio_set_direction(rst, GPIO_MODE_OUTPUT);
+    gpio_set_level(rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
+}
 
 }  // namespace
 
@@ -73,10 +191,7 @@ hal::Status P4Panel::init() {
     bus_config.bus_id = 0;
     bus_config.num_data_lanes = 2;
     bus_config.phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
-    // Confirmed against the published firmware for this exact board model
-    // (Guition JC4880P443C) — not a guess like the earlier 1000/500/480
-    // attempts were.
-    bus_config.lane_bit_rate_mbps = 750;
+    bus_config.lane_bit_rate_mbps = 500;   // matches jc4880p443c_i_w bring-up
 
     esp_lcd_dsi_bus_handle_t bus = nullptr;
     if (esp_lcd_new_dsi_bus(&bus_config, &bus) != ESP_OK) {
@@ -97,50 +212,46 @@ hal::Status P4Panel::init() {
     }
     io_ = io;
 
+    // Bare DPI panel, not the esp_lcd_st7701 vendor wrapper — see the file
+    // comment. Timing matches jc4880p443c_i_w's bring-up sketch exactly.
     esp_lcd_dpi_panel_config_t dpi_config = {};
     dpi_config.virtual_channel = 0;
     dpi_config.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
-    dpi_config.dpi_clock_freq_mhz = 25;   // typical for a 480x800 panel
+    dpi_config.dpi_clock_freq_mhz = 34;
     dpi_config.in_color_format = LCD_COLOR_FMT_RGB565;
     dpi_config.out_color_format = LCD_COLOR_FMT_RGB565;
     dpi_config.num_fbs = 1;
     dpi_config.video_timing.h_size = kNativeCols;
     dpi_config.video_timing.v_size = kNativeRows;
-    // Placeholder porch/sync values — every one of these needs confirming
-    // against whatever the panel's real datasheet timing turns out to be.
-    dpi_config.video_timing.hsync_pulse_width = 8;
-    dpi_config.video_timing.hsync_back_porch  = 20;
-    dpi_config.video_timing.hsync_front_porch = 20;
-    dpi_config.video_timing.vsync_pulse_width = 4;
-    dpi_config.video_timing.vsync_back_porch  = 12;
-    dpi_config.video_timing.vsync_front_porch = 12;
-
-    st7701_vendor_config_t vendor_config = {};
-    vendor_config.mipi_config.dsi_bus = bus;
-    vendor_config.mipi_config.dpi_config = &dpi_config;
-    vendor_config.flags.use_mipi_interface = 1;
-
-    esp_lcd_panel_dev_config_t panel_config = {};
-    // GPIO_NUM_NC: the published firmware for this exact board (Guition
-    // JC4880P443C) doesn't drive a reset pin for this panel either — it
-    // relies on the DSI init command sequence rather than a hardware
-    // reset line. kPanelReset in p4_pins.hpp is unused now; kept only as
-    // the historical placeholder in case that turns out wrong.
-    panel_config.reset_gpio_num = GPIO_NUM_NC;
-    panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-    panel_config.bits_per_pixel = 16;
-    panel_config.vendor_config = &vendor_config;
+    dpi_config.video_timing.hsync_pulse_width = 12;
+    dpi_config.video_timing.hsync_back_porch  = 42;
+    dpi_config.video_timing.hsync_front_porch = 42;
+    dpi_config.video_timing.vsync_pulse_width = 2;
+    dpi_config.video_timing.vsync_back_porch  = 8;
+    dpi_config.video_timing.vsync_front_porch = 166;
 
     esp_lcd_panel_handle_t panel = nullptr;
-    if (esp_lcd_new_panel_st7701(io, &panel_config, &panel) != ESP_OK) {
-        ESP_LOGE(kTag, "esp_lcd_new_panel_st7701 failed");
+    if (esp_lcd_new_panel_dpi(bus, &dpi_config, &panel) != ESP_OK) {
+        ESP_LOGE(kTag, "esp_lcd_new_panel_dpi failed");
         return hal::Status::IoError;
     }
     panel_ = panel;
 
-    esp_lcd_panel_reset(panel);
-    esp_lcd_panel_init(panel);
-    esp_lcd_panel_disp_on_off(panel, true);
+    // The reset line the generic vendor driver never knew about.
+    pulse_panel_reset();
+
+    for (const InitCmd& c : kInitCmds) {
+        if (esp_lcd_panel_io_tx_param(io, c.cmd, c.data, c.len) != ESP_OK) {
+            ESP_LOGE(kTag, "init cmd 0x%02X failed", c.cmd);
+            return hal::Status::IoError;
+        }
+        if (c.delay_ms) vTaskDelay(pdMS_TO_TICKS(c.delay_ms));
+    }
+
+    if (esp_lcd_panel_init(panel) != ESP_OK) {
+        ESP_LOGE(kTag, "esp_lcd_panel_init failed");
+        return hal::Status::IoError;
+    }
 
     void* fb = nullptr;
     if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb) != ESP_OK || !fb) {
@@ -149,21 +260,15 @@ hal::Status P4Panel::init() {
     }
     fb_ = static_cast<uint16_t*>(fb);
 
-    // GPIO26 is confirmed correct (found by demo_p4/main/backlight_scan.cpp
-    // driving it as a plain digital output — see docs/bringup-p4-demo.md).
-    // Force it on immediately and unconditionally so the panel has a
-    // backlight even if the LEDC dimmer below fails to configure — a
-    // guaranteed-on screen beats a dim-but-silently-broken one for a demo.
     const auto bl_gpio = static_cast<gpio_num_t>(p4pins::kPanelBacklight);
     gpio_reset_pin(bl_gpio);
     gpio_set_direction(bl_gpio, GPIO_MODE_OUTPUT);
     gpio_set_level(bl_gpio, 1);
     backlight_gpio_only_ = true;
 
-    // LEDC PWM for actual dimming, same idea as drivers::Ili9488's — a
-    // GPIO of its own rather than a bit on the shared MCP23S17. Upgrades
-    // set_backlight() to real dimming if it configures; falls back to the
-    // plain on/off above if not.
+    // LEDC PWM for actual dimming — upgrades set_backlight() to real
+    // dimming if it configures; falls back to the plain on/off above if
+    // not (see docs/bringup-p4-demo.md for why that fallback exists).
     ledc_timer_config_t timer_cfg = {};
     timer_cfg.speed_mode = kBacklightMode;
     timer_cfg.timer_num = kBacklightTimer;
@@ -198,13 +303,28 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                           const uint16_t* pixels) {
     if (!fb_) return hal::Status::NotPresent;
 
-    for (uint16_t row = 0; row < h; ++row) {
-        const int ux = x;
-        const int uy = y + row;
-        const uint16_t* src = pixels + static_cast<size_t>(row) * w;
-        for (uint16_t col = 0; col < w; ++col) {
-            const int view_col = kMarginX + ux + col;   // 0..799
-            const int view_row = kMarginY + uy;          // 0..479
+    // Nearest-neighbor 1.5x upscale: walk the *destination* pixels for this
+    // rect (not the source ones), so every output pixel gets written even
+    // though 1.5x means some source pixels cover a 2x2 block and others a
+    // 1x1 — walking the source the other way round would leave gaps.
+    const int dst_x0 = x * kScaleNum / kScaleDen;
+    const int dst_x1 = (x + w) * kScaleNum / kScaleDen;
+    const int dst_y0 = y * kScaleNum / kScaleDen;
+    const int dst_y1 = (y + h) * kScaleNum / kScaleDen;
+
+    for (int dvy = dst_y0; dvy < dst_y1; ++dvy) {
+        int sy = dvy * kScaleDen / kScaleNum;
+        if (sy < y) sy = y;
+        if (sy > y + h - 1) sy = y + h - 1;
+        const uint16_t* src = pixels + static_cast<size_t>(sy - y) * w;
+        const int view_row = kMarginY + dvy;
+
+        for (int dvx = dst_x0; dvx < dst_x1; ++dvx) {
+            int sx = dvx * kScaleDen / kScaleNum;
+            if (sx < x) sx = x;
+            if (sx > x + w - 1) sx = x + w - 1;
+            const int view_col = kMarginX + dvx;
+
             int nr, nc;
             if (kRotateCw) {
                 nr = (kNativeRows - 1) - view_col;
@@ -218,7 +338,7 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                             // stray write into someone else's PSRAM is far
                             // worse than a dropped pixel
             }
-            fb_[static_cast<size_t>(nr) * kNativeCols + nc] = src[col];
+            fb_[static_cast<size_t>(nr) * kNativeCols + nc] = src[sx - x];
         }
     }
     return hal::Status::Ok;

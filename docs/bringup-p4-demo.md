@@ -1,92 +1,91 @@
 # Bringing up the ESP32-P4 demo board
 
 `demo_p4/` runs the real dashboard UI and core logic — unmodified — against
-a simulated bike, on a generic AliExpress ESP32-P4 + ESP32-C6 board (4.3",
-480x800 IPS capacitive touch, camera, plastic shell) for demos. See
-`demo_p4/README.md` for what it is and isn't; this is the procedure for
-getting a picture up, the way `docs/bringup.md` is for the real board.
+a simulated bike, on a Guition JC4880P443C_I_W board (ESP32-P4 + ESP32-C6,
+4.3", 480x800 IPS capacitive touch, camera, plastic shell) for demos. See
+`demo_p4/README.md` for what it is and isn't.
 
-**Everything in `demo_p4/main/p4_pins.hpp`, `p4_panel.cpp` and
-`touch_buttons.cpp` is a guess**, not a verified fact. This board has no
-published schematic. It builds cleanly against ESP-IDF v6.0.2 (confirmed:
-`idf.py set-target esp32p4 && idf.py build` produces a flashable
-`dash_demo_p4.bin`), which only proves the API calls are well-formed — none
-of the actual panel/touch behavior has run.
+**Status: the display works.** Panel init succeeds, and the dashboard UI —
+scaled 1.5x — renders correctly on the real screen, confirmed against the
+physical board. Touch does not work yet (§2 below). Chip is a real ESP32-P4
+revision v1.3 (early/pre-production silicon; `sdkconfig.defaults` sets
+`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`/`REV_MIN_100` accordingly).
 
-## 0. Before applying power
+## What it took
 
-Same rule as the real board: don't guess at wiring with the board powered.
-If you can get a multimeter on it, trace the module's DSI/touch header pins
-against `p4_pins.hpp` before flashing so the placeholders can be corrected
-up front rather than by trial and error.
+Three real bugs, in the order they were found and fixed:
 
-## 1. Flash and watch the log
+1. **The DSI PHY has no power without an explicit LDO request.** Every
+   ESP32-P4 needs `esp_ldo_acquire_channel` on channel 3 at 2500mV
+   (`kDsiPhyLdoChan`/`kDsiPhyLdoMv` in `p4_panel.cpp`) before the MIPI-DSI
+   peripheral does anything — this is fixed silicon wiring, not a per-board
+   guess, and skipping it means every DSI command silently hangs forever
+   with no error, because the bus "exists" in software with nothing
+   happening on the wire.
+2. **The `esp_lcd_st7701` vendor component's own LCD-ID read hangs on this
+   board's DSI reverse channel.** `esp_lcd_panel_io_rx_param`'s underlying
+   HAL busy-waits on the read FIFO with no timeout, so an unanswered read
+   takes the whole app down via the task watchdog. Worked around initially
+   by forking the component to skip that one read (kept in git history;
+   removed once §3 replaced the vendor driver entirely).
+3. **The panel has a real hardware reset line (GPIO5) that must be pulsed
+   before it responds to anything**, contrary to an early assumption (based
+   on Espressif's *different* reference board's BSP header) that this
+   panel had no reset pin. This was the actual fix: found via
+   [elik745i/ESP32-2432S024C-Remote](https://github.com/elik745i/ESP32-2432S024C-Remote)'s
+   `boards/jc4880p443c_i_w.json` + `src/jc4880p443_bringup_main.cpp`, a
+   bring-up sketch written for this exact board variant. `p4_panel.cpp` now
+   follows that recipe directly: a bare `esp_lcd_new_panel_dpi` panel (not
+   the vendor ST7701 wrapper), a manual reset pulse, and that sketch's own
+   confirmed init command table sent as raw DBI writes. Confirmed pins from
+   the same source: `kPanelReset=5`, `kTouchRst=22`, `kTouchInt=21`,
+   `kPanelBacklight=23` (the last also matches Espressif's
+   `esp32_p4_function_ev_board` BSP header).
 
-```bash
-. ~/.espressif/tools/activate_idf_v6.0.2.sh
-cd demo_p4
-idf.py -p /dev/ttyACM0 flash monitor
+## Orientation and scale
+
+`kRotateCw` in `p4_panel.cpp` was confirmed correct on the first working
+boot — the picture came up right-side-up with the module physically
+rotated to landscape as described in the plan behind this folder. If you
+ever change how the module is mounted, that's the flag to flip.
+
+The UI renders at its native 480x320 and is upscaled 1.5x (nearest-neighbor,
+in `P4Panel::blit()`) to 720x480, centered in the panel's 800x480 view with
+40px margins left/right — confirmed working and sharp on real hardware.
+
+## Open: touch
+
+The five touch-button zones don't work yet. Boot log shows:
+
+```
+GT911: I2C address initialization procedure skipped - using default GT9xx setup
+E lcd_panel.io.i2c: panel_io_i2c_rx_buffer(145): i2c transaction failed
+E GT911: touch_gt911_read_cfg(419): GT911 read error!
 ```
 
-Expect two health lines at boot: `panel: <status>` and `touch: <status>`
-(see `main.cpp`). `NotPresent` or `IoError` on the panel means the DSI bus
-came up but the ST7701 either isn't there or didn't answer its init
-sequence — see step 2. A crash before either line prints means the DSI bus
-config itself is wrong (lane count, PHY clock source) rather than anything
-panel-specific.
+The touch chip never answers on I2C at all (not a wrong-zone mapping
+problem — `esp_lcd_touch_new_i2c_gt911` itself fails). `kTouchSda=7`,
+`kTouchScl=8` are confirmed against Espressif's own BSP header, and
+`kTouchRst=22`/`kTouchInt=21` against the jc4880p443c_i_w bring-up sketch,
+so the pins are the same class of "confirmed against a real matching
+reference" as the pins that fixed the display — but evidently something is
+still wrong. Candidates, cheapest first:
 
-## 2. If the screen stays dark or shows garbage
+- **I2C address.** GT911 uses 0x5D or 0x14 depending on the level of its
+  INT pin at power-on (see `ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS[_BACKUP]` in
+  the `esp_lcd_touch_gt911` component). `touch_buttons.cpp` uses the
+  macro's default; try the other address if this board's power-on strap
+  differs.
+- **Reset pulse.** `esp_lcd_touch_new_i2c_gt911` pulses `tp_cfg.rst_gpio_num`
+  itself using `tp_cfg.levels.reset` — worth confirming that polarity
+  against the jc4880p443_bringup_main.cpp's `pulseTouchReset()` (pulls low,
+  waits, releases high) rather than trusting the driver's default.
+- **Shared I2C bus contention or timing** — `i2c_master_bus_config_t` in
+  `touch_buttons.cpp` uses default glitch filtering and no explicit clock
+  stretching allowance; a NACK before any clock stretch completes would
+  look exactly like this.
 
-In rough order of likelihood, all in `p4_panel.cpp`:
+## Verification once touch works
 
-- **Wrong controller entirely.** ST7701 is the common choice for this panel
-  class, but not the only one. If nothing in step 1 changes after fixing
-  everything below, the controller may not be an ST7701 at all — the panel
-  FPC sometimes has the driver IC's part number printed on it.
-- **Video timing.** `dpi_config.video_timing` (porches, sync widths,
-  `dpi_clock_freq_mhz`) are placeholders. A torn or shifted image usually
-  means the clock is off; a completely blank panel with a healthy `Ok` from
-  `init()` usually means the porches are wrong enough that the panel never
-  syncs.
-- **Reset/backlight pins.** `p4pins::kPanelReset`/`kPanelBacklight` are
-  guesses. A panel that never leaves its post-reset blank state, or a
-  correct image with the backlight visibly off, points here first — it's
-  the cheapest thing to check with a multimeter.
-- **Lane count / bit rate.** `p4pins::kDsiDataLanes` and
-  `lane_bit_rate_mbps` in `init()` affect whether the DSI PHY links at all;
-  a bus that fails to initialize (`esp_lcd_new_dsi_bus` returning an error
-  in the log) means these are wrong before anything panel-specific runs.
-
-## 3. Once a picture is up: orientation
-
-The picture will very likely be rotated, mirrored, or both on first light,
-because `kRotateCw` in `p4_panel.cpp` is a guess about which way you
-physically mounted the module. Flip it (`false` ↔ `true`) and rebuild if the
-480x320 UI appears sideways or upside down. There's no way to get this
-right without seeing it — don't spend time reasoning about it in the
-abstract.
-
-## 4. Touch
-
-Once the picture is confirmed right-side-up, the five button zones
-(`touch_buttons.cpp`) need their own check: tap each of the five strips in
-the left margin and confirm the right screen/mode reacts. If taps land on
-the wrong zone, or nothing happens at all:
-
-- Wrong zone → try flipping `tp_cfg.flags.swap_xy` / `mirror_x` / `mirror_y`
-  in `touch_buttons.cpp`. These need to match whatever `kRotateCw` ended up
-  being in step 3, and there's no way to derive the right combination
-  without a working picture to tap on first.
-- Nothing at all → `esp_lcd_touch_new_i2c_gt911` failing in the log points
-  at `p4pins::kTouchSda/kTouchScl` (wrong I2C pins) or the controller not
-  being a GT911 at all. `kTouchRst`/`kTouchInt` being wrong can also leave
-  the chip permanently in reset.
-
-## 5. Once it's all working
-
-Nothing left to tune functionally — the UI, lap timer, shift pattern and
-attitude filter are the real firmware's own code, exercised by
-`sim::Bike` exactly as `sim/dash_sim.py` exercises them on a laptop. The one
-optional next step is the 1.5x upscale mentioned in the plan behind this
-folder, entirely inside `p4_panel.cpp::blit()`, if the margined 480x320
-image looks too small in the case.
+Tap each of the five strips in the left margin and confirm the right
+screen/mode reacts, the same way pressing A-E does in `sim/dash_sim.py`.

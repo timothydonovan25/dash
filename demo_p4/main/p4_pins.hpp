@@ -16,19 +16,19 @@ namespace p4pins {
 // boards), so there's normally nothing to configure here beyond lane count.
 inline constexpr int kDsiDataLanes = 2;
 
-// kPanelReset is unused (p4_panel.cpp passes GPIO_NUM_NC — the published
-// firmware for this exact board doesn't drive a reset pin for this panel).
-// kPanelBacklight=23 matches that same published firmware
-// (BSP_LCD_BACKLIGHT in Guition JC4880P443C's esp32_p4_function_ev_board
-// BSP fork) — our own on-device backlight scan was ambiguous between 23
-// and 26 (they're adjacent in the scan's cycle and the flash times the
-// user read off a clock could fit either within normal reaction-time
-// error), so this real published source is what settled it.
-inline constexpr int kPanelReset     = 27;    // unused, see above
+// GPIO5, 22, 21, 23 all confirmed against elik745i/ESP32-2432S024C-Remote's
+// boards/jc4880p443c_i_w.json + src/jc4880p443_bringup_main.cpp — a
+// bring-up sketch written specifically for this exact board variant
+// (JC4880P443C_I_W), not a guess or a same-family reference like the
+// esp32_p4_function_ev_board BSP was. That sketch pulses this reset pin
+// low-then-high before anything else works, which we were never doing
+// (an earlier guess had assumed no reset pin existed at all).
+inline constexpr int kPanelReset     = 5;
 inline constexpr int kPanelBacklight = 23;
 
-// Touch (GT911, the common controller for this panel size/resolution) on
-// its own I2C bus. UNCONFIRMED.
+// Touch (GT911) on its own I2C bus. SDA/SCL confirmed against Espressif's
+// esp32_p4_function_ev_board header; RST/INT confirmed against the
+// jc4880p443c_i_w bring-up sketch above.
 inline constexpr int kTouchSda   = 7;
 inline constexpr int kTouchScl   = 8;
 inline constexpr int kTouchRst   = 22;

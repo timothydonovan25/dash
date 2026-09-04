@@ -2,10 +2,15 @@
 
 A separate ESP-IDF project (own target, own `sdkconfig.defaults`, own
 `main/`) that runs the real dashboard firmware's UI and core logic on a
-generic ESP32-P4 + ESP32-C6 dev board — 4.3", 480x800 IPS capacitive touch,
-camera, plastic shell — for demos, since the real CRF250F PCB is still at
-fab. It exists so the UI can be shown off without real bike hardware; it is
-not a step toward running on the real board, and it never becomes one.
+Guition JC4880P443C_I_W board (ESP32-P4 + ESP32-C6, 4.3", 480x800 IPS
+capacitive touch, camera, plastic shell) for demos, since the real CRF250F
+PCB is still at fab. It exists so the UI can be shown off without real bike
+hardware; it is not a step toward running on the real board, and it never
+becomes one.
+
+**Status: the display works**, confirmed on real hardware — the dashboard
+UI renders correctly, scaled 1.5x. Touch does not work yet. See
+`docs/bringup-p4-demo.md` for what that took and what's still open.
 
 It depends on `../components/core`, `../components/ui` and
 `../components/dash_hal` unmodified, and reuses `services::logic_tick`,
@@ -18,10 +23,13 @@ and the real `services/*` sources are untouched by anything here.
 New code, all under `main/`:
 
 - `p4_panel.{hpp,cpp}` / `p4_pins.hpp` — the display driver, `hal::IPanel`
-  against an assumed ST7701 MIPI-DSI panel.
-- `touch_buttons.{hpp,cpp}` — reads an assumed GT911 touch controller and
-  turns taps on five on-screen zones into the same raw button mask
-  `core::input::Decoder` already knows how to debounce.
+  against the panel's bare MIPI-DSI/DPI interface (an ST7701, driven
+  directly rather than through the generic vendor component — see
+  `docs/bringup-p4-demo.md` for why).
+- `touch_buttons.{hpp,cpp}` — reads a GT911 touch controller and turns taps
+  on five on-screen zones into the same raw button mask
+  `core::input::Decoder` already knows how to debounce. Not working yet —
+  the chip doesn't answer on I2C; see `docs/bringup-p4-demo.md`.
 - `demo_render.{hpp,cpp}` — the render loop, simplified from the real
   `render_service.cpp` because this panel has no SPI wire budget to protect.
 - `demo_bike_task.{hpp,cpp}` — drives `sim::Bike` and `services::logic_tick`
@@ -31,9 +39,8 @@ New code, all under `main/`:
   `main/wiring.cpp` does for the real board, trimmed to what a screen-only
   demo needs.
 
-The exact panel/touch controller ICs for this dropship board aren't
-published anywhere — see `docs/bringup-p4-demo.md` for the bring-up
-procedure and what to try if the picture doesn't come up right first try.
+See `docs/bringup-p4-demo.md` for the bring-up story and the one thing
+still open (touch).
 
 ## Build
 
