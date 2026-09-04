@@ -215,6 +215,15 @@ the shift-light timing changes, the radio is the only suspect. The
 controller and host are pinned to core 1 and `main.cpp` fails the build if
 that ever drifts.
 
+The §11.1 "Dash Media" GATT server itself is no longer unproven: `demo_p4/`
+(a different board, ESP32-P4+C6, not this one) runs the same NimBLE GATT
+service and has advertised as "CRF250F-Dash" on real hardware — see
+`docs/bringup-p4-demo.md`. This board's own BLE stack is simpler, since the
+ESP32-S3 has a native controller and needs none of that demo's ESP-Hosted/
+SDIO co-processor plumbing, but the GATT contract and its write-line
+parsing are exercised code, not just a docs page. Nothing has connected
+to either side yet — that still needs the phone.
+
 ---
 
 ## 9. Every BRINGUP marker, in one place

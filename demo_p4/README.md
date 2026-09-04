@@ -44,9 +44,12 @@ New code, all under `main/`:
 - `main.cpp` — wiring: the same one-function, no-globals job
   `main/wiring.cpp` does for the real board, trimmed to what a screen-only
   demo needs.
+- `ble_media.{hpp,cpp}` — the §11.1 "Dash Media" NimBLE GATT server,
+  running as an ESP-Hosted host with the C6 as its BT controller over SDIO.
+- `ota_slave.{hpp,cpp}` — upgrades the C6's ESP-Hosted firmware over that
+  same SDIO link at boot, if it's older than this host expects.
 
-See `docs/bringup-p4-demo.md` for the bring-up story and the one thing
-still open (touch).
+See `docs/bringup-p4-demo.md` for the full bring-up story.
 
 ## Build
 
@@ -57,3 +60,21 @@ idf.py set-target esp32p4
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
+
+The C6's own firmware (`c6_cp/`, a separate ESP-IDF project targeting
+`esp32c6`) has to be built and pushed into the `slave_fw` partition
+separately — `idf.py flash` above only flashes the P4 side.
+`main/CMakeLists.txt` is meant to fold that in automatically via
+`esptool_py_flash_to_partition`, but that hook doesn't currently land the
+image in `flasher_args.json` (see `docs/bringup-p4-demo.md`), so until
+that's fixed, do it by hand once:
+
+```bash
+. ~/.espressif/tools/activate_idf_v6.0.2.sh
+idf.py -C c6_cp -B c6_cp/build build
+python3 -m esptool --chip esp32p4 -p /dev/ttyACM0 write-flash --force \
+    0x610000 c6_cp/build/network_adapter.bin
+```
+
+After that, `ota_slave.cpp` keeps the C6 current on every boot — no need
+to repeat this unless `c6_cp/`'s firmware changes.
