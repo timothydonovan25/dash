@@ -1,0 +1,15 @@
+## Managed dependencies for the demo board's panel and touch controller.
+##
+## Best guess for this board class, not a confirmed bill of materials — see
+## docs/bringup-p4-demo.md. If the real hardware turns out to use different
+## controller ICs, these are the two lines to swap.
+dependencies:
+  # Forked locally, not pulled from the registry: the stock component hangs
+  # forever on this board's DSI reverse channel during its LCD-ID read (a
+  # busy-wait with no timeout in ESP-IDF's own HAL, triggering the task
+  # watchdog). See demo_p4/vendor/esp_lcd_st7701 and docs/bringup-p4-demo.md.
+  esp_lcd_st7701:
+    path: "../vendor/esp_lcd_st7701"
+  espressif/esp_lcd_touch_gt911: "*"
+  espressif/esp_lcd_touch: "*"
+  idf: ">=5.3"

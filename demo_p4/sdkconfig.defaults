@@ -1,0 +1,26 @@
+CONFIG_IDF_TARGET="esp32p4"
+
+# The real board is early silicon (chip revision v1.3, confirmed by
+# esptool at flash time), not the v3.x IDF defaults to. v3.x and pre-v3.x
+# ESP32-P4 revisions are mutually exclusive hardware families in IDF's own
+# words (see components/esp_hw_support/port/esp32p4/Kconfig.hw_support),
+# so this is a real fact about the board, not a tunable.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The listing advertises 32MB PSRAM / 16MB flash for this board family; both
+# knobs are here to change once the actual module is confirmed.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_COMPILER_CXX_EXCEPTIONS=n
+CONFIG_COMPILER_CXX_RTTI=n
+
+# No BLE, no CAN, no SD, no radio in this build — see demo_p4/README.md.
+# The C6 companion chip on this board is unused here.
