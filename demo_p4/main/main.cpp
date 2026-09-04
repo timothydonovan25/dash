@@ -12,9 +12,11 @@
 #include "drivers/clock.hpp"
 #include "hal/i_engine.hpp"
 #include "core/input/input.hpp"
+#include "core/delta/delta.hpp"
 #include "p4_pins.hpp"
 
 #include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +31,13 @@ core::config::Settings g_settings;
 core::health::Tracker  g_health;
 ui::SystemInfo         g_system;
 services::LapHistory   g_lap_history;
+// PSRAM, not internal SRAM — the same reason main/wiring.cpp puts the real
+// dash's copy there: 1536 points x 2 (reference + recording) is real size,
+// and there's nothing time-critical about the delta screen that would care
+// about the slower access.
+EXT_RAM_BSS_ATTR core::delta::Tracker g_delta;
+EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
+EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
 
 drivers::EspClock g_clock;
 demo::P4Panel     g_panel;
@@ -92,6 +101,9 @@ extern "C" void app_main(void) {
     g_deps.health   = &g_health;
     g_deps.system   = &g_system;
     g_deps.lap_history = &g_lap_history;
+    g_deps.delta       = &g_delta;
+    g_deps.trip_trace  = &g_trip_trace;
+    g_deps.lap_trace   = &g_lap_trace;
 
     g_slots.health.publish(g_health.publish());
     g_commands.begin();

@@ -13,6 +13,27 @@ namespace {
 constexpr uint32_t kPollMs = 20;   // the demo has nowhere near the real
                                    // dash's 3ms shift-light budget to protect
 
+// Same class render_service.cpp uses for the real dash's map screens: a
+// read-only view over the trip/lap breadcrumb buffers, walked by the
+// widget rather than copied out of (§4.4).
+class TraceSource final : public ui::IPointSource {
+public:
+    using Buffer = core::state::TrackBuffer<core::state::TrackPoint, 4096>;
+    explicit TraceSource(Buffer* b) : buf_(b) {}
+
+    size_t count() const override { return buf_ ? buf_->size() : 0; }
+    bool point(size_t i, float& x_ft, float& y_ft) const override {
+        core::state::TrackPoint p;
+        if (!buf_ || !buf_->read_nth(i, p)) return false;
+        x_ft = p.x_ft;
+        y_ft = p.y_ft;
+        return true;
+    }
+
+private:
+    Buffer* buf_;
+};
+
 void render_task_impl(void* arg) {
     auto* pair = static_cast<std::pair<services::Deps*, services::CommandQueue*>*>(arg);
     services::Deps& d = *pair->first;
@@ -25,6 +46,11 @@ void render_task_impl(void* arg) {
 
     ui::App app(ctx);
     app.bind_settings(d.settings);
+
+    TraceSource trip_src(d.trip_trace);
+    TraceSource lap_src(d.lap_trace);
+    app.set_trip_source(&trip_src);
+    app.set_track_source(&lap_src);
 
     // The whole screen, one buffer, one shot — see demo_render.hpp for why
     // this doesn't need the real render task's banding.
