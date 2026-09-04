@@ -71,6 +71,14 @@ constexpr Rect kSong      {152, 244, 324, MediaRow::kRowH};
 constexpr Rect kAlbum     {152, 264, 324, MediaRow::kRowH};
 constexpr Rect kArtist    {152, 284, 324, MediaRow::kRowH};
 
+// The one patch of this screen §11.1 media left empty: right of the g-ball
+// (which ends at x=318), below the clock (which ends at y=156), above the
+// song row (which starts at y=244). A 6 px margin on both those edges is
+// the same "widget bounds are what a repaint clears" reasoning as kSong's
+// left edge above — this tile's ring is round, so its own bounds already
+// leave a corner of slack past that on every side.
+constexpr Rect kMediaArc  {350, 158,  80,  80};
+
 // The odometer and trip meter are the least urgent things here, so they get
 // the strip along the bottom that nothing else wants.
 constexpr Rect kOdo       { 28, 306, 210,  10};
@@ -131,6 +139,7 @@ void SpeedScreen::enter(Canvas&) {
     album_.configure(MediaRow::Kind::Album, color::kDim);
     artist_.set_bounds(kArtist);
     artist_.configure(MediaRow::Kind::Artist, color::kDim);
+    progress_.set_bounds(kMediaArc);
 
     odo_.set_bounds(kOdo);    odo_.configure("", color::kDim, 1, Align::Left);
     trip_.set_bounds(kTrip);  trip_.configure("", color::kDim, 1, Align::Right);
@@ -141,6 +150,7 @@ void SpeedScreen::enter(Canvas&) {
     list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
     list_[12] = &ball_;     list_[13] = &fault_;      list_[14] = &fault_what_;
     list_[15] = &song_;     list_[16] = &album_;      list_[17] = &artist_;
+    list_[18] = &progress_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -224,6 +234,21 @@ void SpeedScreen::update(const Frame& f) {
     album_.set(f.media.album, playing, f.t_ms);
     artist_.set(f.media.artist, playing, f.t_ms);
 
+    // §11.1's `P` tag is an anchor, not a per-tick position — the phone
+    // does not write a fresh one every second of playback, so the live
+    // elapsed time is that anchor plus however long this screen's own
+    // clock has moved since, and only while state says it is actually
+    // playing (state 1). Paused or stopped, the anchor already is the
+    // answer.
+    uint32_t elapsed = f.media.position_ms;
+    if (f.media.state == 1 && f.t_ms >= f.media.position_at_ms) {
+        elapsed += f.t_ms - f.media.position_at_ms;
+    }
+    if (f.media.duration_ms > 0 && elapsed > f.media.duration_ms) {
+        elapsed = f.media.duration_ms;
+    }
+    progress_.set(elapsed, f.media.duration_ms, f.media.state, playing);
+
     size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
                             f.gnss.fix);
     if (k + 6 < sizeof buf) {
@@ -274,16 +299,17 @@ void SpeedScreen::draw_background(Canvas& c) {
                 color::kDim, 1, Align::Right);
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 19}; }
 
 const char* SpeedScreen::widget_name(size_t i) const {
     // Same order as list_ above.
-    static const char* kNames[18] = {
+    static const char* kNames[19] = {
         "tach stem", "tach flare", "speed", "rpm", "shift", "gear",
         "clock", "lean", "sats", "hdop", "odo", "trip",
         "g-ball", "fault", "fault what", "song", "album", "artist",
+        "progress",
     };
-    return i < 18 ? kNames[i] : nullptr;
+    return i < 19 ? kNames[i] : nullptr;
 }
 
 // --- MinimalScreen ------------------------------------------------------

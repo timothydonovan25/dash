@@ -760,6 +760,8 @@ S 1
 | `A` | Artist | as above |
 | `L` | aLbum | as above (`A` was taken) |
 | `S` | State | `0` stop, `1` play, `2` pause |
+| `D` | Duration | track length, decimal ASCII milliseconds; `0`/absent is unknown |
+| `P` | Position | decimal ASCII milliseconds, **an anchor, not a live value** — see below |
 
 Rules the firmware side depends on:
 
@@ -777,6 +779,16 @@ Rules the firmware side depends on:
 - **On disconnect, `ble` must publish a zeroed `Media`.** A dash still
   showing what was playing forty minutes ago is worse than one showing
   nothing, and nothing downstream can tell stale from current.
+- **`P` is not resent every second of playback.** A `MediaController`
+  position callback fires continuously on the phone, and turning that into
+  a BLE write a second would be most of the link's traffic for a number
+  the dash can work out itself. `P` instead means "position was this many
+  ms, as of now" — the dash records its own clock alongside it
+  (`Media.position_at_ms`) and, while `S` says playing, adds the elapsed
+  wall time on top for display. The phone resends `P` on connect, on a
+  track or seek change, and otherwise only as an occasional resync beat
+  (alongside `S`'s existing one) to correct for drift — never on every
+  position tick.
 
 `Media.src` records which path fed the data, so the DIAG screen can say.
 There is only one path today; the field stays because a second one would

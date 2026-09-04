@@ -2,6 +2,7 @@
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "core/state/track_buffer.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -473,6 +474,60 @@ int main() {
         for (int16_t y = 0; y < kScreenH; ++y) {
             CHECK(s.canvas.pixel(0, y) != color::kWhite);
         }
+    }
+
+    CASE("the media progress ring fills with the fraction played, and the play/pause glyph matches state");
+    {
+        Screen320x480 s;
+        MediaProgress p;
+        const Rect box{100, 100, 80, 80};
+        p.set_bounds(box);
+
+        // Invalid: no accent colour anywhere in the tile, whatever the
+        // numbers say — same "no media" gate MediaRow uses.
+        p.set(30000, 120000, 1, false);
+        for (Color& c : s.px) c = 0;
+        p.render(s.canvas);
+        bool any_accent = false;
+        for (int16_t y = box.y; y < box.bottom(); ++y)
+            for (int16_t x = box.x; x < box.right(); ++x)
+                if (s.canvas.pixel(x, y) == color::kAccent) any_accent = true;
+        CHECK(!any_accent);
+
+        // A quarter played: a point a few degrees short of the quarter mark
+        // (90 deg clockwise from twelve o'clock) is inside the filled arc,
+        // and a point a few degrees past it is not.
+        p.set(30000, 120000, 1, true);
+        for (Color& c : s.px) c = 0;
+        p.render(s.canvas);
+        const int16_t cx = box.cx(), cy = box.cy();
+        // Mirrors MediaProgress::render's own r: the smaller half minus its
+        // 2 px margin. box is square here, so either half gives the same
+        // answer.
+        const int16_t r = static_cast<int16_t>(box.h / 2 - 2);
+        const int16_t rr = static_cast<int16_t>(r - 3);   // mid-band, clear of rounding at either edge
+        auto at_deg = [&](float deg) {
+            const float rad = deg * 3.14159265f / 180.0f;
+            return s.canvas.pixel(static_cast<int16_t>(cx + rr * std::sin(rad)),
+                                  static_cast<int16_t>(cy - rr * std::cos(rad)));
+        };
+        CHECK(at_deg(80.0f) == color::kAccent);
+        CHECK(at_deg(100.0f) != color::kAccent);
+
+        // The play triangle's centroid sits in the gap between the two
+        // pause bars, so this one point tells the icons apart: lit for
+        // play, background for paused/stopped.
+        const int16_t mid_x = static_cast<int16_t>(cx - 1);
+        const int16_t mid_y = static_cast<int16_t>(cy - 16);
+        p.set(0, 120000, 1, true);
+        for (Color& c : s.px) c = 0;
+        p.render(s.canvas);
+        CHECK(s.canvas.pixel(mid_x, mid_y) == color::kText);
+
+        p.set(0, 120000, 2, true);
+        for (Color& c : s.px) c = 0;
+        p.render(s.canvas);
+        CHECK(s.canvas.pixel(mid_x, mid_y) != color::kText);
     }
 
     CASE("the media block and its icons come and go together");

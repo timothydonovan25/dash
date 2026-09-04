@@ -51,6 +51,18 @@ void set_media(const core::state::Media& m) {
 // separator itself is not specified beyond that one example, so this
 // treats anything after the tag byte as the value with at most one
 // leading space stripped, which reads both "T Foo" and "TFoo" the same).
+// §11.1's `D`/`P` values are decimal ASCII milliseconds. No sign, no
+// overflow check beyond wrapping like any other uint32_t — a malformed
+// value just draws a wrong number, not a crash.
+uint32_t parse_u32(const uint8_t* s, uint16_t len) {
+    uint32_t v = 0;
+    for (uint16_t i = 0; i < len; ++i) {
+        if (s[i] < '0' || s[i] > '9') break;
+        v = v * 10 + static_cast<uint32_t>(s[i] - '0');
+    }
+    return v;
+}
+
 void apply_line(const uint8_t* data, uint16_t len) {
     if (len == 0) return;
     // A write-no-response line may or may not carry a trailing newline;
@@ -89,6 +101,16 @@ void apply_line(const uint8_t* data, uint16_t len) {
         }
         case 'S':
             if (rest_len > 0) g_media.state = static_cast<uint8_t>(rest[0] - '0');
+            break;
+        case 'D':
+            g_media.duration_ms = parse_u32(rest, rest_len);
+            break;
+        case 'P':
+            // An anchor, not a live value (§11.1) — record the dash's own
+            // clock alongside it so the screen can extrapolate forward
+            // while playing rather than needing this resent every tick.
+            g_media.position_ms = parse_u32(rest, rest_len);
+            g_media.position_at_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             break;
         default:
             known = false;   // unknown tags are ignored, not an error (§11.1)

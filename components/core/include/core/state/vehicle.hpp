@@ -122,6 +122,19 @@ struct Media {
     // `ble` task must clear this slot: a dashboard still showing what was
     // playing forty minutes ago is worse than one showing nothing.
     uint32_t updated_ms = 0;
+
+    // §11.1 tags `P`/`D`. The phone does not write `position_ms` on every
+    // tick of its own playback clock — that would be a BLE write a second
+    // for a field the dash can extrapolate itself — so this is an anchor:
+    // "the phone said `position_ms` was true at dash-clock `position_at_ms`".
+    // A screen wanting the live elapsed time adds `frame.t_ms -
+    // position_at_ms` to `position_ms` while `state == 1` (playing), and
+    // shows `position_ms` unchanged otherwise. `duration_ms` of 0 means the
+    // phone hasn't said, same "unknown, not zero" convention as everywhere
+    // else here.
+    uint32_t position_ms    = 0;
+    uint32_t duration_ms    = 0;
+    uint32_t position_at_ms = 0;
 };
 
 struct TpmsWheel {

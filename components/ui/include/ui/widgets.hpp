@@ -355,6 +355,31 @@ private:
     int16_t     offset_  = 0;      // 0 whenever the text fits
 };
 
+// The media block's progress ring: how far into the track as an arc from
+// twelve o'clock, the elapsed and total time inside it, and a play/pause
+// glyph. Sits in the one patch of the speed screen §11.1 media left empty —
+// right of the g-ball, under the clock, above the song/album/artist rows.
+//
+// A widget has no clock, so it does not extrapolate `elapsed_ms` itself —
+// the screen does that from `Frame.t_ms` and `Media.position_at_ms` every
+// tick, the same way `GBall`'s jump hold works from `land_ms`. This only
+// draws whatever `elapsed_ms` it was last handed, quantised to the second
+// so a 20-50 Hz update loop still only repaints the ring once a second.
+class MediaProgress : public Widget {
+public:
+    // `state` is the raw §11.1 tag: 0 stop, 1 play, 2 pause. `valid` is
+    // false when there is no media at all — same gate `MediaRow` uses.
+    void set(uint32_t elapsed_ms, uint32_t duration_ms, uint8_t state,
+             bool valid);
+    void render(Canvas& c) override;
+
+private:
+    uint32_t elapsed_ms_  = 0;
+    uint32_t duration_ms_ = 0;
+    uint8_t  state_       = 0;
+    bool     valid_       = false;
+};
+
 // The one widget allowed to draw over whatever screen is up. A tyre losing
 // air is worth interrupting the trip map for (§7.4).
 class AlertOverlay : public Widget {

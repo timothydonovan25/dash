@@ -782,6 +782,88 @@ void MediaRow::render(Canvas& c) {
                 color_, kScale, Align::Left);
 }
 
+// --- MediaProgress --------------------------------------------------------
+
+namespace {
+
+// Plain "M:SS", no tenths and no hour digit — this is a song, not a lap.
+// Integer maths rather than snprintf, matching core/units — Clamped to
+// 99:59 rather than growing a third digit, which nothing that plays music
+// would ever actually reach.
+void fmt_mmss(char* buf, size_t n, uint32_t ms) {
+    uint32_t total_s = ms / 1000;
+    if (total_s > 99 * 60 + 59) total_s = 99 * 60 + 59;
+    const uint32_t m = total_s / 60;
+    const uint32_t s = total_s % 60;
+    size_t k = 0;
+    if (m >= 10 && k + 1 < n) buf[k++] = static_cast<char>('0' + (m / 10) % 10);
+    if (k + 1 < n) buf[k++] = static_cast<char>('0' + m % 10);
+    if (k + 1 < n) buf[k++] = ':';
+    if (k + 1 < n) buf[k++] = static_cast<char>('0' + s / 10);
+    if (k + 1 < n) buf[k++] = static_cast<char>('0' + s % 10);
+    buf[k < n ? k : n - 1] = '\0';
+}
+
+}  // namespace
+
+void MediaProgress::set(uint32_t elapsed_ms, uint32_t duration_ms,
+                        uint8_t state, bool valid) {
+    // To the second: at a 20-50 Hz update rate this is the difference
+    // between a ring that repaints once a second and one that repaints
+    // every tick for a hand that has not visibly moved.
+    const bool a = assign_t(elapsed_ms_, elapsed_ms - elapsed_ms % 1000);
+    const bool b = assign_t(duration_ms_, duration_ms);
+    const bool d = assign_t(state_, state);
+    const bool e = assign_t(valid_, valid);
+    if (a || b || d || e) touch();
+}
+
+void MediaProgress::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+
+    const int16_t cx = bounds.cx();
+    const int16_t cy = bounds.cy();
+    const int16_t r  = static_cast<int16_t>(bounds.w < bounds.h
+                            ? bounds.w / 2 - 2 : bounds.h / 2 - 2);
+    const int16_t ri = static_cast<int16_t>(r - 6);
+
+    c.fill_arc(cx, cy, r, ri, 0.0f, 360.0f, color::kGrid);
+
+    if (valid_ && duration_ms_ > 0) {
+        float frac = static_cast<float>(elapsed_ms_) /
+                    static_cast<float>(duration_ms_);
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+        if (frac > 0.0f) {
+            c.fill_arc(cx, cy, r, ri, 0.0f, frac * 360.0f, color::kAccent);
+        }
+    }
+
+    // Play is a right-pointing triangle, pause/stop is two bars — the
+    // current state, not a button to tap; there is no touch on this tile.
+    const int16_t iy = static_cast<int16_t>(cy - 16);
+    if (valid_ && state_ == 1) {
+        c.fill_triangle(static_cast<int16_t>(cx - 4), static_cast<int16_t>(iy - 5),
+                        static_cast<int16_t>(cx - 4), static_cast<int16_t>(iy + 5),
+                        static_cast<int16_t>(cx + 5), iy, color::kText);
+    } else {
+        c.fill_rect(Rect{static_cast<int16_t>(cx - 5), static_cast<int16_t>(iy - 5), 3, 10},
+                   valid_ ? color::kText : color::kDim);
+        c.fill_rect(Rect{static_cast<int16_t>(cx + 2), static_cast<int16_t>(iy - 5), 3, 10},
+                   valid_ ? color::kText : color::kDim);
+    }
+
+    char elapsed[8] = "--:--", total[8] = "--:--";
+    if (valid_) {
+        fmt_mmss(elapsed, sizeof elapsed, elapsed_ms_);
+        fmt_mmss(total, sizeof total, duration_ms_);
+    }
+    c.draw_text(cx, static_cast<int16_t>(cy - 2), elapsed,
+               valid_ ? color::kText : color::kDim, 1, Align::Center);
+    c.draw_text(cx, static_cast<int16_t>(cy + 8), total, color::kDim, 1,
+               Align::Center);
+}
+
 // --- AlertOverlay -------------------------------------------------------
 
 void AlertOverlay::show(const char* text, Color c) {

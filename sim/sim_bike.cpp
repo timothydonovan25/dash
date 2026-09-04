@@ -2,6 +2,7 @@
 #include "core/geo/geo.hpp"
 #include "core/shift/shift.hpp"
 #include <cmath>
+#include <cstring>
 
 namespace sim {
 namespace {
@@ -68,6 +69,8 @@ void Bike::reset() {
     lon_ = -83.100000;
     heading_deg_ = 0.0f;
     lean_deg_ = 0.0f;
+    media_position_ms_ = 0;
+    media_title_prev_[0] = '\0';
 }
 
 void Bike::trigger_jump(uint32_t now_ms, uint32_t airtime_ms) {
@@ -215,6 +218,23 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         copy_into(md.artist, c.media_artist);
         md.state = 1;
         md.updated_ms = now_ms;
+
+        // A new title restarts the clock. There is no BLE front end here
+        // to send a real §11.1 `P`, so this advances position itself —
+        // wrapping at the duration, if one was given, is what makes the
+        // progress ring worth looking at for longer than one track.
+        if (std::strcmp(c.media_title, media_title_prev_) != 0) {
+            media_position_ms_ = 0;
+            copy_into(media_title_prev_, c.media_title);
+        } else {
+            media_position_ms_ += dt_ms;
+            if (c.media_duration_ms > 0 && media_position_ms_ >= c.media_duration_ms) {
+                media_position_ms_ %= c.media_duration_ms;
+            }
+        }
+        md.position_ms = media_position_ms_;
+        md.duration_ms = c.media_duration_ms;
+        md.position_at_ms = now_ms;
     }
     slots.media.publish(md);
 

@@ -55,9 +55,10 @@ private:
     MediaRow    song_;
     MediaRow    album_;
     MediaRow    artist_;
+    MediaProgress progress_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[18] = {};
+    Widget*     list_[19] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

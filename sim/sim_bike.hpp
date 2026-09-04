@@ -35,6 +35,12 @@ struct Controls {
     char  media_title [60] = {};
     char  media_album [60] = {};
     char  media_artist[60] = {};
+    // Total track length; 0 means unknown, same as a real §11.1 phone that
+    // hasn't said. Position is not a control — `Bike::step` advances it on
+    // its own while a title is set, wrapping at the duration, so the
+    // progress ring has something to show without a front end that can
+    // drive a fourth slider off an actual phone.
+    uint32_t media_duration_ms = 0;
 
     // Drives the bike round a synthetic circuit at `speed_mph`, so the lap
     // timer, the delta matcher and the map screens have something real to
@@ -84,6 +90,9 @@ private:
     uint32_t spike_until_ms_ = 0;
 
     core::jump::Detector jump_;
+
+    uint32_t media_position_ms_ = 0;
+    char     media_title_prev_[60] = {};
 };
 
 }  // namespace sim
