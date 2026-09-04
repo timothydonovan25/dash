@@ -856,7 +856,10 @@ void MediaProgress::render(Canvas& c) {
     char elapsed[8] = "--:--", total[8] = "--:--";
     if (valid_) {
         fmt_mmss(elapsed, sizeof elapsed, elapsed_ms_);
-        fmt_mmss(total, sizeof total, duration_ms_);
+        // 0 is "the phone hasn't said" (same convention as everywhere else
+        // here), not a zero-length track — showing "0:00" would read as a
+        // real answer instead of a missing one.
+        if (duration_ms_ > 0) fmt_mmss(total, sizeof total, duration_ms_);
     }
     c.draw_text(cx, static_cast<int16_t>(cy - 2), elapsed,
                valid_ ? color::kText : color::kDim, 1, Align::Center);

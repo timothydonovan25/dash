@@ -79,10 +79,25 @@ void apply_line(const uint8_t* data, uint16_t len) {
     bool known = true;
     switch (tag) {
         case 'T': {
-            const size_t n = rest_len < sizeof(g_media.title) - 1
-                                 ? rest_len : sizeof(g_media.title) - 1;
-            std::memcpy(g_media.title, rest, n);
-            g_media.title[n] = '\0';
+            char buf[sizeof(g_media.title)];
+            const size_t n = rest_len < sizeof(buf) - 1
+                                 ? rest_len : sizeof(buf) - 1;
+            std::memcpy(buf, rest, n);
+            buf[n] = '\0';
+            // The phone is supposed to send a fresh `P`/`D` alongside a new
+            // title, but those are separate writes on a link with no
+            // delivery guarantee and no ordering guarantee between them —
+            // §11.1 is one line per write, not one transaction. Rather than
+            // trust that pair to always both land, a title that actually
+            // changed resets the clock itself: a stale anchor surviving a
+            // track change is what makes the ring climb straight through a
+            // skip instead of restarting at zero.
+            if (std::strcmp(buf, g_media.title) != 0) {
+                g_media.position_ms = 0;
+                g_media.duration_ms = 0;
+                g_media.position_at_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+            }
+            std::memcpy(g_media.title, buf, n + 1);
             break;
         }
         case 'A': {
@@ -100,7 +115,26 @@ void apply_line(const uint8_t* data, uint16_t len) {
             break;
         }
         case 'S':
-            if (rest_len > 0) g_media.state = static_cast<uint8_t>(rest[0] - '0');
+            if (rest_len > 0) {
+                const uint8_t new_state = static_cast<uint8_t>(rest[0] - '0');
+                const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                if (g_media.state == 1 && new_state != 1) {
+                    // Leaving "playing": fold the elapsed wall time into
+                    // the anchor now, so the screen's own extrapolation
+                    // (which only runs while state == 1) freezes at the
+                    // actual pause point instead of snapping back to
+                    // whatever `position_ms` was as of the last `P`,
+                    // which by design isn't resent on every tick.
+                    if (now >= g_media.position_at_ms) {
+                        g_media.position_ms += now - g_media.position_at_ms;
+                    }
+                }
+                // Entering "playing" (including resuming from a pause):
+                // restart the anchor at now, so the time spent paused is
+                // not counted as elapsed once extrapolation resumes.
+                if (new_state == 1) g_media.position_at_ms = now;
+                g_media.state = new_state;
+            }
             break;
         case 'D':
             g_media.duration_ms = parse_u32(rest, rest_len);
