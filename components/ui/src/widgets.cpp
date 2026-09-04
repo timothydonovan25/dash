@@ -564,7 +564,7 @@ void TachBar::render(Canvas& c) {
     for (uint8_t i = 0; i < tick_count_; ++i) {
         for (int16_t y = tick_y_[i]; y < tick_y_[i] + kTickH; ++y) {
             if (y < y_top_ || y >= y_bottom_) continue;
-            c.fill_rect(Rect{bounds.x, y, width_at(y), 1}, color::kWhite);
+            c.fill_rect(Rect{bounds.x, y, width_at(y), 1}, color::kAlarm);
         }
     }
 }

@@ -456,7 +456,7 @@ int main() {
             for (int16_t dy = 0; dy < TachBar::kTickH; ++dy) {
                 const auto row = static_cast<int16_t>(y + dy);
                 const int16_t w = TachBar::width_at(row);
-                CHECK(s.canvas.pixel(static_cast<int16_t>(w / 2), row) == color::kWhite);
+                CHECK(s.canvas.pixel(static_cast<int16_t>(w / 2), row) == color::kAlarm);
             }
             ++marks_found;
         }
@@ -472,7 +472,7 @@ int main() {
         for (Color& c : s.px) c = 0;
         none.render(s.canvas);
         for (int16_t y = 0; y < kScreenH; ++y) {
-            CHECK(s.canvas.pixel(0, y) != color::kWhite);
+            CHECK(s.canvas.pixel(0, y) != color::kAlarm);
         }
     }
 
