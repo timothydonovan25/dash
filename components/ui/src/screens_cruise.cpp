@@ -98,6 +98,24 @@ size_t append(char* buf, size_t n, size_t k, const char* s) {
     return k;
 }
 
+// §11.1's `P` tag is an anchor, not a per-tick position — the phone does
+// not write a fresh one every second of playback, so the live elapsed
+// time is that anchor plus however long this screen's own clock has moved
+// since, and only while state says it is actually playing (state 1).
+// Paused or stopped, the anchor already is the answer. Shared by every
+// screen with a media block, so SpeedScreen and MediaScreen can never
+// quietly disagree about what "now" means for a paused track.
+uint32_t media_elapsed_ms(const core::state::Media& m, uint32_t t_ms) {
+    uint32_t elapsed = m.position_ms;
+    if (m.state == 1 && t_ms >= m.position_at_ms) {
+        elapsed += t_ms - m.position_at_ms;
+    }
+    if (m.duration_ms > 0 && elapsed > m.duration_ms) {
+        elapsed = m.duration_ms;
+    }
+    return elapsed;
+}
+
 }  // namespace
 
 void SpeedScreen::enter(Canvas&) {
@@ -234,20 +252,8 @@ void SpeedScreen::update(const Frame& f) {
     album_.set(f.media.album, playing, f.t_ms);
     artist_.set(f.media.artist, playing, f.t_ms);
 
-    // §11.1's `P` tag is an anchor, not a per-tick position — the phone
-    // does not write a fresh one every second of playback, so the live
-    // elapsed time is that anchor plus however long this screen's own
-    // clock has moved since, and only while state says it is actually
-    // playing (state 1). Paused or stopped, the anchor already is the
-    // answer.
-    uint32_t elapsed = f.media.position_ms;
-    if (f.media.state == 1 && f.t_ms >= f.media.position_at_ms) {
-        elapsed += f.t_ms - f.media.position_at_ms;
-    }
-    if (f.media.duration_ms > 0 && elapsed > f.media.duration_ms) {
-        elapsed = f.media.duration_ms;
-    }
-    progress_.set(elapsed, f.media.duration_ms, f.media.state, playing);
+    progress_.set(media_elapsed_ms(f.media, f.t_ms), f.media.duration_ms,
+                 f.media.state, playing);
 
     size_t k = u::fmt_value(buf, sizeof buf, static_cast<float>(f.gnss.sats), 0,
                             f.gnss.fix);
@@ -327,6 +333,73 @@ const char* SpeedScreen::widget_name(size_t i) const {
     };
     return i < 19 ? kNames[i] : nullptr;
 }
+
+// --- MediaScreen ----------------------------------------------------------
+//
+// Everything SpeedScreen's own media block already computes (the play
+// state gate, the elapsed-time extrapolation), just laid out for reading
+// rather than glancing — see media_elapsed_ms() above, shared by both.
+namespace {
+constexpr Rect kMediaSpeed  { 20,  40, 130,  90};
+constexpr Rect kMediaRing   {300,  30, 150, 150};
+constexpr Rect kMediaSong   { 20, 210, 440,  28};
+constexpr Rect kMediaAlbum  { 20, 244, 440,  28};
+constexpr Rect kMediaArtist { 20, 278, 440,  28};
+}  // namespace
+
+void MediaScreen::enter(Canvas&) {
+    speed_.set_bounds(kMediaSpeed.inset(4));
+    speed_.configure("", 0, 5);
+
+    progress_.set_bounds(kMediaRing);
+
+    song_.set_bounds(kMediaSong);
+    song_.configure(MediaRow::Kind::Song, color::kText, 3);
+    album_.set_bounds(kMediaAlbum);
+    album_.configure(MediaRow::Kind::Album, color::kDim, 3);
+    artist_.set_bounds(kMediaArtist);
+    artist_.configure(MediaRow::Kind::Artist, color::kDim, 3);
+
+    list_[0] = &speed_;  list_[1] = &song_;   list_[2] = &album_;
+    list_[3] = &artist_; list_[4] = &progress_;
+}
+
+void MediaScreen::update(const Frame& f) {
+    const bool speed_ok = f.health.ok(Dev::Gnss) || f.motion.front_mph > 0.0f ||
+                          f.motion.rear_mph > 0.0f;
+    speed_.set(u::speed_for_display(f.motion.best_mph, units(), nullptr), speed_ok);
+
+    const bool playing = f.media.updated_ms != 0;
+    song_.set(f.media.title, playing, f.t_ms);
+    album_.set(f.media.album, playing, f.t_ms);
+    artist_.set(f.media.artist, playing, f.t_ms);
+    progress_.set(media_elapsed_ms(f.media, f.t_ms), f.media.duration_ms,
+                 f.media.state, playing);
+}
+
+bool MediaScreen::handle(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::nav::Press;
+    if (e.press != Press::Short) return false;
+    int32_t cmd;
+    switch (e.button) {
+        case Button::C: cmd = 0; break;   // previous
+        case Button::D: cmd = 2; break;   // next
+        case Button::E: cmd = 1; break;   // play/pause
+        default: return false;
+    }
+    return post(core::state::Command(core::state::CommandId::MediaCtrl, cmd));
+}
+
+void MediaScreen::draw_background(Canvas& c) {
+    c.draw_round_rect(kMediaSpeed, chrome::kRadius, kFrame);
+    const char* sunit = units() == core::units::System::Metric ? "km/h" : "mph";
+    c.draw_text(static_cast<int16_t>(kMediaSpeed.right() - 6),
+                static_cast<int16_t>(kMediaSpeed.bottom() + 4), sunit,
+                color::kDim, 1, Align::Right);
+}
+
+WidgetList MediaScreen::widgets() { return WidgetList{list_, 5}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //

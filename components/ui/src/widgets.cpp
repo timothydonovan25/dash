@@ -719,10 +719,11 @@ const icon::Bitmap& icon_for(MediaRow::Kind k) {
 
 }  // namespace
 
-void MediaRow::configure(Kind k, Color text_color) {
+void MediaRow::configure(Kind k, Color text_color, uint8_t scale) {
     const bool a = assign_t(kind_, k);
     const bool b = assign_t(color_, text_color);
-    if (a || b) touch();
+    const bool d = assign_t(scale_, scale);
+    if (a || b || d) touch();
 }
 
 void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
@@ -730,7 +731,7 @@ void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
     changed = assign_t(valid_, valid) || changed;
 
     const int16_t avail = static_cast<int16_t>(bounds.w - kTextX);
-    const int16_t w = text_width_px(text_.s, kScale);
+    const int16_t w = text_width_px(text_.s, scale_);
 
     int16_t off = 0;
     if (valid_ && w > avail && avail > 0) {
@@ -763,13 +764,13 @@ void MediaRow::render(Canvas& c) {
     const int16_t tx = static_cast<int16_t>(bounds.x + kTextX);
     const int16_t ty = static_cast<int16_t>(bounds.y + 1);
     const int16_t avail = static_cast<int16_t>(bounds.w - kTextX);
-    const int16_t w = text_width_px(text_.s, kScale);
+    const int16_t w = text_width_px(text_.s, scale_);
 
     // Everything below draws deliberately wider than the window it is in.
     const ClipGuard clip(c, Rect{tx, bounds.y, avail, bounds.h});
 
     if (w <= avail) {
-        c.draw_text(tx, ty, text_.s, color_, kScale, Align::Left);
+        c.draw_text(tx, ty, text_.s, color_, scale_, Align::Left);
         return;
     }
 
@@ -777,9 +778,9 @@ void MediaRow::render(Canvas& c) {
     // of the next and the belt never shows a hole.
     const int16_t cycle = static_cast<int16_t>(w + kGapPx);
     c.draw_text(static_cast<int16_t>(tx - offset_), ty, text_.s, color_,
-                kScale, Align::Left);
+                scale_, Align::Left);
     c.draw_text(static_cast<int16_t>(tx - offset_ + cycle), ty, text_.s,
-                color_, kScale, Align::Left);
+                color_, scale_, Align::Left);
 }
 
 // --- MediaProgress --------------------------------------------------------
@@ -825,7 +826,22 @@ void MediaProgress::render(Canvas& c) {
     const int16_t cy = bounds.cy();
     const int16_t r  = static_cast<int16_t>(bounds.w < bounds.h
                             ? bounds.w / 2 - 2 : bounds.h / 2 - 2);
-    const int16_t ri = static_cast<int16_t>(r - 6);
+
+    // Every pixel offset below scales off r relative to the tile this was
+    // first drawn at (r = 38, SpeedScreen's 80x80 kMediaArc), so a bigger
+    // ring elsewhere — MediaScreen's is roughly twice the radius — gets a
+    // thicker band, a bigger icon and bigger time text instead of the same
+    // fixed handful of pixels adrift in the middle of more circle. At
+    // r == 38 every one of these divisions reduces to the original literal
+    // exactly (38 * k / 38 == k), so SpeedScreen's tile is pixel-identical
+    // to what it always drew.
+    const int16_t band = static_cast<int16_t>(r * 6 / 38);
+    const int16_t ri = static_cast<int16_t>(r - band);
+    // A discrete choice, not something to compute a ratio for: text scale
+    // is an integer multiplier, and there is no "1.9" to round to. Halfway
+    // between SpeedScreen's r (38) and MediaScreen's (73) is as good a line
+    // as any, and keeps SpeedScreen's own tile at the scale it always drew.
+    const uint8_t txt_scale = static_cast<uint8_t>(r >= 55 ? 2 : 1);
 
     c.fill_arc(cx, cy, r, ri, 0.0f, 360.0f, color::kGrid);
 
@@ -841,15 +857,20 @@ void MediaProgress::render(Canvas& c) {
 
     // Play is a right-pointing triangle, pause/stop is two bars — the
     // current state, not a button to tap; there is no touch on this tile.
-    const int16_t iy = static_cast<int16_t>(cy - 16);
+    const int16_t iy = static_cast<int16_t>(cy - r * 16 / 38);
+    const int16_t itri = static_cast<int16_t>(r * 4 / 38);
+    const int16_t ivert = static_cast<int16_t>(r * 5 / 38);
+    const int16_t ibarw = static_cast<int16_t>(r * 3 / 38 > 0 ? r * 3 / 38 : 1);
+    const int16_t ibarh = static_cast<int16_t>(r * 10 / 38);
     if (valid_ && state_ == 1) {
-        c.fill_triangle(static_cast<int16_t>(cx - 4), static_cast<int16_t>(iy - 5),
-                        static_cast<int16_t>(cx - 4), static_cast<int16_t>(iy + 5),
-                        static_cast<int16_t>(cx + 5), iy, color::kText);
+        c.fill_triangle(static_cast<int16_t>(cx - itri), static_cast<int16_t>(iy - ivert),
+                        static_cast<int16_t>(cx - itri), static_cast<int16_t>(iy + ivert),
+                        static_cast<int16_t>(cx + ivert), iy, color::kText);
     } else {
-        c.fill_rect(Rect{static_cast<int16_t>(cx - 5), static_cast<int16_t>(iy - 5), 3, 10},
-                   valid_ ? color::kText : color::kDim);
-        c.fill_rect(Rect{static_cast<int16_t>(cx + 2), static_cast<int16_t>(iy - 5), 3, 10},
+        c.fill_rect(Rect{static_cast<int16_t>(cx - ivert), static_cast<int16_t>(iy - ivert),
+                        ibarw, ibarh}, valid_ ? color::kText : color::kDim);
+        c.fill_rect(Rect{static_cast<int16_t>(cx + itri - ibarw + 1),
+                        static_cast<int16_t>(iy - ivert), ibarw, ibarh},
                    valid_ ? color::kText : color::kDim);
     }
 
@@ -861,10 +882,10 @@ void MediaProgress::render(Canvas& c) {
         // real answer instead of a missing one.
         if (duration_ms_ > 0) fmt_mmss(total, sizeof total, duration_ms_);
     }
-    c.draw_text(cx, static_cast<int16_t>(cy - 2), elapsed,
-               valid_ ? color::kText : color::kDim, 1, Align::Center);
-    c.draw_text(cx, static_cast<int16_t>(cy + 8), total, color::kDim, 1,
-               Align::Center);
+    c.draw_text(cx, static_cast<int16_t>(cy - 2 * txt_scale), elapsed,
+               valid_ ? color::kText : color::kDim, txt_scale, Align::Center);
+    c.draw_text(cx, static_cast<int16_t>(cy + 8 * txt_scale), total, color::kDim,
+               txt_scale, Align::Center);
 }
 
 // --- AlertOverlay -------------------------------------------------------

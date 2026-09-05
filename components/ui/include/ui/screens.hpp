@@ -1,6 +1,6 @@
 // Every screen in the firmware (§7.1).
 //
-//   Cruise  big speed · trip stats · trip map · minimal
+//   Cruise  big speed · media · trip stats · trip map · minimal
 //   Track   lap timer · lap history · track map
 //   Stat    all data · engine · attitude
 //   Diag    sensors · gps · system · bus and I/O · radio
@@ -63,6 +63,31 @@ private:
     Label       odo_;
     Label       trip_;
     Widget*     list_[19] = {};
+};
+
+// The dedicated now-playing screen: title/artist/album at a size actually
+// meant to be read, a big progress ring, and speed kept small beside them
+// so this is still useful moving, not just parked. SpeedScreen's own media
+// block stays as it is — a glance while the speed is the point — this is
+// the screen for when the song is the point.
+class MediaScreen final : public Screen {
+public:
+    const char* name() const override { return "MEDIA"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    // Same three inputs, same meaning, as SpeedScreen — one control scheme
+    // for §11's Ctrl everywhere in Cruise, not a screen-specific one.
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+
+private:
+    BigNumber     speed_;
+    MediaRow      song_;
+    MediaRow      album_;
+    MediaRow      artist_;
+    MediaProgress progress_;
+    Widget*       list_[5] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

@@ -14,9 +14,10 @@ constexpr Rect kAlertBox{20, 170, 280, 120};
 }  // namespace
 
 App::App(const Context& ctx) : ctx_(ctx) {
-    Screen* all[] = {&speed_, &minimal_, &trip_, &trip_map_, &lap_, &lap_history_,
-                     &track_map_, &all_data_, &engine_, &attitude_, &sensors_,
-                     &gps_, &system_, &bus_, &radio_, &config_};
+    Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &lap_,
+                     &lap_history_, &track_map_, &all_data_, &engine_,
+                     &attitude_, &sensors_, &gps_, &system_, &bus_, &radio_,
+                     &config_};
     for (Screen* s : all) s->bind(ctx_);
     alert_.set_bounds(kAlertBox);
 }
@@ -26,8 +27,9 @@ Screen* App::screen_for(Mode m, uint8_t index) {
         case Mode::Cruise:
             switch (index) {
                 case 0: return &speed_;
-                case 1: return &trip_;
-                case 2: return &trip_map_;
+                case 1: return &media_;
+                case 2: return &trip_;
+                case 3: return &trip_map_;
                 default: return &minimal_;
             }
         case Mode::Track:

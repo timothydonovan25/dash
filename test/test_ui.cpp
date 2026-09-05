@@ -728,6 +728,30 @@ int main() {
         CHECK(fx.sink.posted.size() == 3);
     }
 
+    CASE("the media screen has its own C/D/short-E control, and renders bigger than the speed screen's block");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 1);   // MEDIA, right after SPEED
+
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted[0].id == core::state::CommandId::MediaCtrl);
+        CHECK(fx.sink.posted[0].i == 2);   // next
+
+        Frame f = busy_frame();
+        std::strcpy(f.media.title, "In the Forest");
+        std::strcpy(f.media.album, "Terra Incognita");
+        std::strcpy(f.media.artist, "Gojira");
+        f.media.updated_ms = 90000;
+        f.media.duration_ms = 225000;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 0);
+    }
+
     CASE("the config screen edits settings and reports every change upward");
     {
         Fixture fx;

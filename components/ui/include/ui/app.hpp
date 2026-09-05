@@ -59,6 +59,7 @@ private:
     core::nav::Layout layout_{};
 
     SpeedScreen      speed_;
+    MediaScreen      media_;
     MinimalScreen    minimal_;
     TripScreen       trip_;
     TripMapScreen    trip_map_;

@@ -323,7 +323,11 @@ class MediaRow : public Widget {
 public:
     enum class Kind : uint8_t { Song = 0, Album, Artist };
 
-    void configure(Kind k, Color text_color);
+    // `scale` defaults to the size the speed screen has always used; a
+    // dedicated media screen with room to spare passes a bigger one. The
+    // icon stays its native size either way — it is a small fixed glyph,
+    // not something meant to scale with the text next to it.
+    void configure(Kind k, Color text_color, uint8_t scale = kDefaultScale);
 
     // `valid` is false when nothing has ever arrived, or when the phone has
     // gone away — a dash still showing what was playing forty minutes ago is
@@ -335,8 +339,8 @@ public:
 
     void render(Canvas& c) override;
 
-    static constexpr int16_t kRowH  = 20;
-    static constexpr uint8_t kScale = 2;
+    static constexpr int16_t kRowH  = 20;   // suggested height at kDefaultScale
+    static constexpr uint8_t kDefaultScale = 2;
     static constexpr int16_t kTextX = 21;   // clear of the widest icon
 
 private:
@@ -351,6 +355,7 @@ private:
     TextBuf<60> text_;
     Kind        kind_    = Kind::Song;
     Color       color_   = color::kText;
+    uint8_t     scale_   = kDefaultScale;
     bool        valid_   = false;
     int16_t     offset_  = 0;      // 0 whenever the text fits
 };
