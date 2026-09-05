@@ -68,6 +68,17 @@ void render_task_impl(void* arg) {
     app.begin(canvas);
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
 
+    // DIAG's System screen (ui::SystemInfo) was reading this struct's
+    // untouched, default-constructed zeros — heap/PSRAM/uptime/render Hz
+    // all "0" forever, which reads as a genuine reading rather than as
+    // "nobody's measured this." Same fix as health.publish() above: this
+    // is the one place that already loops continuously. Mirrors exactly
+    // what keeper_service.cpp and render_service.cpp do for the real
+    // dash; log/GPS/ctrl/pod/IMU counters stay at zero here on purpose —
+    // this demo has none of those things to count.
+    uint32_t frames = 0;
+    uint32_t last_hz_ms = d.clock->now_ms();
+
     for (;;) {
         const uint32_t now = d.clock->now_ms();
 
@@ -104,6 +115,26 @@ void render_task_impl(void* arg) {
         // one place in demo_p4 that already loops continuously and already
         // touches health, so it's the natural place to keep it current.
         d.slots->health.publish(d.health->publish());
+
+        if (d.system) {
+            d.system->uptime_s = now / 1000;
+            d.system->heap_free_b = static_cast<uint32_t>(
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            d.system->heap_min_b = static_cast<uint32_t>(
+                heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+            d.system->psram_free_b = static_cast<uint32_t>(
+                heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        }
+
+        ++frames;
+        if (now - last_hz_ms >= 1000) {
+            if (d.system) {
+                d.system->render_hz_x10 =
+                    static_cast<uint16_t>(frames * 10000 / (now - last_hz_ms));
+            }
+            frames = 0;
+            last_hz_ms = now;
+        }
     }
 }
 
