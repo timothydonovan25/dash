@@ -137,6 +137,33 @@ struct Media {
     uint32_t position_at_ms = 0;
 };
 
+// §11's reserved "Ctrl" characteristic: what the rider last asked for, one
+// CommandId::MediaCtrl payload at a time. `cmd` is 0xFF ("nothing posted
+// yet") or 0/1/2 for previous/play-pause/next.
+//
+// This is a hand-off between `logic` (the one writer, via the command
+// queue) and whichever task actually owns the radio, not a display value —
+// no screen reads it, so it has no place in `Frame`. There is deliberately
+// no sequence field here either: `Published<T>::generation()` already
+// answers "is this a new one since I last looked" without a second number
+// to keep in sync with the first.
+struct MediaCtrl {
+    uint8_t cmd = 0xFF;
+};
+
+// DIAG's Radio screen (§11.6). Unlike MediaCtrl, this *is* display data —
+// what the link itself looks like, separate from what it's carrying — so
+// it lives in Frame like Media and Tpms do.
+struct BleDiag {
+    int16_t rssi_dbm       = 0;
+    bool    has_rssi       = false;   // false before any connection ever read one
+    // The last §11.1 tag the dash accepted from the phone ('T','A','L','S',
+    // 'D','P'), or 0 if nothing has arrived yet. A byte, not a whole line —
+    // a title on a diagnostics table would just be the Media row again.
+    char    last_tag       = 0;
+    bool    ctrl_subscribed = false;  // phone is listening for Ctrl notifies
+};
+
 struct TpmsWheel {
     float    psi     = 0.0f;
     float    temp_c  = 0.0f;

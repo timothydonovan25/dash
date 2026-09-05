@@ -28,6 +28,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.media  = s.media.get();
     f.tpms   = s.tpms.get();
     f.health = s.health.get();
+    f.ble_diag = s.ble_diag.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -63,6 +64,7 @@ const char* command_name(CommandId id) {
         case CommandId::StorageToHost:     return "storage.to_host";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
+        case CommandId::MediaCtrl:         return "media.ctrl";
     }
     return "?";
 }

@@ -30,4 +30,16 @@ void ble_media_start(core::health::Tracker& health);
 // disconnect, ble must publish a zeroed Media").
 core::state::Media ble_media_snapshot();
 
+// §11's reserved "Ctrl" characteristic: notify the phone of a transport
+// command. `cmd` is 0 previous, 1 play/pause, 2 next — anything else is
+// dropped, same "unknown values are ignored" convention as the inbound
+// tags. A no-op if nothing is connected or nothing has subscribed yet.
+void ble_media_send_ctrl(uint8_t cmd);
+
+// What DIAG's Radio screen (§11.6) shows about the link itself, as opposed
+// to what it's carrying (that's ble_media_snapshot()). Queries RSSI fresh
+// each call — it costs nothing (NimBLE just returns the last received
+// packet's cached RSSI) so there's no reason to cache it here too.
+core::state::BleDiag ble_media_diag();
+
 }  // namespace demo

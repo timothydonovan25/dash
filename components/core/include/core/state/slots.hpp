@@ -22,6 +22,10 @@ struct Slots {
     Published<Media>    media;      // ble (not in this build)
     Published<Tpms>     tpms;       // ble (not in this build)
     Published<Health>   health;     // keeper
+    Published<BleDiag>  ble_diag;   // ble (not in this build)
+    // Not in Frame: nothing on screen reads it, only whichever task owns
+    // the radio. See core::state::MediaCtrl.
+    Published<MediaCtrl> media_ctrl;  // logic
 };
 
 // One coherent read of everything, taken once per frame. Screens get this
@@ -38,6 +42,7 @@ struct Frame {
     Media    media;
     Tpms     tpms;
     Health   health;
+    BleDiag  ble_diag;
     uint32_t t_ms = 0;
 };
 

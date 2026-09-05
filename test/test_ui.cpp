@@ -698,6 +698,36 @@ int main() {
         CHECK(fx.sink.posted[1].id == core::state::CommandId::LapArm);
     }
 
+    CASE("the speed screen turns C/D/short-E into media control, and leaves long E and A/B alone");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);   // SPEED
+
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted[0].id == core::state::CommandId::MediaCtrl);
+        CHECK(fx.sink.posted[0].i == 0);   // previous
+
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 2);
+        CHECK(fx.sink.posted[1].i == 1);   // play/pause
+
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 3);
+        CHECK(fx.sink.posted[2].i == 2);   // next
+
+        // Long E is still the overlay menu toggle, not a fourth media command.
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.size() == 3);
+
+        // A and B still switch mode/screen — this screen only claims C/D/short-E.
+        fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
+        CHECK(fx.app.nav_state().screen != 0);
+        CHECK(fx.sink.posted.size() == 3);
+    }
+
     CASE("the config screen edits settings and reports every change upward");
     {
         Fixture fx;
@@ -805,6 +835,35 @@ int main() {
         fx.app.update(busy_frame());
         fx.app.render(s.canvas, true);
         CHECK(s.ink() > 0);
+    }
+
+    CASE("the radio screen shows BLE health, RSSI, the last tag and Ctrl state");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Diag, 4);   // RADIO
+
+        Frame f = busy_frame();
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t silent = s.ink();
+
+        f.health[Dev::BleHost].state = DevState::Ok;
+        f.health[Dev::Phone].state = DevState::Ok;
+        f.ble_diag.has_rssi = true;
+        f.ble_diag.rssi_dbm = -61;
+        f.ble_diag.last_tag = 'P';
+        f.ble_diag.ctrl_subscribed = true;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        // Real values in place of every "--"/blank note is strictly more ink,
+        // not just different ink -- a regression that silently drops back to
+        // the unbuilt-firmware note would otherwise still pass an ink-only
+        // inequality check.
+        CHECK(s.ink() > silent);
     }
 
     CASE("a partial update lands the same pixels as a full repaint");

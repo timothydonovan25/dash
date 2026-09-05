@@ -283,6 +283,22 @@ void SpeedScreen::update(const Frame& f) {
     trip_.set_text(buf);
 }
 
+bool SpeedScreen::handle(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::nav::Press;
+    // Long E stays the overlay menu toggle (core::nav's own job); only the
+    // three inputs nav does nothing with here are claimed.
+    if (e.press != Press::Short) return false;
+    int32_t cmd;
+    switch (e.button) {
+        case Button::C: cmd = 0; break;   // previous
+        case Button::D: cmd = 2; break;   // next
+        case Button::E: cmd = 1; break;   // play/pause
+        default: return false;
+    }
+    return post(core::state::Command(core::state::CommandId::MediaCtrl, cmd));
+}
+
 // Only what never changes: the tile frames and the unit labels. Everything
 // with data in it is a widget above.
 void SpeedScreen::draw_background(Canvas& c) {

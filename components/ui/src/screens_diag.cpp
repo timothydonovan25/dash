@@ -264,7 +264,7 @@ void RadioScreen::enter(Canvas&) {
     note_.set_bounds(kRadioNote);
     note_.configure("", color::kDim, 1, Align::Left);
     table_.set_bounds(kRadioTable);
-    table_.configure(6, 2);
+    table_.configure(8, 2);
     list_[0] = &note_;
     list_[1] = &table_;
 }
@@ -278,11 +278,28 @@ void RadioScreen::update(const Frame& f) {
                                              : "BLE not built in this firmware");
     table_.set_row(0, "Host", f.health.ok(Dev::BleHost) ? "up" : "--");
     table_.set_row(1, "Phone", f.health.ok(Dev::Phone) ? "bonded" : "--");
-    table_.set_row(2, "TPMS front", f.tpms.front.valid ? "seen" : "--");
-    table_.set_row(3, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
-    table_.set_row(4, "Media", f.media.updated_ms ? f.media.title : "--");
-    table_.set_row(5, "Controller core", "1");
-    table_.set_row_count(6);
+
+    char rssi[12] = "--";
+    if (f.ble_diag.has_rssi) {
+        size_t k = core::units::fmt_value(rssi, sizeof rssi,
+                                          static_cast<float>(f.ble_diag.rssi_dbm), 0,
+                                          true);
+        if (k + 5 < sizeof rssi) {
+            rssi[k++] = ' '; rssi[k++] = 'd'; rssi[k++] = 'B'; rssi[k++] = 'm';
+            rssi[k] = '\0';
+        }
+    }
+    table_.set_row(2, "RSSI", rssi);
+
+    // The one byte, not the line: a title here would just repeat the Media
+    // row below. '\0' before anything has ever arrived.
+    char last[2] = {f.ble_diag.last_tag, '\0'};
+    table_.set_row(3, "Last tag", f.ble_diag.last_tag ? last : "--");
+    table_.set_row(4, "Ctrl", f.ble_diag.ctrl_subscribed ? "subscribed" : "--");
+    table_.set_row(5, "TPMS front", f.tpms.front.valid ? "seen" : "--");
+    table_.set_row(6, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
+    table_.set_row(7, "Media", f.media.updated_ms ? f.media.title : "--");
+    table_.set_row_count(8);
 }
 
 WidgetList RadioScreen::widgets() { return WidgetList{list_, 2}; }

@@ -23,6 +23,7 @@ enum class CommandId : uint8_t {
     StorageToHost,    // hand the SD card to USB MSC
     ImuCalibrate,
     ImuSetMountOffset,
+    MediaCtrl,        // i: 0 previous, 1 play/pause, 2 next — §11 "Ctrl"
 };
 
 struct Command {

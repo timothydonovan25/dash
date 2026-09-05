@@ -11,13 +11,18 @@ becomes one.
 **Status: fully working**, confirmed on real hardware — the dashboard UI
 renders correctly (scaled 1.5x), all five on-screen button zones respond
 to touch, the demo runs the built-in circuit with live lean/g-force and a
-working lap timer/delta, and BLE (§11.1 Dash Media) is up: the C6
-co-processor's stock firmware was a version behind what this host
-expects, so it gets upgraded automatically at boot over the existing SDIO
-link (no UART adapter needed — see `main/ota_slave.cpp`), after which
-NimBLE advertises as "CRF250F-Dash". Nothing has connected to it yet —
-that side needs the phone. See `docs/bringup-p4-demo.md` for the full
-story.
+working lap timer/delta, and BLE (§11.1 Dash Media) is up and connected
+to the phone app (`~/phone-app`): the C6 co-processor's stock firmware
+gets upgraded automatically at boot over the existing SDIO link if it's
+behind what this host expects (no UART adapter needed — see
+`main/ota_slave.cpp`), NimBLE advertises as "CRF250F-Dash", and once
+connected the speed screen's progress ring tracks the phone's now-playing
+media in real time. Short C/D/E on that screen send previous/next/
+play-pause back to the phone over the Ctrl characteristic — see
+`docs/phone-media-app.md`'s "Control from the handlebars". DIAG's Radio
+screen shows the link's own health: host/phone state, RSSI, the last
+accepted tag, and whether the phone has subscribed to Ctrl. See
+`docs/bringup-p4-demo.md` for the full story.
 
 It depends on `../components/core`, `../components/ui` and
 `../components/dash_hal` unmodified, and reuses `services::logic_tick`,

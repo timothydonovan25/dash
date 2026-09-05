@@ -60,6 +60,10 @@ void bike_task(void* arg) {
     uint8_t lamp_mask = 0;
     uint32_t now = d.clock->now_ms();
     bool lap_armed = false;
+    // generation(), not the value itself: media_ctrl has no way to tell "a
+    // new one arrived" from "still the last one" other than this, since it
+    // is deliberately not a queue (see core::state::MediaCtrl).
+    uint32_t ctrl_gen = 0;
 
     for (;;) {
         now += kTickMs;
@@ -72,6 +76,7 @@ void bike_task(void* arg) {
         // the actual, single write — ble_media.cpp's own callback never
         // touches the slot directly, only this cache (rule 2: one writer).
         d.slots->media.publish(demo::ble_media_snapshot());
+        d.slots->ble_diag.publish(demo::ble_media_diag());
 
         // Set once the bike has a fix to set it against (auto_ride/gps_fix
         // are always on here, so this fires on the very first tick), then
@@ -85,6 +90,16 @@ void bike_task(void* arg) {
         }
 
         services::logic_tick(d, logic, commands, now);
+
+        // Ctrl: whatever the rider just pressed on the speed screen, one
+        // BLE notify per press. logic_tick is the one writer of this slot
+        // (§4.5's rule 2); this is just the one task that already loops
+        // continuously and already has ble_media in scope to hand it off to.
+        const uint32_t gen = d.slots->media_ctrl.generation();
+        if (gen != ctrl_gen) {
+            ctrl_gen = gen;
+            demo::ble_media_send_ctrl(d.slots->media_ctrl.get().cmd);
+        }
 
         const core::config::ShiftView sv = core::config::shift_view(*d.settings);
         core::shift::Config sc;

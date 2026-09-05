@@ -25,6 +25,10 @@ public:
     void draw_background(Canvas& c) override;
     // No title bar: this screen is read at speed and wants every pixel.
     bool wants_title() const override { return false; }
+    // C/D/short-E: nav does nothing with them here (focus_count() is 0, and
+    // short E is always free — see ui/app.hpp), so this screen claims them
+    // for §11's reserved "Ctrl" characteristic: previous, next, play/pause.
+    bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
     // This is the screen the panel budget is decided on, so it is the one
     // worth naming: the wire-cost report is read to find out which widget

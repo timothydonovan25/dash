@@ -70,6 +70,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 // whenever the last row happened to land.
                 s.log_gate.reset();
                 break;
+            case core::state::CommandId::MediaCtrl:
+                // Just a hand-off: whichever task owns the radio drains
+                // this on its own schedule via Published<T>::generation().
+                d.slots->media_ctrl.publish(
+                    core::state::MediaCtrl{static_cast<uint8_t>(cmd.i)});
+                break;
             default:
                 break;
         }

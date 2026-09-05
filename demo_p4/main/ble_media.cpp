@@ -7,6 +7,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
+#include "host/ble_hs_mbuf.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
@@ -36,11 +37,30 @@ static const ble_uuid128_t kSvcUuid = BLE_UUID128_INIT(
 static const ble_uuid128_t kFeedUuid = BLE_UUID128_INIT(
     0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
     0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x5f, 0x6e);
+// Characteristic 6e5f0003-b5a3-f393-e0a9-e50e24dcca9e ("Ctrl", notify,
+// dash -> phone — docs/phone-media-app.md's "Reserved: control from the
+// handlebars", now built).
+static const ble_uuid128_t kCtrlUuid = BLE_UUID128_INIT(
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
+    0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x5f, 0x6e);
 
 uint8_t                 g_own_addr_type = 0;
 SemaphoreHandle_t       g_mutex = nullptr;
 core::state::Media      g_media;   // guarded by g_mutex
 core::health::Tracker*  g_health = nullptr;
+
+// Ctrl's own bookkeeping: which connection (if any) is subscribed, and the
+// value handle NimBLE assigns kCtrlUuid at registration. gap_event writes
+// these from the NimBLE host task; ble_media_send_ctrl() is called from
+// demo_bike_task's own task — a different one — so this is guarded by
+// g_mutex exactly like g_media is, for the same reason.
+uint16_t g_ctrl_val_handle = 0;
+uint16_t g_ctrl_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+bool     g_ctrl_subscribed = false;
+
+// DIAG's Radio screen (§11.6). Same g_mutex as g_media — apply_line()
+// already holds it when this is the one place that sets last_tag.
+char g_last_tag = 0;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -154,7 +174,10 @@ void apply_line(const uint8_t* data, uint16_t len) {
             known = false;   // unknown tags are ignored, not an error (§11.1)
             break;
     }
-    if (known) g_media.updated_ms = now_ms();
+    if (known) {
+        g_media.updated_ms = now_ms();
+        g_last_tag = tag;
+    }
     xSemaphoreGive(g_mutex);
 }
 
@@ -173,6 +196,16 @@ int feed_access_cb(uint16_t conn_handle, uint16_t attr_handle,
     return 0;
 }
 
+// NimBLE requires every characteristic to have a non-null access_cb
+// (ble_gatts_chr_is_sane rejects the whole service otherwise, at
+// registration) even a notify-only one that permits neither read nor
+// write and so should never actually reach this.
+int ctrl_access_cb(uint16_t conn_handle, uint16_t attr_handle,
+                   struct ble_gatt_access_ctxt* ctxt, void* arg) {
+    (void)conn_handle; (void)attr_handle; (void)ctxt; (void)arg;
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
 const struct ble_gatt_svc_def kGattSvcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -182,6 +215,14 @@ const struct ble_gatt_svc_def kGattSvcs[] = {
                 .uuid = &kFeedUuid.u,
                 .access_cb = feed_access_cb,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+            },
+            {
+                .uuid = &kCtrlUuid.u,
+                .access_cb = ctrl_access_cb,
+                // Notify-only. NimBLE adds the CCCD itself since NOTIFY is
+                // set (ble_gatt_chr_def.descriptors' own doc comment).
+                .flags = BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &g_ctrl_val_handle,
             },
             {},
         },
@@ -238,6 +279,9 @@ int gap_event(struct ble_gap_event* event, void* arg) {
             if (event->connect.status == 0) {
                 ESP_LOGI(kTag, "connected");
                 g_health->report_ok(core::state::Dev::Phone, now_ms());
+                xSemaphoreTake(g_mutex, portMAX_DELAY);
+                g_ctrl_conn_handle = event->connect.conn_handle;
+                xSemaphoreGive(g_mutex);
             } else {
                 ESP_LOGW(kTag, "connect failed: %d", event->connect.status);
                 start_advertising();
@@ -252,7 +296,19 @@ int gap_event(struct ble_gap_event* event, void* arg) {
             // Not present, not a fault — a phone out of range is normal,
             // not a broken device.
             g_health->set_absent(core::state::Dev::Phone);
+            xSemaphoreTake(g_mutex, portMAX_DELAY);
+            g_ctrl_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            g_ctrl_subscribed = false;
+            xSemaphoreGive(g_mutex);
             start_advertising();
+            return 0;
+        case BLE_GAP_EVENT_SUBSCRIBE:
+            if (event->subscribe.attr_handle == g_ctrl_val_handle) {
+                ESP_LOGI(kTag, "ctrl subscribe: notify=%d", event->subscribe.cur_notify);
+                xSemaphoreTake(g_mutex, portMAX_DELAY);
+                g_ctrl_subscribed = event->subscribe.cur_notify != 0;
+                xSemaphoreGive(g_mutex);
+            }
             return 0;
         default:
             return 0;
@@ -352,6 +408,41 @@ core::state::Media ble_media_snapshot() {
     out = g_media;
     xSemaphoreGive(g_mutex);
     return out;
+}
+
+core::state::BleDiag ble_media_diag() {
+    core::state::BleDiag out;
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    out.last_tag = g_last_tag;
+    out.ctrl_subscribed = g_ctrl_subscribed;
+    const uint16_t conn_handle = g_ctrl_conn_handle;
+    xSemaphoreGive(g_mutex);
+
+    if (conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        int8_t rssi = 0;
+        if (ble_gap_conn_rssi(conn_handle, &rssi) == 0) {
+            out.rssi_dbm = rssi;
+            out.has_rssi = true;
+        }
+    }
+    return out;
+}
+
+void ble_media_send_ctrl(uint8_t cmd) {
+    if (cmd > 2) return;   // unknown values are not sent (§11.1 convention)
+
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    const bool ready = g_ctrl_subscribed && g_ctrl_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+    const uint16_t conn_handle = g_ctrl_conn_handle;
+    xSemaphoreGive(g_mutex);
+    if (!ready) return;
+
+    const char line[3] = {'C', ' ', static_cast<char>('0' + cmd)};
+    struct os_mbuf* om = ble_hs_mbuf_from_flat(line, sizeof(line));
+    if (!om) return;
+    if (ble_gatts_notify_custom(conn_handle, g_ctrl_val_handle, om) != 0) {
+        ESP_LOGW(kTag, "ctrl notify failed");
+    }
 }
 
 }  // namespace demo
