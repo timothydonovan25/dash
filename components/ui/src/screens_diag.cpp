@@ -262,10 +262,7 @@ constexpr Rect kRadioTable {14,  72, 452, 232};
 
 void RadioScreen::enter(Canvas&) {
     note_.set_bounds(kRadioNote);
-    // BLE is deliberately not in this build. It is step 9 of the build
-    // order, after the real-time path works, precisely so that if the shift
-    // light timing changes you know the radio caused it.
-    note_.configure("BLE not built in this firmware", color::kDim, 1, Align::Left);
+    note_.configure("", color::kDim, 1, Align::Left);
     table_.set_bounds(kRadioTable);
     table_.configure(6, 2);
     list_[0] = &note_;
@@ -273,6 +270,12 @@ void RadioScreen::enter(Canvas&) {
 }
 
 void RadioScreen::update(const Frame& f) {
+    // On the real S3 firmware `Dev::BleHost` never leaves Absent — nothing
+    // there calls ble_media_start() (step 9 of the build order; see
+    // CLAUDE.md) — so this note still reads exactly as it always has there.
+    // It only changes where BLE is actually running (demo_p4).
+    note_.set_text(f.health.ok(Dev::BleHost) ? "BLE up"
+                                             : "BLE not built in this firmware");
     table_.set_row(0, "Host", f.health.ok(Dev::BleHost) ? "up" : "--");
     table_.set_row(1, "Phone", f.health.ok(Dev::Phone) ? "bonded" : "--");
     table_.set_row(2, "TPMS front", f.tpms.front.valid ? "seen" : "--");

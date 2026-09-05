@@ -11,13 +11,19 @@
 // co-processor's own firmware and docs/bringup-p4-demo.md for the pin
 // wiring and the C6 slave-firmware version this needed.
 #pragma once
+#include "core/health/health.hpp"
 #include "core/state/vehicle.hpp"
 
 namespace demo {
 
 // Brings up the hosted BT controller binding, NimBLE, and the Dash Media
 // GATT service, then starts advertising. Call once from app_main.
-void ble_media_start();
+//
+// Reports Dev::BleHost (the stack itself) and Dev::Phone (whether one is
+// currently connected) to `health`, which is what makes DIAG's Radio
+// screen say anything real instead of showing the tracker's untouched
+// Absent default.
+void ble_media_start(core::health::Tracker& health);
 
 // A thread-safe copy of whatever the phone last wrote — zeroed if nothing
 // has connected yet, or if the last connection dropped (§11.1: "on

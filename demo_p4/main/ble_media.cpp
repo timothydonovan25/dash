@@ -1,6 +1,7 @@
 #include "ble_media.hpp"
 #include "ota_slave.hpp"
 
+#include "core/health/health.hpp"
 #include "esp_hosted.h"
 #include "esp_hosted_misc.h"
 #include "nimble/nimble_port.h"
@@ -36,9 +37,12 @@ static const ble_uuid128_t kFeedUuid = BLE_UUID128_INIT(
     0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
     0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x5f, 0x6e);
 
-uint8_t             g_own_addr_type = 0;
-SemaphoreHandle_t   g_mutex = nullptr;
-core::state::Media  g_media;   // guarded by g_mutex
+uint8_t                 g_own_addr_type = 0;
+SemaphoreHandle_t       g_mutex = nullptr;
+core::state::Media      g_media;   // guarded by g_mutex
+core::health::Tracker*  g_health = nullptr;
+
+uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 void set_media(const core::state::Media& m) {
     xSemaphoreTake(g_mutex, portMAX_DELAY);
@@ -95,7 +99,7 @@ void apply_line(const uint8_t* data, uint16_t len) {
             if (std::strcmp(buf, g_media.title) != 0) {
                 g_media.position_ms = 0;
                 g_media.duration_ms = 0;
-                g_media.position_at_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                g_media.position_at_ms = now_ms();
             }
             std::memcpy(g_media.title, buf, n + 1);
             break;
@@ -117,7 +121,7 @@ void apply_line(const uint8_t* data, uint16_t len) {
         case 'S':
             if (rest_len > 0) {
                 const uint8_t new_state = static_cast<uint8_t>(rest[0] - '0');
-                const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                const uint32_t now = now_ms();
                 if (g_media.state == 1 && new_state != 1) {
                     // Leaving "playing": fold the elapsed wall time into
                     // the anchor now, so the screen's own extrapolation
@@ -144,13 +148,13 @@ void apply_line(const uint8_t* data, uint16_t len) {
             // clock alongside it so the screen can extrapolate forward
             // while playing rather than needing this resent every tick.
             g_media.position_ms = parse_u32(rest, rest_len);
-            g_media.position_at_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+            g_media.position_at_ms = now_ms();
             break;
         default:
             known = false;   // unknown tags are ignored, not an error (§11.1)
             break;
     }
-    if (known) g_media.updated_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    if (known) g_media.updated_ms = now_ms();
     xSemaphoreGive(g_mutex);
 }
 
@@ -233,6 +237,7 @@ int gap_event(struct ble_gap_event* event, void* arg) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
                 ESP_LOGI(kTag, "connected");
+                g_health->report_ok(core::state::Dev::Phone, now_ms());
             } else {
                 ESP_LOGW(kTag, "connect failed: %d", event->connect.status);
                 start_advertising();
@@ -244,6 +249,9 @@ int gap_event(struct ble_gap_event* event, void* arg) {
             // than one showing nothing, and nothing downstream can tell
             // stale from current unless this task says so.
             set_media(core::state::Media{});
+            // Not present, not a fault — a phone out of range is normal,
+            // not a broken device.
+            g_health->set_absent(core::state::Dev::Phone);
             start_advertising();
             return 0;
         default:
@@ -272,7 +280,9 @@ void host_task(void*) {
 
 }  // namespace
 
-void ble_media_start() {
+void ble_media_start(core::health::Tracker& health) {
+    g_health = &health;
+    g_health->begin_init(core::state::Dev::BleHost, now_ms());
     g_mutex = xSemaphoreCreateMutex();
 
     // Brings the SDIO link to the C6 up (demo_p4/c6_cp/ on the other end)
@@ -280,6 +290,7 @@ void ble_media_start() {
     // if this hangs or errors, nothing downstream will work either.
     if (esp_hosted_connect_to_slave() != 0) {
         ESP_LOGE(kTag, "esp_hosted_connect_to_slave failed");
+        g_health->report_error(core::state::Dev::BleHost, 1, now_ms());
         return;
     }
     esp_hosted_coprocessor_fwver_t fwver;
@@ -300,16 +311,19 @@ void ble_media_start() {
 
     if (esp_hosted_bt_controller_init() != ESP_OK) {
         ESP_LOGE(kTag, "esp_hosted_bt_controller_init failed");
+        g_health->report_error(core::state::Dev::BleHost, 2, now_ms());
         return;
     }
     if (esp_hosted_bt_controller_enable() != ESP_OK) {
         ESP_LOGE(kTag, "esp_hosted_bt_controller_enable failed");
+        g_health->report_error(core::state::Dev::BleHost, 3, now_ms());
         return;
     }
 
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
         ESP_LOGE(kTag, "nimble_port_init failed: %s", esp_err_to_name(err));
+        g_health->report_error(core::state::Dev::BleHost, static_cast<int32_t>(err), now_ms());
         return;
     }
 
@@ -322,12 +336,14 @@ void ble_media_start() {
 
     if (ble_gatts_count_cfg(kGattSvcs) != 0 || ble_gatts_add_svcs(kGattSvcs) != 0) {
         ESP_LOGE(kTag, "GATT service registration failed");
+        g_health->report_error(core::state::Dev::BleHost, 4, now_ms());
         return;
     }
     ble_svc_gap_device_name_set(kDeviceName);
 
     nimble_port_freertos_init(host_task);
     ESP_LOGI(kTag, "started");
+    g_health->report_ok(core::state::Dev::BleHost, now_ms());
 }
 
 core::state::Media ble_media_snapshot() {

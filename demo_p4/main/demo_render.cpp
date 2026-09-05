@@ -97,6 +97,13 @@ void render_task_impl(void* arg) {
             d.health->report_error(core::state::Dev::Display,
                                    static_cast<int32_t>(s), now);
         }
+        // main.cpp only publishes the tracker's snapshot into the slot once,
+        // at boot — nothing has re-published it since, which left every
+        // report_ok/report_error above (and anything ble_media.cpp reports)
+        // invisible to the Frame every screen actually reads. This is the
+        // one place in demo_p4 that already loops continuously and already
+        // touches health, so it's the natural place to keep it current.
+        d.slots->health.publish(d.health->publish());
     }
 }
 

@@ -118,5 +118,5 @@ extern "C" void app_main(void) {
     // own, and this is the one piece of the board that talks to another
     // chip (the C6, over SDIO) rather than just local peripherals — if
     // bring-up here goes wrong, the dashboard itself should already be up.
-    demo::ble_media_start();
+    demo::ble_media_start(g_health);
 }
