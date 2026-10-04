@@ -1,27 +1,33 @@
-// ILI9488 on SPI3, plus the backlight.
+// ILI9488 on the 8-bit 8080 bus, plus the backlight.
 //
-// Three things about this panel drive the whole design:
+// Three things about this panel and this bus drive the design:
 //
-//  - **It does not accept RGB565 over 4-wire SPI.** It needs 18-bit colour,
-//    three bytes per pixel. The UI thinks in RGB565 everywhere and the
-//    conversion happens here, on the way out.
-//  - **A full frame is 460 kB** at that depth, so drawing happens in bands.
-//  - **Its reset line is on the MCP23S17 (GPB6)**, not a GPIO, so the
-//    expander has to be alive first (§6).
+//  - **RGB565 goes out as is**, two bytes per pixel. 8080 mode accepts it;
+//    only SPI mode needed the RGB666 conversion. The I80 peripheral swaps
+//    each pixel's bytes on the way out, because the panel wants the high
+//    byte first and the UI's pixels are little-endian in memory.
+//  - **The P4's DMA wants every transfer's address and length on a 32-byte
+//    boundary.** The UI blits rectangles of any size, so pixels are staged
+//    through an aligned buffer owned here, and any tail shorter than 32
+//    bytes goes out as the parameters of a Memory Write Continue command.
+//    The caller's buffer is free the moment blit() returns.
+//  - **The backlight is on the PCA9955B**, so set_backlight() forwards there.
 //
-// The panel command set comes from the `esp_lcd_ili9488` managed component
-// rather than being written here — see idf_component.yml. This class is the
-// bridge between that and hal::IPanel.
+// The panel command set comes from the `esp_lcd_ili9488` managed component.
+// This class bridges that to hal::IPanel and owns the blit path itself.
 #pragma once
 #include "hal/i_display.hpp"
 
 namespace drivers {
 
-class Mcp23s17;
+class Pca9955b;
 
 class Ili9488 final : public hal::IPanel {
 public:
-    explicit Ili9488(Mcp23s17* expander) : mcp_(expander) {}
+    // `lcd_bus` is bsp::BusStatus::lcd_bus. Either may be null, and the
+    // panel then reports NotPresent rather than crashing.
+    Ili9488(void* lcd_bus, Pca9955b* backlight)
+        : bus_(lcd_bus), backlight_(backlight) {}
 
     hal::Status init() override;
     uint16_t width() const override;
@@ -31,10 +37,11 @@ public:
     hal::Status set_backlight(uint8_t percent) override;
 
 private:
-    Mcp23s17* mcp_;
-    void*     io_ = nullptr;       // esp_lcd_panel_io_handle_t
-    void*     panel_ = nullptr;    // esp_lcd_panel_handle_t
-    bool      backlight_ready_ = false;
+    void*     bus_;
+    Pca9955b* backlight_;
+    void*     io_ = nullptr;        // esp_lcd_panel_io_handle_t
+    void*     panel_ = nullptr;     // esp_lcd_panel_handle_t
+    uint8_t*  staging_ = nullptr;   // DMA-capable, 64-byte aligned
 };
 
 }  // namespace drivers

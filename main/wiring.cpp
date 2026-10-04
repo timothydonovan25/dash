@@ -40,15 +40,14 @@ EXT_RAM_BSS_ATTR core::delta::Tracker                                    g_delta
 services::LapHistory                                    g_lap_history;
 
 drivers::EspClock    g_clock;
-drivers::Mcp23s17    g_board;
 drivers::ButtonPod   g_pod;
-drivers::Ili9488     g_panel{&g_board};
+drivers::Pca9955b    g_leds;      // shift lamps and backlight
 drivers::Icm42688p   g_imu;
 drivers::Pa1616d     g_gnss;
-drivers::EngineSense g_sense{&g_board};
-drivers::ShiftLamps  g_lamps{&g_board};
+drivers::EngineSense g_sense;
 drivers::NvsStorage  g_storage;
 drivers::SdCard      g_card;
+drivers::VinSense    g_vin;
 hal::NullEngine      g_engine;   // the ECU is unreachable on this board (§10.1)
 
 services::Deps         g_deps;
@@ -89,23 +88,27 @@ void load_settings() {
 services::Deps& build() {
     // 1. Buses and safe pin levels, before any driver exists.
     const bsp::BusStatus buses = bsp::board_init();
-    ESP_LOGI(kTag, "buses: spi2=%d spi3=%d i2c0=%d uart1=%d",
-             buses.spi2, buses.spi3, buses.i2c0, buses.uart1);
+    ESP_LOGI(kTag, "buses: spi2=%d i2c0=%d i2c1=%d uart1=%d lcd=%d",
+             buses.spi2, buses.i2c0, buses.i2c1, buses.uart1,
+             buses.lcd_bus != nullptr);
+
+    // The panel needs the 8080 bus handle, which only exists once the bus
+    // is up. A function-local static is still built exactly once and never
+    // freed, like everything else in this file.
+    static drivers::Ili9488 panel{buses.lcd_bus, &g_leds};
 
     // 2. Storage first, because the settings decide how everything else is
     //    set up.
     bring_up(core::state::Dev::Sd, g_storage.init());
     load_settings();
 
-    // 3. The board expander, then the panel. TFT_RST is on GPB6, so nothing
-    //    about the display can happen before the expander answers (§6).
-    bring_up(core::state::Dev::McpBoard, g_board.init());
-    bring_up(core::state::Dev::Display, g_panel.init());
-    g_panel.set_backlight(20);
-
-    // The lamps stay dark until ctrl opens the master gate. Bringing this up
-    // after the panel means the backlight's LEDC timer already exists.
-    bring_up(core::state::Dev::McpBoard, g_lamps.init());
+    // 3. The LED driver, then the panel. The driver comes up dark — every
+    //    duty at zero — and the panel's backlight is three of its channels,
+    //    so it has to answer before the backlight can. The panel's reset is
+    //    a plain GPIO on this board; nothing else has to come up first.
+    bring_up(core::state::Dev::LedDriver, g_leds.init());
+    bring_up(core::state::Dev::Display, panel.init());
+    panel.set_backlight(20);
 
     // 4. The sensors. Any of these may be absent; none of them stop the boot.
     bring_up(core::state::Dev::Imu, g_imu.init());
@@ -113,6 +116,9 @@ services::Deps& build() {
     bring_up(core::state::Dev::McpPod, g_pod.init());
     g_sense.init();
     g_card.init();
+    // VIN sense has no health slot: a failed init leaves `rails` reading
+    // nothing, which ctrl and the screens already treat as "unknown supply".
+    if (!hal::ok(g_vin.init())) ESP_LOGW(kTag, "VIN sense: no ADC");
 
     // Not fitted, and not faults: the health table distinguishes the two so
     // the keeper does not spend the ride retrying things that do not exist.
@@ -127,14 +133,14 @@ services::Deps& build() {
     g_deps.clock      = &g_clock;
     g_deps.imu        = &g_imu;
     g_deps.gnss       = &g_gnss;
-    g_deps.board      = &g_board;
     g_deps.pod        = &g_pod;
-    g_deps.panel      = &g_panel;
+    g_deps.panel      = &panel;
     g_deps.sense      = &g_sense;
-    g_deps.lamps      = &g_lamps;
+    g_deps.lamps      = &g_leds;
     g_deps.engine     = &g_engine;
     g_deps.storage    = &g_storage;
     g_deps.card       = &g_card;
+    g_deps.rails      = &g_vin;
     g_deps.slots      = &g_slots;
     g_deps.settings   = &g_settings;
     g_deps.health     = &g_health;

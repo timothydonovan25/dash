@@ -14,21 +14,14 @@
 
 namespace drivers {
 
-class Mcp23s17;
-
 class EngineSense final : public hal::IEngineSense {
 public:
-    // The neutral switch is on the expander, not on a GPIO, so this driver
-    // reads it through the one that owns it.
-    explicit EngineSense(Mcp23s17* expander) : mcp_(expander) {}
-
     hal::Status init() override;
     hal::Status read(Counts& out) override;
 
     void set_refractory_us(uint32_t tach_us) { tach_refractory_us_ = tach_us; }
 
 private:
-    Mcp23s17* mcp_;
     uint32_t  tach_refractory_us_ = 0;
     bool      started_ = false;
 };

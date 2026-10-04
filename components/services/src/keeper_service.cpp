@@ -5,8 +5,10 @@
 // what turns a loose GH1.25 connector into a self-healing problem instead of
 // a dead sensor for the rest of the ride (§12).
 #include "services/services.hpp"
-#include "drivers/mcp23s17.hpp"
+#include "drivers/pca9955b.hpp"
 #include "drivers/pod.hpp"
+#include "core/power/power.hpp"
+#include "bsp/pins.hpp"
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -54,17 +56,18 @@ void keeper_task(void* arg) {
         if (d.health->claim_retry(core::state::Dev::McpPod, now, policy)) {
             if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) pod->recover_bus();
         }
-        if (d.health->claim_retry(core::state::Dev::McpBoard, now, policy) && d.board) {
-            d.board->init();
+        if (d.health->claim_retry(core::state::Dev::LedDriver, now, policy) && d.lamps) {
+            d.lamps->init();
         }
         if (d.health->claim_retry(core::state::Dev::Display, now, policy) && d.panel) {
             d.panel->init();
         }
 
-        // A board expander that browned out comes back with default
-        // registers and looks alive. Re-write them whether or not it has
-        // complained.
-        if (d.board) d.board->refresh_config();
+        // An LED driver that browned out comes back with every output at
+        // zero current and looks alive. Re-write its configuration whether
+        // or not it has complained; `ctrl` re-sends the lamp duty and the
+        // backlight duty is re-sent below.
+        if (auto* leds = static_cast<drivers::Pca9955b*>(d.lamps)) leds->refresh_config();
 
         d.slots->health.publish(d.health->publish());
 
@@ -104,13 +107,18 @@ void keeper_task(void* arg) {
         }
 
         // --- rails ------------------------------------------------------
-        // BRINGUP: there is no VIN sense on this board revision — no divider,
-        // and IO6 is the only spare pin with an ADC on it, reserved for
-        // exactly that on the next one (dash-v1-netlist-review §3). Until
-        // then the firmware genuinely cannot tell bike power from USB power,
-        // so these stay at zero and every widget bound to them shows `--`,
-        // which is the truth.
+        // VIN through the divider. A failed read publishes zero, which every
+        // widget shows as `--` and core::power reads as "unknown supply", so
+        // `ctrl` falls back to the engine-running test rather than trusting
+        // a number that is not there.
         core::state::Elec e;
+        uint32_t pin_mv = 0;
+        if (d.rails && hal::ok(d.rails->read_vin_pin_mv(pin_mv))) {
+            core::power::Divider div;
+            div.top_kohm = bsp::kVinTopKohm;
+            div.bottom_kohm = bsp::kVinBottomKohm;
+            e.vbat = core::power::vin_from_pin_mv(pin_mv, div);
+        }
         d.slots->elec.publish(e);
 
         // --- system -----------------------------------------------------
@@ -131,8 +139,10 @@ void keeper_task(void* arg) {
             }
         }
 
-        // Backlight follows the config setting. There is no light sensor on
-        // this board, so auto-dim is not an option yet (§18).
+        // Backlight follows the config setting. Sent every second rather than
+        // on change, which is also what restores it after an LED-driver
+        // brown-out. There is no light sensor, so auto-dim is not an option
+        // yet (§18).
         if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
 
         vTaskDelay(pdMS_TO_TICKS(1000));

@@ -215,9 +215,9 @@ void BusScreen::update(const Frame& f) {
     };
 
     table_.set_row(0, "SPI2 imu", state_text(f.health[Dev::Imu].state));
-    table_.set_row(1, "SPI2 mcp", state_text(f.health[Dev::McpBoard].state));
+    table_.set_row(1, "I2C1 leds",state_text(f.health[Dev::LedDriver].state));
     table_.set_row(2, "SPI2 sd",  state_text(f.health[Dev::Sd].state));
-    table_.set_row(3, "SPI3 tft", state_text(f.health[Dev::Display].state));
+    table_.set_row(3, "i80 tft",  state_text(f.health[Dev::Display].state));
     table_.set_row(4, "I2C0 pod", state_text(f.health[Dev::McpPod].state));
     table_.set_row(5, "UART1 gps",state_text(f.health[Dev::Gnss].state));
 
@@ -232,7 +232,7 @@ void BusScreen::update(const Frame& f) {
     table_.set_row(8, "Neutral in", f.engine.neutral ? "LOW (N)" : "high");
 
     u::fmt_value(v, sizeof v, f.elec.vbat, 1, f.elec.vbat > 0.0f);
-    table_.set_row(9, "VIN sense", v);      // no divider this revision: reads --
+    table_.set_row(9, "VIN sense", v);      // -- until the ADC has a reading
 
     // The pod is the only device on a cable that leaves the box, so it is
     // the one that gets its bus wedged. `stuck` non-zero means clocking the

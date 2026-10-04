@@ -9,4 +9,5 @@
 #include "hal/i_engine.hpp"
 #include "hal/i_display.hpp"
 #include "hal/i_shift_lamps.hpp"
+#include "hal/i_rails.hpp"
 #include "hal/i_storage.hpp"

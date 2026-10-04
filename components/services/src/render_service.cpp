@@ -7,12 +7,12 @@
 // Drawing happens in bands, and — this is the part that decides the frame
 // rate — only the parts of the screen that changed are sent to the panel.
 //
-// A full 480x320 frame at the ILI9488's 18-bit colour is 460 kB. At 40 MHz
-// that is 92 ms on the wire, so a dashboard that pushed every frame whole
-// would run at about eleven frames a second no matter how fast the drawing
-// was. The widget dirty flags exist for this: the speed tile alone is 38 kB
-// and 7.6 ms, so refreshing what moved instead of everything is the
-// difference between 11 fps and comfortably over 30.
+// On the P4 board the ILI9488 is on an 8-bit 8080 bus: a full 480x320 frame
+// is 307 kB of RGB565, about 31 ms at a 10 MHz write strobe. That is just
+// inside 30 Hz on its own, but not with anything else on the frame, so the
+// widget dirty flags stay until a measured number says otherwise
+// (docs/s3-parallel-respin.md §6). On the S3 board's SPI the same frame was
+// 92 ms, and the dirty flags were the difference between 11 fps and 30.
 //
 // A whole frame still goes out on a screen change, when an alert is
 // dismissed, and at boot — anything where the panel's contents are unknown.
@@ -38,7 +38,7 @@ namespace {
 // screen where nothing has changed costs one walk of thirteen dirty flags.
 constexpr uint32_t kPollMs = 10;
 
-constexpr int16_t kBandLines = 40;
+constexpr int16_t kBandLines = bsp::kTftBandLines;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
 
 // Both traces, exposed to the map widgets as a read-only view. The widget
@@ -108,10 +108,10 @@ void render_task(void* arg) {
     app.set_trip_source(&trip_src);
     app.set_track_source(&lap_src);
 
-    // Internal SRAM, not PSRAM. This is 38 kB that the SPI DMA reads on
-    // every transfer, and DMA out of PSRAM on the S3 goes through the cache
-    // rather than straight off the bus. The big buffers that can afford to
-    // live in PSRAM are the traces, and they do — see wiring.cpp.
+    // Internal SRAM, not PSRAM. This is 38 kB that is redrawn for every
+    // transfer; the panel driver copies it into its own DMA staging buffer,
+    // so it is the CPU, not the DMA, that reads it. The big buffers that can
+    // afford to live in PSRAM are the traces, and they do — see wiring.cpp.
     auto* band = static_cast<ui::Color*>(
         heap_caps_malloc(kBandPixels * sizeof(ui::Color),
                          MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));

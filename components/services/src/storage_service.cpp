@@ -6,14 +6,13 @@
 // one answer to "who has the card right now".
 //
 // USB mass storage is NOT implemented (§9.3). It is a real constraint rather
-// than a missing function: the ESP32-S3 can present the card to a laptop
+// than a missing function: the ESP32-P4 can present the card to a laptop
 // over its native USB, but only if nothing on the device has it mounted at
 // the same time — two writers on one FAT volume corrupts it. So the hand-off
 // has to unmount, stop the logger, and refuse to log until the host lets go.
 // That state machine is here; the TinyUSB half of it is not, and pretending
 // otherwise would be worse than a clear gap.
 #include "services/services.hpp"
-#include "drivers/mcp23s17.hpp"
 #include "drivers/sdcard.hpp"
 
 #include "freertos/FreeRTOS.h"
@@ -40,13 +39,7 @@ void storage_task(void* arg) {
             continue;
         }
 
-        // Card detect lives on the expander (GPB7), not on a GPIO, so it
-        // arrives second-hand from whoever last polled it.
-        bool inserted = true;
-        if (auto* mcp = static_cast<drivers::Mcp23s17*>(d.board)) {
-            inserted = mcp->card_detect();
-        }
-        card->note_card_detect(inserted);
+        const bool inserted = card->card_detect();
 
         if (!inserted) {
             if (was_present) {

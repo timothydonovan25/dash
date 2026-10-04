@@ -1,14 +1,26 @@
-CONFIG_IDF_TARGET="esp32s3"
+CONFIG_IDF_TARGET="esp32p4"
+
+# The P4 board: Guition JC-ESP32P4-M3-C6 module. docs/p4-board-pin-map.md.
+#
+# BRINGUP: chip revision. The only P4 measured so far (demo_p4's board) was
+# revision v1.3, which needs the pre-v3 selection below; v3.x silicon is a
+# different hardware family in IDF's own words. Read the module's revision
+# with `esptool.py chip-id` on arrival and change these two lines if it is
+# v3 or later.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# PSRAM: N16R8 is octal
+# PSRAM: 32 MB in the P4NRW32's own package, hex mode.
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
 # Lets EXT_RAM_BSS_ATTR put the map traces and the blackbox in PSRAM, which
-# keeps internal SRAM for the panel's DMA buffer and the task stacks.
+# keeps internal SRAM for the panel's staging buffer and the task stacks.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 CONFIG_FREERTOS_HZ=1000
@@ -17,22 +29,12 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_COMPILER_CXX_RTTI=n
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
-# BLE — see docs/system-architecture.md section 11.4.
-# Both of these MUST stay on core 1 or the shift-light latency budget breaks.
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-# Peripheral: the phone connects in and writes the media Feed
-# characteristic. Observer: passive scan for TPMS beacons, which never
-# connect. Central and the GATT client existed only for Apple's AMS, which
-# section 11.1 is explicitly not doing -- the phone here is an Android
-# handset. They are off because they are not free: NimBLE and the
-# controller add about 268 kB of image as configured.
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
-CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
-CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
-CONFIG_BT_NIMBLE_GATT_CLIENT=n
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2
-CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
-CONFIG_BT_CTRL_PINNED_TO_CORE_1=y
+# The console. The USB-C connector is wired to the full-speed USB-Serial/JTAG
+# port on GPIO24/25, so one cable flashes, monitors and debugs. UART0 on
+# GPIO37/38 stays on test pads as a fallback for when USB is wedged.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# No BLE in this build. The P4 has no radio: BLE reaches the module's C6
+# over SDIO through esp_hosted, and that is step 9 of the build order, after
+# the real-time path works (§11.4). demo_p4/ shows the working setup.
+CONFIG_BT_ENABLED=n

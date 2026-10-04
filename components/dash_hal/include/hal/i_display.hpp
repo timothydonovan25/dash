@@ -1,9 +1,10 @@
 // The panel. Deliberately narrow: a rectangle of pixels and a backlight.
 //
-// The ILI9488 in 4-wire SPI mode does not accept RGB565. It needs 18-bit
-// colour, three bytes per pixel, so a full 320x480 frame is 460 kB and has
-// to go out in bands. That is the driver's problem — the UI thinks in one
-// pixel format everywhere and never in bands.
+// On the P4 board the ILI9488 is on an 8-bit 8080 bus and takes RGB565
+// directly, two bytes per pixel. The bus DMA has alignment rules the UI
+// should not have to know about, and the backlight is on the LED driver,
+// not on a GPIO. Both are the driver's problem — the UI thinks in one pixel
+// format everywhere and never in bus transfers.
 #pragma once
 #include <cstdint>
 #include "hal/status.hpp"

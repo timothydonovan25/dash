@@ -70,10 +70,10 @@ the GPIO matrix. At 24 MHz or less that is comfortable.
 | 24 | GPIO23 | `WHEEL_HALL_R` | |
 | 26–31 | — | — | MIPI-DSI, unused on this board |
 | 33–38 | — | — | MIPI-CSI, unused on this board |
-| 39 | — | `D-` | **high-speed** USB OTG (already wired) |
-| 40 | — | `D+` | |
-| 42 | GPIO24 | test pad `USB_FS_DM` | USB-Serial/JTAG, for debug |
-| 43 | GPIO25 | test pad `USB_FS_DP` | |
+| 39 | — | — | high-speed USB OTG, not connected |
+| 40 | — | — | |
+| 42 | GPIO24 | `D-` | USB-Serial/JTAG on the USB-C, via D3: flash, console, JTAG |
+| 43 | GPIO25 | `D+` | |
 | 45 | GPIO26 | `TFT_D0` | i80 data |
 | 46 | GPIO27 | `TFT_D1` | |
 | 47 | GPIO28 | `TFT_D2` | |
@@ -235,13 +235,13 @@ that at 20 mA, and about 60 % of what 50 mA would give.
 
 ## 3. VIN sense
 
-`VIN` → 100 kΩ → `VIN_SENSE` → 22 kΩ → GND, with 100 nF at the pin.
+`VIN` → 100 kΩ (R17) → `VIN_SENSE` → 22.1 kΩ (R18) → GND, with 100 nF at the pin.
 
 | VIN | Pin voltage |
 |---|---|
 | ~4.5 V (USB through D5) | 0.81 V |
-| 12.6 V (engine off) | 2.27 V |
-| 14.4 V (running) | 2.60 V |
+| 12.6 V (engine off) | 2.28 V |
+| 14.4 V (running) | 2.61 V |
 | ~29 V (SMBJ18A clamping) | 5.2 V — **needs a clamp** |
 
 Add a clamp to 3.3 V on `VIN_SENSE`: the BAT54S pattern used on the tach
@@ -255,7 +255,7 @@ power-source test `dash-v1-netlist-review.md` §3 asked for.
 1. `FLASH`: U16-76 → **U16-54**. Add 10 kΩ to VCC on pin 54 and on pin 55.
 2. `ESP_EN` → **U16-75**.
 3. Pin 74: 10 kΩ to VCC, 1 µF to GND. Pin 18: 10 kΩ to VCC.
-4. Test pads on pins 16, 17, 42, 43, 56, 57.
+4. Test pads on pins 16, 17, 56, 57. Pins 42/43 go to the USB-C instead.
 5. New net `VIN_SENSE` with the divider and clamp in §3.
 6. Delete `PPS` (U4-13 left open) and `TFT_MISO`.
 7. **FPC1, from the panel datasheet** (pin: function → net):

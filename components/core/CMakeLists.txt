@@ -16,4 +16,5 @@ idf_component_register(
          "src/log.cpp"
          "src/delta.cpp"
          "src/gear.cpp"
+         "src/power.cpp"
     INCLUDE_DIRS "include")

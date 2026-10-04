@@ -1,8 +1,9 @@
 // The SD card, in SPI mode, on the shared SPI2 bus.
 //
-// Not SDMMC: the card socket is wired to the same three SPI pins as the IMU
-// and the expander, with its own chip select. That is slower than a 4-bit
-// SDMMC bus and it is what the board has.
+// Not SDMMC: the card socket is wired to the same three SPI pins as the IMU,
+// with its own chip select. That is slower than a 4-bit SDMMC bus and it is
+// what the board has. On the P4 it also keeps the card off the SDMMC
+// controller, which the module uses for its link to the C6.
 //
 // The reason this sits behind an interface and gets drained by its own
 // low-priority task: **an SD card can stall for hundreds of milliseconds**
@@ -22,14 +23,15 @@ public:
 
     void unmount();
 
-    // Card-detect comes from the MCP23S17 (GPB7), not a GPIO, so the caller
-    // passes what the expander last saw rather than this polling for it.
-    void note_card_detect(bool inserted) { detected_ = inserted; }
+    // Reads the socket's card-detect switch. Configures the pin on first
+    // use, so it works before init() and after unmount().
+    bool card_detect();
     bool detected() const { return detected_; }
 
 private:
     bool  mounted_ = false;
     bool  detected_ = false;
+    bool  cd_ready_ = false;
     void* card_ = nullptr;        // sdmmc_card_t*
     void* open_file_ = nullptr;   // FILE*, kept open between appends
     char  open_path_[64] = {};

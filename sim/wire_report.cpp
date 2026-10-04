@@ -30,12 +30,13 @@ namespace {
 constexpr int16_t kBandLines  = 40;
 constexpr size_t  kBandPixels = static_cast<size_t>(kScreenW) * kBandLines;
 
-// The bus as bsp/buses.cpp configures it, so a transfer the SPI driver would
-// reject shows up here as a rejected transfer rather than as a slow one.
-constexpr uint32_t kBusLimitBytes = 320u * 40u * 3u;
+// The bus as bsp/buses.cpp configures it on the P4 board, so a transfer
+// the 8080 driver would reject shows up here as a rejected transfer rather
+// than as a slow one. 10 MHz is bsp::kTftWrHz.
+constexpr uint32_t kBusLimitBytes = 480u * 40u * 2u;
 
 wire::Panel panel_model() {
-    wire::Panel p;
+    wire::Panel p = wire::i80_8bit(10000000u);
     p.bus_limit_bytes = kBusLimitBytes;
     return p;
 }

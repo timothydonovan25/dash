@@ -15,7 +15,7 @@
 // | input   |  0   |   9  | 100 Hz    | pod poll, debounce                  |
 // | render  |  1   |   6  | 30 Hz     | snapshot, widgets, panel            |
 // | logger  |  1   |   5  | drain     | blackbox ring to SD                 |
-// | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, rail sense       |
+// | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, VIN sense        |
 // | storage |  1   |   3  | 2 Hz      | card mount, hotplug, USB hand-off    |
 //
 // Core 0 is a real-time island: no radio, no filesystem. Anything added to
@@ -51,7 +51,6 @@ struct Deps {
     hal::IClock*       clock   = nullptr;
     hal::IImu*         imu     = nullptr;
     hal::IGnss*        gnss    = nullptr;
-    hal::IExpander*    board   = nullptr;
     hal::IButtonPod*   pod     = nullptr;
     hal::IPanel*       panel   = nullptr;
     hal::IEngineSense* sense   = nullptr;
@@ -59,6 +58,7 @@ struct Deps {
     hal::IEngine*      engine  = nullptr;      // NullEngine today
     hal::IStorage*     storage = nullptr;
     hal::ICard*        card    = nullptr;
+    hal::IRailSense*   rails   = nullptr;
 
     core::state::Slots*     slots    = nullptr;
     core::config::Settings* settings = nullptr;

@@ -1,21 +1,29 @@
 #include "drivers/ili9488.hpp"
-#include "drivers/mcp23s17.hpp"
+#include "drivers/pca9955b.hpp"
 #include "bsp/pins.hpp"
 
-#include "driver/ledc.h"
-#include "driver/spi_master.h"
+#include "esp_heap_caps.h"
+#include "esp_lcd_ili9488.h"
+#include "esp_lcd_io_i80.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_ili9488.h"
+
+#include <cstring>
 
 namespace drivers {
 namespace {
 
-constexpr ledc_timer_t   kBlTimer   = LEDC_TIMER_0;
-constexpr ledc_channel_t kBlChannel = LEDC_CHANNEL_0;
-constexpr ledc_mode_t    kBlMode    = LEDC_LOW_SPEED_MODE;
+// The bus's DMA burst, from bsp/buses.cpp. Every color transfer's address
+// and length must be a multiple of it.
+constexpr size_t kDmaAlign = 32;
+constexpr size_t kStagingBytes = static_cast<size_t>(bsp::kTftMaxBlitPx) * 2;
 
-hal::Status from_esp(int err) {
+constexpr int kCaset    = 0x2A;
+constexpr int kPaset    = 0x2B;
+constexpr int kRamwr    = 0x2C;
+constexpr int kRamwrCon = 0x3C;   // Memory Write Continue
+
+hal::Status from_esp(esp_err_t err) {
     if (err == ESP_OK) return hal::Status::Ok;
     if (err == ESP_ERR_TIMEOUT) return hal::Status::Timeout;
     return hal::Status::IoError;
@@ -29,44 +37,53 @@ uint16_t Ili9488::width() const  { return bsp::kTftHeight; }
 uint16_t Ili9488::height() const { return bsp::kTftWidth; }
 
 hal::Status Ili9488::init() {
-    // The reset line is on the expander. If that is dead we carry on anyway:
-    // R3 pulls the line high, so the panel comes out of reset by itself and
-    // this degrades to "the screen might not have reset cleanly" rather than
-    // to a dark dash.
-    if (mcp_) mcp_->pulse_tft_reset();
+    if (!bus_) return hal::Status::NotPresent;
 
-    // SPI3 belongs to bsp, which sizes its transfers for exactly one band.
-    const int max_transfer = bsp::kTftHeight * 40 * 3;   // landscape width
-    esp_err_t err = ESP_OK;
+    if (!staging_) {
+        staging_ = static_cast<uint8_t*>(heap_caps_aligned_alloc(
+            64, kStagingBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+        if (!staging_) return hal::Status::IoError;
+    }
 
-    esp_lcd_panel_io_spi_config_t io_cfg = {};
-    io_cfg.dc_gpio_num = static_cast<gpio_num_t>(bsp::kTftDc);
-    io_cfg.cs_gpio_num = static_cast<gpio_num_t>(bsp::kTftCs);
-    io_cfg.pclk_hz = 40 * 1000 * 1000;
-    io_cfg.lcd_cmd_bits = 8;
-    io_cfg.lcd_param_bits = 8;
-    io_cfg.spi_mode = 0;
-    io_cfg.trans_queue_depth = 10;
+    if (!io_) {
+        esp_lcd_panel_io_i80_config_t cfg = {};
+        cfg.cs_gpio_num = static_cast<gpio_num_t>(bsp::kTftCs);
+        cfg.pclk_hz = bsp::kTftWrHz;
+        cfg.trans_queue_depth = 4;
+        cfg.lcd_cmd_bits = 8;
+        cfg.lcd_param_bits = 8;
+        cfg.dc_levels.dc_idle_level = 0;
+        cfg.dc_levels.dc_cmd_level = 0;
+        cfg.dc_levels.dc_dummy_level = 0;
+        cfg.dc_levels.dc_data_level = 1;
+        // Colour data only; command parameters go out in the order given.
+        cfg.flags.swap_color_bytes = 1;
 
-    esp_lcd_panel_io_handle_t io = nullptr;
-    // esp_lcd_spi_bus_handle_t is an int in IDF 6, so this is a value
-    // conversion rather than a pointer cast.
-    err = esp_lcd_new_panel_io_spi(
-        static_cast<esp_lcd_spi_bus_handle_t>(SPI3_HOST), &io_cfg, &io);
-    if (err != ESP_OK) return from_esp(err);
-    io_ = io;
+        esp_lcd_panel_io_handle_t io = nullptr;
+        const esp_err_t err = esp_lcd_new_panel_io_i80(
+            static_cast<esp_lcd_i80_bus_handle_t>(bus_), &cfg, &io);
+        if (err != ESP_OK) return from_esp(err);
+        io_ = io;
+    }
 
-    esp_lcd_panel_dev_config_t panel_cfg = {};
-    panel_cfg.reset_gpio_num = GPIO_NUM_NC; // it is on the expander, not a pin
-    panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
-    panel_cfg.bits_per_pixel = 18;          // RGB666: this panel's only option
+    if (!panel_) {
+        esp_lcd_panel_dev_config_t panel_cfg = {};
+        // A real GPIO now, not a pin on an expander that has to come up
+        // first. R3 still holds the line high if this pin is not driven.
+        panel_cfg.reset_gpio_num = static_cast<gpio_num_t>(bsp::kTftRst);
+        panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_cfg.bits_per_pixel = 16;          // 8080 mode takes RGB565
 
-    esp_lcd_panel_handle_t panel = nullptr;
-    err = esp_lcd_new_panel_ili9488(io, &panel_cfg, max_transfer, &panel);
-    if (err != ESP_OK) return from_esp(err);
-    panel_ = panel;
+        esp_lcd_panel_handle_t panel = nullptr;
+        // No conversion buffer: the 16-bit path never converts.
+        const esp_err_t err = esp_lcd_new_panel_ili9488(
+            static_cast<esp_lcd_panel_io_handle_t>(io_), &panel_cfg, 0, &panel);
+        if (err != ESP_OK) return from_esp(err);
+        panel_ = panel;
+    }
 
-    err = esp_lcd_panel_reset(panel);
+    auto* panel = static_cast<esp_lcd_panel_handle_t>(panel_);
+    esp_err_t err = esp_lcd_panel_reset(panel);
     if (err != ESP_OK) return from_esp(err);
     err = esp_lcd_panel_init(panel);
     if (err != ESP_OK) return from_esp(err);
@@ -76,49 +93,66 @@ hal::Status Ili9488::init() {
     //
     // BRINGUP: if the display comes up mirrored or upside down when the
     // board arrives, these two lines are the only thing to change.
+    // panel_test's corners screen shows which.
     esp_lcd_panel_swap_xy(panel, true);
     esp_lcd_panel_mirror(panel, true, false);
-
-    esp_lcd_panel_disp_on_off(panel, true);
-
-    return hal::Status::Ok;
+    return from_esp(esp_lcd_panel_disp_on_off(panel, true));
 }
 
 hal::Status Ili9488::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                           const uint16_t* pixels) {
-    if (!panel_ || !pixels) return hal::Status::NotPresent;
-    // esp_lcd's end coordinates are exclusive. The component does the
-    // RGB565-to-RGB666 expansion on the way to the panel.
-    return from_esp(esp_lcd_panel_draw_bitmap(
-        static_cast<esp_lcd_panel_handle_t>(panel_), x, y, x + w, y + h,
-        pixels));
+    if (!io_ || !staging_ || !pixels) return hal::Status::NotPresent;
+    if (w == 0 || h == 0) return hal::Status::Ok;
+    const size_t px = static_cast<size_t>(w) * h;
+    if (px > static_cast<size_t>(bsp::kTftMaxBlitPx)) return hal::Status::Unsupported;
+
+    auto* io = static_cast<esp_lcd_panel_io_handle_t>(io_);
+
+    // The window first. A parameter write waits for every colour transfer
+    // still in flight, so once these return the previous blit's DMA has
+    // finished reading the staging buffer and it is safe to refill.
+    const uint16_t x1 = static_cast<uint16_t>(x + w - 1);
+    const uint16_t y1 = static_cast<uint16_t>(y + h - 1);
+    const uint8_t caset[4] = {static_cast<uint8_t>(x >> 8), static_cast<uint8_t>(x),
+                              static_cast<uint8_t>(x1 >> 8), static_cast<uint8_t>(x1)};
+    const uint8_t paset[4] = {static_cast<uint8_t>(y >> 8), static_cast<uint8_t>(y),
+                              static_cast<uint8_t>(y1 >> 8), static_cast<uint8_t>(y1)};
+    esp_err_t err = esp_lcd_panel_io_tx_param(io, kCaset, caset, sizeof caset);
+    if (err != ESP_OK) return from_esp(err);
+    err = esp_lcd_panel_io_tx_param(io, kPaset, paset, sizeof paset);
+    if (err != ESP_OK) return from_esp(err);
+
+    const size_t bytes = px * 2;
+    std::memcpy(staging_, pixels, bytes);
+
+    // The aligned bulk by DMA. It is queued, not waited for: the next blit's
+    // window write is what waits, so drawing the next widget overlaps this
+    // transfer.
+    const size_t bulk = bytes & ~(kDmaAlign - 1);
+    if (bulk) {
+        err = esp_lcd_panel_io_tx_color(io, kRamwr, staging_, bulk);
+        if (err != ESP_OK) return from_esp(err);
+    }
+
+    // Fewer than sixteen pixels left over. They go out as command
+    // parameters, which bypass the DMA rule but also the I80 byte swap, so
+    // they are swapped here.
+    const size_t tail = bytes - bulk;
+    if (tail) {
+        uint8_t t[kDmaAlign];
+        for (size_t i = 0; i < tail; i += 2) {
+            t[i]     = staging_[bulk + i + 1];
+            t[i + 1] = staging_[bulk + i];
+        }
+        err = esp_lcd_panel_io_tx_param(io, bulk ? kRamwrCon : kRamwr, t, tail);
+        if (err != ESP_OK) return from_esp(err);
+    }
+    return hal::Status::Ok;
 }
 
 hal::Status Ili9488::set_backlight(uint8_t percent) {
-    if (percent > 100) percent = 100;
-
-    if (!backlight_ready_) {
-        ledc_timer_config_t t = {};
-        t.speed_mode = kBlMode;
-        t.timer_num = kBlTimer;
-        t.duty_resolution = LEDC_TIMER_8_BIT;
-        t.freq_hz = 5000;               // above hearing, below any flicker
-        t.clk_cfg = LEDC_AUTO_CLK;
-        if (ledc_timer_config(&t) != ESP_OK) return hal::Status::IoError;
-
-        ledc_channel_config_t c = {};
-        c.speed_mode = kBlMode;
-        c.channel = kBlChannel;
-        c.timer_sel = kBlTimer;
-        c.gpio_num = bsp::kTftBacklight;
-        c.duty = 0;
-        if (ledc_channel_config(&c) != ESP_OK) return hal::Status::IoError;
-        backlight_ready_ = true;
-    }
-
-    const uint32_t duty = (255u * percent) / 100u;
-    if (ledc_set_duty(kBlMode, kBlChannel, duty) != ESP_OK) return hal::Status::IoError;
-    return from_esp(ledc_update_duty(kBlMode, kBlChannel));
+    if (!backlight_) return hal::Status::NotPresent;
+    return backlight_->set_backlight(percent);
 }
 
 }  // namespace drivers

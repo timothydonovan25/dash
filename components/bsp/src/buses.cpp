@@ -3,9 +3,9 @@
 
 #include "driver/gpio.h"
 #include "driver/i2c.h"
-#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "driver/uart.h"
+#include "esp_lcd_io_i80.h"
 
 namespace bsp {
 namespace {
@@ -29,35 +29,20 @@ bool init_spi2() {
     return ok_or_already(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
 }
 
-bool init_spi3() {
-    spi_bus_config_t bus = {};
-    bus.sclk_io_num = static_cast<gpio_num_t>(kTftSclk);
-    bus.mosi_io_num = static_cast<gpio_num_t>(kTftMosi);
-    bus.miso_io_num = static_cast<gpio_num_t>(kTftMiso);
-    bus.quadwp_io_num = -1;
-    bus.quadhd_io_num = -1;
-    // One band of 40 lines at three bytes per pixel. The panel driver splits
-    // anything larger, and the split shows as tearing.
-    bus.max_transfer_sz = kTftWidth * 40 * 3;
-    return ok_or_already(spi_bus_initialize(SPI3_HOST, &bus, SPI_DMA_CH_AUTO));
-}
-
-bool init_i2c0() {
+bool init_i2c(i2c_port_t port, int sda, int scl, int hz) {
     i2c_config_t cfg = {};
     cfg.mode = I2C_MODE_MASTER;
-    cfg.sda_io_num = static_cast<gpio_num_t>(kI2cSda);
-    cfg.scl_io_num = static_cast<gpio_num_t>(kI2cScl);
-    // The 4.7k externals do the work. The internal pull-ups are around 45k
-    // and barely register; they are left on as insurance against an
+    cfg.sda_io_num = static_cast<gpio_num_t>(sda);
+    cfg.scl_io_num = static_cast<gpio_num_t>(scl);
+    // The external resistors do the work. The internal pull-ups are around
+    // 45k and barely register; they are left on as insurance against an
     // unpopulated resistor, which is a real bring-up failure.
     cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
     cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    // 100 kHz, not 400. Half a metre of cable and 4.7k pull-ups give about
-    // 470 ns of rise time; fast mode allows 300 ns and standard allows 1000.
-    cfg.master.clk_speed = kI2cHz;
+    cfg.master.clk_speed = hz;
 
-    if (i2c_param_config(I2C_NUM_0, &cfg) != ESP_OK) return false;
-    return ok_or_already(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+    if (i2c_param_config(port, &cfg) != ESP_OK) return false;
+    return ok_or_already(i2c_driver_install(port, I2C_MODE_MASTER, 0, 0, 0));
 }
 
 bool init_uart1() {
@@ -77,31 +62,46 @@ bool init_uart1() {
                         UART_PIN_NO_CHANGE) == ESP_OK;
 }
 
+void* init_lcd_bus() {
+    esp_lcd_i80_bus_config_t bus = {};
+    bus.clk_src = LCD_CLK_SRC_DEFAULT;
+    bus.dc_gpio_num = static_cast<gpio_num_t>(kTftDc);
+    bus.wr_gpio_num = static_cast<gpio_num_t>(kTftWr);
+    for (int i = 0; i < 8; ++i) {
+        bus.data_gpio_nums[i] = static_cast<gpio_num_t>(kTftData[i]);
+    }
+    bus.bus_width = 8;
+    bus.max_transfer_bytes = static_cast<size_t>(kTftMaxBlitPx) * 2;
+    // The driver's own default, written out because it sets the DMA's
+    // alignment rule: on the P4's AXI DMA every transfer's address and
+    // length must be a multiple of the burst. drivers/ili9488 stages
+    // through a buffer that honours it, so the UI never has to.
+    bus.dma_burst_size = 32;
+
+    esp_lcd_i80_bus_handle_t handle = nullptr;
+    if (esp_lcd_new_i80_bus(&bus, &handle) != ESP_OK) return nullptr;
+    return handle;
+}
+
 }  // namespace
 
 BusStatus init_buses() {
     BusStatus s;
     s.spi2 = init_spi2();
-    s.spi3 = init_spi3();
-    s.i2c0 = init_i2c0();
+    s.i2c0 = init_i2c(I2C_NUM_0, kI2cSda, kI2cScl, kI2cHz);
+    s.i2c1 = init_i2c(I2C_NUM_1, kLedSda, kLedScl, kLedI2cHz);
     s.uart1 = init_uart1();
     return s;
 }
 
 BusStatus board_init() {
-    // The shift-lamp master FET and the backlight are the two pins that can
-    // draw real current the moment they float. Both are driven low before
-    // anything else, because the USB bench limit is not theoretical: eight
-    // lamps plus the backlight plus the 3V3 rail is roughly 610 mA against a
-    // 500 mA port, and that browns out the expander that holds TFT_RST.
-    gpio_config_t out = {};
-    out.pin_bit_mask = (1ull << kShiftMasterPwm) | (1ull << kTftBacklight);
-    out.mode = GPIO_MODE_OUTPUT;
-    gpio_config(&out);
-    gpio_set_level(static_cast<gpio_num_t>(kShiftMasterPwm), 0);
-    gpio_set_level(static_cast<gpio_num_t>(kTftBacklight), 0);
-
-    return init_buses();
+    // Nothing on this board draws current from a floating pin any more. The
+    // shift lamps and the backlight are on the PCA9955B, whose outputs come
+    // out of power-on reset with zero current and zero duty, and the panel's
+    // reset and chip select are held inactive by R3 and R41.
+    BusStatus s = init_buses();
+    s.lcd_bus = init_lcd_bus();
+    return s;
 }
 
 }  // namespace bsp

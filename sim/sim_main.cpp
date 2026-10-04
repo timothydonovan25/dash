@@ -54,7 +54,7 @@ constexpr uint32_t kFrameMs = 50;    // 20 Hz to the window
 // render_service, same strip split, same bus limit as bsp/buses.cpp.
 constexpr int16_t kBandLines  = 40;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
-constexpr uint32_t kBusLimitBytes = 320u * 40u * 3u;
+constexpr uint32_t kBusLimitBytes = 480u * 40u * 2u;   // the 8080 bus, RGB565
 
 class DequeSource final : public services::ICommandSource,
                           public ui::ICommandSink {
@@ -216,7 +216,7 @@ int main() {
     ui::FrameBufferCanvas canvas(px.data(), ui::kScreenW, ui::kScreenH);
     app.begin(canvas);
 
-    ui::wire::Panel wire_panel;
+    ui::wire::Panel wire_panel = ui::wire::i80_8bit(10000000u);   // bsp::kTftWrHz
     wire_panel.bus_limit_bytes = kBusLimitBytes;
     ui::wire::Model wire(wire_panel, kBandPixels, kBandLines);
 

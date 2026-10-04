@@ -164,6 +164,27 @@ int main() {
         CHECK(wire::transfer_cost(p, 12800).oversized == 0);
     }
 
+    CASE("an 8-bit 8080 bus moves a byte per strobe, two bytes a pixel");
+    {
+        const wire::Panel p = wire::i80_8bit(10000000u);
+        const wire::Cost c = wire::transfer_cost(p, 19200);   // one full band
+
+        // 19200 px * 2 B = 38400 B, + 11 command bytes, one byte per 100 ns
+        // strobe = 3.8411 ms. + 5 us driver + 19200 * 2 ns of staging copy.
+        CHECK_NEAR(c.ms(), 3.8845, 0.01);
+    }
+
+    CASE("a full repaint over 8080 at 10 MHz is just inside 30 Hz");
+    {
+        wire::Model m(wire::i80_8bit(10000000u), kBand, 40);
+        m.full_repaint();
+        const wire::Cost c = m.end_frame();
+        CHECK(c.pixels == static_cast<uint32_t>(kScreenW) * kScreenH);
+        // 307 kB at 10 MB/s is 30.7 ms on the wire alone.
+        CHECK(c.ms() > 30.7f);
+        CHECK(c.ms() < 33.3f);
+    }
+
     CASE("the model accumulates frames and remembers the worst one");
     {
         wire::Panel p;

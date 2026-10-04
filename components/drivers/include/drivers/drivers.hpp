@@ -2,7 +2,7 @@
 // interface and knowing nothing about the application.
 //
 // ────────────────────────────────────────────────────────────────────────
-//  NONE OF THIS HAS RUN. The PCB is at fab. Every class below is written
+//  NONE OF THIS HAS RUN. The P4 board has not been drawn yet. Every class below is written
 //  against a datasheet and a netlist, which is not the same as working.
 //  CLAUDE.md says not to write drivers you cannot test, and the spirit of
 //  that is respected here: these are the shape of the drivers, the register
@@ -15,7 +15,6 @@
 // ────────────────────────────────────────────────────────────────────────
 #pragma once
 #include "drivers/clock.hpp"
-#include "drivers/mcp23s17.hpp"
 #include "drivers/pod.hpp"
 #include "drivers/ili9488.hpp"
 #include "drivers/icm42688p.hpp"
@@ -23,4 +22,5 @@
 #include "drivers/engine_sense.hpp"
 #include "drivers/nvs_storage.hpp"
 #include "drivers/sdcard.hpp"
-#include "drivers/shift_lamps.hpp"
+#include "drivers/pca9955b.hpp"
+#include "drivers/vin_sense.hpp"

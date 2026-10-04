@@ -1,10 +1,12 @@
 // What a frame costs on the wire.
 //
-// The ILI9488 over SPI is this dashboard's binding constraint, not the CPU
-// and not the memory. A whole 480x320 frame is 460 kB at 18-bit colour,
-// which is 92 ms at 40 MHz — 11 fps no matter how fast anything draws. So
-// the only question that matters about a screen is how many pixels it
-// actually sends, and this prices that.
+// The panel's bus is this dashboard's binding constraint, not the CPU and
+// not the memory. Over the S3 board's SPI a whole 480x320 frame is 460 kB at
+// 18-bit colour, 92 ms at 40 MHz — 11 fps no matter how fast anything
+// draws. The P4 board's 8-bit 8080 bus (`i80_8bit`) is about three times
+// faster, which still does not make a whole frame free. So the only
+// question that matters about a screen is how many pixels it actually
+// sends, and this prices that.
 //
 // It is a model, not a measurement. It knows the wire rate exactly, because
 // that is arithmetic; the per-transfer overhead is an estimate and is meant
@@ -47,7 +49,24 @@ struct Panel {
     // rather than pricing a transfer that would never happen. Zero means
     // do not check.
     uint32_t bus_limit_bytes = 0;
+
+    // How many bits move per clock. 1 for SPI, the default. An 8-bit 8080
+    // bus moves a whole byte per write strobe.
+    uint8_t bits_per_clock = 1;
 };
+
+// An 8-bit 8080 bus driving the ILI9488 in RGB565, as on the P4 board. No
+// colour conversion — the pixels go out as they are — but the panel driver
+// copies each transfer into its aligned DMA staging buffer first, which
+// costs about as much per pixel as a memcpy does.
+inline Panel i80_8bit(uint32_t write_hz) {
+    Panel p;
+    p.clock_hz = write_hz;
+    p.bytes_per_px = 2;
+    p.bits_per_clock = 8;
+    p.convert_ns_per_px = 2;
+    return p;
+}
 
 struct Cost {
     uint32_t transfers = 0;
@@ -79,7 +98,7 @@ inline Cost transfer_cost(const Panel& p, uint32_t pixels) {
     c.transfers = 1;
     c.pixels    = pixels;
     c.ns = p.overhead_ns
-         + bits * 1000000000ull / p.clock_hz
+         + bits * 1000000000ull / (static_cast<uint64_t>(p.clock_hz) * p.bits_per_clock)
          + static_cast<uint64_t>(pixels) * p.convert_ns_per_px;
     if (p.bus_limit_bytes != 0 && payload > p.bus_limit_bytes) c.oversized = 1;
     return c;

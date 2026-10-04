@@ -1,9 +1,9 @@
 ## Managed dependencies.
 ##
-## The ILI9488 panel driver is pulled in rather than written. In 4-wire SPI
-## mode this panel needs 18-bit colour and will not take RGB565, and the
-## conversion plus the command sequence is exactly the kind of code that is
-## already correct somewhere else (§7.6).
+## The ILI9488 panel driver is pulled in rather than written: its init
+## sequence is exactly the kind of code that is already correct somewhere
+## else (§7.6). It only speaks esp_lcd_panel_io, so it drives the 8080 bus
+## unchanged; drivers/src/ili9488.cpp owns the blit path itself.
 dependencies:
   atanisoft/esp_lcd_ili9488: "^1.0.0"
   idf: ">=5.0"

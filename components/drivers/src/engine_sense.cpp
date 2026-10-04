@@ -1,5 +1,4 @@
 #include "drivers/engine_sense.hpp"
-#include "drivers/mcp23s17.hpp"
 #include "bsp/pins.hpp"
 
 #include "driver/gpio.h"
@@ -92,7 +91,18 @@ hal::Status EngineSense::init() {
     // Confirm on the bench with a wheel on a stand before trusting the mph.
     s = install(bsp::kWheelHallFront, g_front, 200);
     if (!hal::ok(s)) return s;
-    return install(bsp::kWheelHallRear, g_rear, 200);
+    s = install(bsp::kWheelHallRear, g_rear, 200);
+    if (!hal::ok(s)) return s;
+
+    // Neutral. R64 is the pull-up; the internal one is insurance against
+    // it being unpopulated, the same reasoning as the I2C pull-ups.
+    gpio_config_t n = {};
+    n.pin_bit_mask = 1ull << bsp::kNeutral;
+    n.mode = GPIO_MODE_INPUT;
+    n.pull_up_en = GPIO_PULLUP_ENABLE;
+    n.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    n.intr_type = GPIO_INTR_DISABLE;
+    return gpio_config(&n) == ESP_OK ? hal::Status::Ok : hal::Status::IoError;
 }
 
 hal::Status EngineSense::read(Counts& out) {
@@ -106,18 +116,11 @@ hal::Status EngineSense::read(Counts& out) {
     out.rear_edge_us = widen(g_rear.edge_us_lo.load(std::memory_order_relaxed), now);
     out.t_us = now;
 
-    // Neutral comes from the expander, and the expander is on a shared bus.
-    // `ctrl` runs at 500 Hz and an SPI round trip is ~20 us, so this is
-    // affordable — but it is the one part of this read that can fail, and it
-    // must not take the pulse counts down with it.
-    if (mcp_) {
-        if (hal::ok(mcp_->poll_inputs())) {
-            out.neutral = mcp_->neutral();
-        } else {
-            out.neutral = mcp_->neutral();     // last known
-            return hal::Status::Timeout;
-        }
-    }
+    // Neutral is a plain GPIO on this board. It reads LOW in neutral —
+    // opto-isolated and pulled up — and is inverted here so that nothing
+    // above ever has to remember that. Nothing in this read can fail now.
+    const int level = gpio_get_level(static_cast<gpio_num_t>(bsp::kNeutral));
+    out.neutral = bsp::kNeutralActiveLow ? level == 0 : level != 0;
     return hal::Status::Ok;
 }
 

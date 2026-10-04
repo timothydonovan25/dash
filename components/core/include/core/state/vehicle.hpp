@@ -102,7 +102,7 @@ Lap to_published(const lap::State& s, int32_t delta_ms = 0,
                  bool delta_valid = false);
 
 struct Elec {
-    float vbat = 0.0f;    // no VIN sense this revision; see dash-v1 review §3
+    float vbat = 0.0f;    // VIN through the sense divider; 0 = no reading
     float v5   = 0.0f;
     float v3v3 = 0.0f;
 };
@@ -198,7 +198,7 @@ struct DevHealth {
 // here instead, because the DIAG sensors screen renders it as a table and
 // walking named members would mean writing that list out twice.
 enum class Dev : uint8_t {
-    Imu = 0, Gnss, McpBoard, McpPod, Sd, Ecu, Display, BleHost, Phone,
+    Imu = 0, Gnss, LedDriver, McpPod, Sd, Ecu, Display, BleHost, Phone,
     TpmsF, TpmsR, Count
 };
 inline constexpr uint8_t kDevCount = static_cast<uint8_t>(Dev::Count);

@@ -37,7 +37,7 @@ const char* dev_name(Dev d) {
     switch (d) {
         case Dev::Imu:      return "IMU";
         case Dev::Gnss:     return "GPS";
-        case Dev::McpBoard: return "MCP board";
+        case Dev::LedDriver: return "LED driver";
         case Dev::McpPod:   return "MCP pod";
         case Dev::Sd:       return "SD";
         case Dev::Ecu:      return "ECU";

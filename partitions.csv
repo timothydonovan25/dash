@@ -1,5 +1,29 @@
-# name,     type, subtype,  offset,   size
-nvs,        data, nvs,      0x9000,   0x10000
-phy_init,   data, phy,      0x19000,  0x1000
-coredump,   data, coredump, 0x1a000,  0x10000
-factory,    app,  factory,  0x30000,  0x600000
+# The P4 board's flash: 16 MB on the JC-ESP32P4-M3-C6 module.
+#
+# Settle this before the first flash. Changing it later erases NVS, and
+# NVS holds the odometer (docs/bringup.md §0).
+#
+# Ahead of the table: the bootloader at 0x2000 (the P4's offset, not 0x0
+# as on the S3) and the partition table itself at 0x8000.
+#
+# name,     type, subtype,  offset,    size
+#
+# Settings, odometer, engine hours. Same place as on the S3 board.
+nvs,        data, nvs,      0x9000,    0x10000
+# Which of the two app slots boots. `idf.py flash` writes it so the first
+# boot is ota_0.
+otadata,    data, ota,      0x19000,   0x2000
+# Crash dumps, both cores' stacks. Fills the gap up to the first app slot.
+coredump,   data, coredump, 0x1B000,   0x15000
+# Two app slots, 6 MB each. dash.bin is about 650 kB today; BLE through
+# esp_hosted adds NimBLE and the hosted transport, well under 1 MB more.
+# An update writes the slot that is not running and switches only once the
+# new image is complete.
+ota_0,      app,  ota_0,    0x30000,   0x600000
+ota_1,      app,  ota_1,    0x630000,  0x600000
+# The C6's firmware, for the P4 to push over SDIO through esp_hosted's
+# partition OTA, so the C6 never needs a UART adapter on its test pads.
+# demo_p4's build is 683 kB; 2 MB leaves room for a BLE + Wi-Fi image.
+# Subtype 0x40 and the label match demo_p4/main/ota_slave.cpp.
+slave_fw,   data, 0x40,     0xC30000,  0x200000
+# 0xE30000–0x1000000 (1.8 MB) is deliberately unallocated.

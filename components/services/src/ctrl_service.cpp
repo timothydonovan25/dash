@@ -1,9 +1,9 @@
 // `ctrl` — core 0, priority 18, 500 Hz.
 //
 // The only latency-critical task on the bike. Tach edge to shift lamp has to
-// stay under about 3 ms: one 500 Hz tick is 2 ms worst case, and one SPI
-// write to the expander is about 20 us. Everything else here is bookkeeping
-// that happens to share the loop.
+// stay under about 3 ms: one 500 Hz tick is 2 ms worst case, and one I2C
+// write to the LED driver is about 0.1 ms at 1 MHz. Everything else here is
+// bookkeeping that happens to share the loop.
 //
 // Nothing in this file is allowed to block, allocate, touch the filesystem
 // or log. If a line here can wait, it belongs in `logic`.
@@ -11,6 +11,7 @@
 #include "core/shift/shift.hpp"
 #include "core/gear/gear.hpp"
 #include "core/tach/tach.hpp"
+#include "core/power/power.hpp"
 #include "bsp/pins.hpp"
 
 #include "freertos/FreeRTOS.h"
@@ -22,6 +23,12 @@ namespace {
 constexpr uint32_t kHz = 500;
 constexpr TickType_t kPeriod = pdMS_TO_TICKS(2);
 
+// The LED driver comes out of a brown-out with every duty at zero and
+// acknowledges as if nothing happened. The mask is only written when it
+// changes, so without this a steady bar would stay dark until the rpm moved.
+// Once a second is 0.1 ms of I2C per 500 ticks.
+constexpr uint32_t kResendTicks = kHz;
+
 void ctrl_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
@@ -30,6 +37,7 @@ void ctrl_task(void* arg) {
     core::tach::WheelMeter rear;
     uint8_t last_mask = 0;
     uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
+    uint32_t ticks = 0;
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -66,23 +74,31 @@ void ctrl_task(void* arg) {
 
         const uint16_t rpm = static_cast<uint16_t>(tach.raw_rpm());
         const uint8_t mask = core::shift::pattern(rpm, sc, last_mask);
-        if (mask != last_mask && d.lamps) {
-            d.lamps->set_mask(mask);
+        const bool resend = ++ticks % kResendTicks == 0;
+        hal::Status lamp_status = hal::Status::Ok;
+        bool wrote = false;
+        if ((mask != last_mask || resend) && d.lamps) {
+            lamp_status = d.lamps->set_mask(mask);
             last_mask = mask;
+            wrote = true;
         }
 
-        // The master gate is what actually lights them, and it doubles as
-        // the brightness control. With no engine turning, the board is
-        // probably on a USB port: eight lamps plus the backlight plus the
-        // 3V3 rail is about 610 mA against a 500 mA supply, and browning out
-        // the expander takes the panel's reset line with it. So the duty is
-        // clamped until the engine is running.
+        // The master duty is the brightness control. On USB the whole board
+        // shares a 500 mA port, so it is capped there. The VIN sense says
+        // which supply it is; until it has a reading, a turning engine is
+        // the fallback evidence that this is the bike, as it was on the S3
+        // board, which had no VIN sense at all.
+        const core::power::Source src =
+            core::power::classify(d.slots->elec.get().vbat);
+        const bool full = src == core::power::Source::Bike ||
+                          (src == core::power::Source::Unknown && tach.running());
         const uint8_t master =
-            tach.running() ? 100u
-                           : static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255);
+            full ? 100u : static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255);
         if (master != last_master && d.lamps) {
-            d.lamps->set_master(master);
+            const hal::Status ms = d.lamps->set_master(master);
+            if (hal::ok(lamp_status)) lamp_status = ms;
             last_master = master;
+            wrote = true;
         }
 
         const uint32_t now_ms_early = d.clock->now_ms();
@@ -115,15 +131,23 @@ void ctrl_task(void* arg) {
         m.rear_mph = rear.mph();
         m.gps_mph = d.slots->gnss.get().speed_mph;
         m.best_mph = core::tach::best_speed_mph(
-            m.front_mph, d.health->publish().ok(core::state::Dev::McpBoard),
-            m.rear_mph, true,
+            m.front_mph, hal::ok(s),
+            m.rear_mph, hal::ok(s),
             m.gps_mph, d.slots->gnss.get().fix);
         d.slots->motion.publish(m);
 
+        // Only a write says anything about the LED driver. A quiet tick is
+        // not evidence either way, and the resend makes sure there is at
+        // least one write a second for the tracker to see.
         const uint32_t now_ms = now_ms_early;
-        if (hal::ok(s)) d.health->report_ok(core::state::Dev::McpBoard, now_ms);
-        else            d.health->report_error(core::state::Dev::McpBoard,
-                                               static_cast<int32_t>(s), now_ms);
+        if (wrote) {
+            if (hal::ok(lamp_status)) {
+                d.health->report_ok(core::state::Dev::LedDriver, now_ms);
+            } else {
+                d.health->report_error(core::state::Dev::LedDriver,
+                                       static_cast<int32_t>(lamp_status), now_ms);
+            }
+        }
 
         // Missing a deadline here is the one timing failure on this bike that
         // a rider would feel, so it is counted and shown on DIAG → System

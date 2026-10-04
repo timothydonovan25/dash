@@ -1,6 +1,7 @@
 #include "drivers/sdcard.hpp"
 #include "bsp/pins.hpp"
 
+#include "driver/gpio.h"
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -31,6 +32,25 @@ hal::Status from_esp(esp_err_t err) {
 
 }  // namespace
 
+bool SdCard::card_detect() {
+    if (!cd_ready_) {
+        // R16 is the pull-up; the internal one covers it being unpopulated.
+        gpio_config_t cd = {};
+        cd.pin_bit_mask = 1ull << bsp::kSdCardDetect;
+        cd.mode = GPIO_MODE_INPUT;
+        cd.pull_up_en = GPIO_PULLUP_ENABLE;
+        cd.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        cd.intr_type = GPIO_INTR_DISABLE;
+        cd_ready_ = gpio_config(&cd) == ESP_OK;
+        // A pin that would not configure reads as "inserted", so a broken
+        // detect line degrades to "try to mount" rather than "never log".
+        if (!cd_ready_) return detected_ = true;
+    }
+    const int level = gpio_get_level(static_cast<gpio_num_t>(bsp::kSdCardDetect));
+    detected_ = bsp::kSdCardDetectActiveLow ? level == 0 : level != 0;
+    return detected_;
+}
+
 hal::Status SdCard::init() {
     if (mounted_) return hal::Status::Ok;
 
@@ -41,8 +61,9 @@ hal::Status SdCard::init() {
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = static_cast<gpio_num_t>(bsp::kCsSd);
     slot.host_id = SPI2_HOST;
-    // Card detect is on the expander (GPB7), not on a GPIO, so the driver
-    // cannot watch it — the keeper reports it in through note_card_detect().
+    // Card detect is read by card_detect() and acted on by the storage task,
+    // which owns the unmount. Handing the pin to sdspi as well would give it
+    // two readers with two ideas of what a pulled card means.
     slot.gpio_cd = GPIO_NUM_NC;
     slot.gpio_wp = GPIO_NUM_NC;
 
