@@ -712,6 +712,7 @@ const icon::Bitmap& icon_for(MediaRow::Kind k) {
     switch (k) {
         case MediaRow::Kind::Album:  return icon::kAlbum;
         case MediaRow::Kind::Artist: return icon::kArtist;
+        case MediaRow::Kind::Lyric:  return icon::kLyric;
         case MediaRow::Kind::Song:   break;
     }
     return icon::kSong;
@@ -781,6 +782,29 @@ void MediaRow::render(Canvas& c) {
                 scale_, Align::Left);
     c.draw_text(static_cast<int16_t>(tx - offset_ + cycle), ty, text_.s,
                 color_, scale_, Align::Left);
+}
+
+// --- AlbumArt --------------------------------------------------------------
+
+void AlbumArt::set(const char* album, bool valid) {
+    const bool a = album_.set(album ? album : "");
+    const bool b = assign_t(valid_, valid);
+    if (a || b) {
+        cover_ = (valid_ && !album_.empty()) ? album_art::find(album_.s)
+                                              : nullptr;
+        touch();
+    }
+}
+
+void AlbumArt::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    if (!cover_) return;
+    // Centred rather than stretched: the source is baked at a fixed size
+    // (`tools/make_album_art.py`), and there is no scaling primitive to
+    // fit an arbitrary tile — see Canvas::draw_image.
+    const int16_t x = static_cast<int16_t>(bounds.x + (bounds.w - cover_->w) / 2);
+    const int16_t y = static_cast<int16_t>(bounds.y + (bounds.h - cover_->h) / 2);
+    c.draw_image(x, y, cover_->pixels, cover_->w, cover_->h);
 }
 
 // --- MediaProgress --------------------------------------------------------

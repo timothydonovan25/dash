@@ -14,7 +14,8 @@
 //                                duration (media track length, ms)
 //        btn <A-E> down|up       real debounce and long-press timing
 //        cmd <lapline|laparm|lapclear|tripreset|jump>
-//        media <title>\t<album>\t<artist>    bare `media` clears it
+//        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
+//                                                     bare `media` clears it
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac>\n
@@ -131,13 +132,16 @@ const char* copy_field(char (&dst)[N], const char* src) {
     return src[i] == '\t' ? src + i + 1 : src + i;
 }
 
-// `media <title>\t<album>\t<artist>`. Tab separated rather than anything a
-// band might reasonably use: "Song | Remix" is a real track name and "Song
-// <tab> Remix" is not. A bare `media` clears the block.
+// `media <title>\t<album>\t<artist>\t<lyric>`. Tab separated rather than
+// anything a band might reasonably use: "Song | Remix" is a real track name
+// and "Song <tab> Remix" is not. The lyric field is optional — a line with
+// only the first three fields leaves it blank, same as a real phone with no
+// .lrc for the track. A bare `media` clears the whole block.
 void apply_media(sim::Controls& c, const char* rest) {
     rest = copy_field(c.media_title, rest);
     rest = copy_field(c.media_album, rest);
-    copy_field(c.media_artist, rest);
+    rest = copy_field(c.media_artist, rest);
+    copy_field(c.media_lyric, rest);
 }
 
 }  // namespace

@@ -1,0 +1,6 @@
+# Adafruit Feather ESP32-S3 Reverse TFT. Layer on top of sdkconfig.defaults:
+#
+#   rm -f sdkconfig
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.feather_rtft" build
+CONFIG_PANEL_TEST_BOARD_FEATHER_RTFT=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

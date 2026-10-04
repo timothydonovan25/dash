@@ -1,0 +1,6 @@
+## The same panel driver, at the same version, as the dash firmware. It
+## only speaks esp_lcd_panel_io, so it drives SPI and i80 alike: in 16-bit
+## mode it sends the caller's pixels untouched, and only the 18-bit (SPI)
+## path converts.
+dependencies:
+  atanisoft/esp_lcd_ili9488: "1.1.1"

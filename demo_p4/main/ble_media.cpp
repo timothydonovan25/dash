@@ -120,6 +120,10 @@ void apply_line(const uint8_t* data, uint16_t len) {
                 g_media.position_ms = 0;
                 g_media.duration_ms = 0;
                 g_media.position_at_ms = now_ms();
+                // A lyric line belongs to the track it was sent for; a new
+                // track with no lyric written yet must not go on showing
+                // the last line of the one before it.
+                g_media.lyric[0] = '\0';
             }
             std::memcpy(g_media.title, buf, n + 1);
             break;
@@ -136,6 +140,13 @@ void apply_line(const uint8_t* data, uint16_t len) {
                                  ? rest_len : sizeof(g_media.album) - 1;
             std::memcpy(g_media.album, rest, n);
             g_media.album[n] = '\0';
+            break;
+        }
+        case 'Y': {
+            const size_t n = rest_len < sizeof(g_media.lyric) - 1
+                                 ? rest_len : sizeof(g_media.lyric) - 1;
+            std::memcpy(g_media.lyric, rest, n);
+            g_media.lyric[n] = '\0';
             break;
         }
         case 'S':

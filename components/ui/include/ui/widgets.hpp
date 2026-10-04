@@ -7,6 +7,7 @@
 #pragma once
 #include <cstdint>
 #include "ui/widget.hpp"
+#include "ui/album_art.hpp"
 #include "core/state/vehicle.hpp"
 
 namespace ui {
@@ -321,7 +322,7 @@ private:
 // would still be sitting next to nothing after the music stopped.
 class MediaRow : public Widget {
 public:
-    enum class Kind : uint8_t { Song = 0, Album, Artist };
+    enum class Kind : uint8_t { Song = 0, Album, Artist, Lyric };
 
     // `scale` defaults to the size the speed screen has always used; a
     // dedicated media screen with room to spare passes a bigger one. The
@@ -383,6 +384,22 @@ private:
     uint32_t duration_ms_ = 0;
     uint8_t  state_       = 0;
     bool     valid_       = false;
+};
+
+// The current lyric line's picture, matched by album title against a
+// handful of albums baked into flash (`ui/album_art.hpp`) — see that
+// header for why this never touches BLE. Blank when the album has no
+// baked-in cover, which is nearly always true: this is a rider's ~10
+// favourite albums, not their whole library.
+class AlbumArt : public Widget {
+public:
+    void set(const char* album, bool valid);
+    void render(Canvas& c) override;
+
+private:
+    TextBuf<60>              album_;
+    bool                      valid_ = false;
+    const album_art::Cover*  cover_ = nullptr;
 };
 
 // The one widget allowed to draw over whatever screen is up. A tyre losing

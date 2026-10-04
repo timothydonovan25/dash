@@ -115,6 +115,11 @@ struct Media {
     char     title[60]  = {};
     char     album[60]  = {};
     char     artist[60] = {};
+    // §11.1 tag `Y`. Streamed live from the phone's own .lrc reader, one
+    // line at a time as playback reaches it — never a whole lyric file, and
+    // never written to flash on this end. The phone owns the file and the
+    // timing; the dash only ever holds the one line it was last told.
+    char     lyric[60]  = {};
     uint8_t  state      = 0;
     uint8_t  src        = 0;
     // Zero means nothing has ever arrived, and every screen treats that as

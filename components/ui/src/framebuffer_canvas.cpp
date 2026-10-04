@@ -280,4 +280,16 @@ void FrameBufferCanvas::draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
     }
 }
 
+void FrameBufferCanvas::draw_image(int16_t x, int16_t y, const uint16_t* pixels,
+                                   int16_t w, int16_t h) {
+    if (!pixels || w <= 0 || h <= 0) return;
+    for (int16_t row = 0; row < h; ++row) {
+        const uint16_t* line = pixels + static_cast<size_t>(row) * w;
+        for (int16_t col = 0; col < w; ++col) {
+            put(static_cast<int16_t>(x + col), static_cast<int16_t>(y + row),
+                line[col]);
+        }
+    }
+}
+
 }  // namespace ui

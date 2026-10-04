@@ -216,6 +216,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         copy_into(md.title,  c.media_title);
         copy_into(md.album,  c.media_album);
         copy_into(md.artist, c.media_artist);
+        copy_into(md.lyric,  c.media_lyric);
         md.state = 1;
         md.updated_ms = now_ms;
 

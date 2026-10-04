@@ -37,6 +37,8 @@ public:
                    uint8_t scale, Align align) override;
     void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits, int16_t w,
                      int16_t h, Color c) override;
+    void draw_image(int16_t x, int16_t y, const uint16_t* pixels, int16_t w,
+                    int16_t h) override;
 
     void set_clip(const Rect& r) override { clip_ = r; clipped_ = true; }
     void clear_clip() override { clipped_ = false; }

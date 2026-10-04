@@ -35,6 +35,9 @@ struct Controls {
     char  media_title [60] = {};
     char  media_album [60] = {};
     char  media_artist[60] = {};
+    // §11.1 tag `Y`. Real phone never sends a whole file, so neither does
+    // this: the front end sets whatever one line it wants shown.
+    char  media_lyric [60] = {};
     // Total track length; 0 means unknown, same as a real §11.1 phone that
     // hasn't said. Position is not a control — `Bike::step` advances it on
     // its own while a title is set, wrapping at the duration, so the

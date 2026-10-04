@@ -20,5 +20,6 @@ struct Bitmap {
 extern const Bitmap kSong;      // 17x16, a dithered sound wave
 extern const Bitmap kAlbum;     // 14x16, a beamed note
 extern const Bitmap kArtist;    // 13x16, head and shoulders
+extern const Bitmap kLyric;     // 14x16, a speech bubble
 
 }  // namespace ui::icon

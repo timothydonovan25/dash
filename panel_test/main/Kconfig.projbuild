@@ -1,0 +1,157 @@
+menu "Panel test"
+
+    choice PANEL_TEST_IFACE
+        prompt "Panel interface"
+        default PANEL_TEST_IFACE_I80
+        help
+            8-bit 8080 is the question this test exists to answer. SPI is
+            the shipped board's mode, for proving the panel and wiring are
+            alive before blaming the parallel setup.
+
+        config PANEL_TEST_IFACE_I80
+            bool "8-bit 8080 parallel, RGB565"
+        config PANEL_TEST_IFACE_SPI
+            bool "4-line SPI, RGB666 (as the shipped board)"
+    endchoice
+
+    choice PANEL_TEST_BOARD
+        prompt "Pin preset"
+        default PANEL_TEST_BOARD_RESPIN
+        help
+            Sets the default for every pin below. Any pin can still be
+            changed on its own.
+
+        config PANEL_TEST_BOARD_RESPIN
+            bool "Respin pin map (bare S3 dev board)"
+            help
+                docs/s3-parallel-respin.md §3. Needs a board that breaks
+                out GPIO 3, 45, 46 and 48, such as a DevKitC-1.
+        config PANEL_TEST_BOARD_FEATHER_RTFT
+            bool "Adafruit Feather ESP32-S3 Reverse TFT"
+            help
+                Header pins only, clear of the on-board TFT (GPIO 40-42,
+                45, 7) and of the SPI header (35-37), which that TFT also
+                listens on. D0-D5 on A0-A5, the rest on the opposite
+                header. D12 is reset; D13 is left to its LED.
+    endchoice
+
+    config PANEL_TEST_PCLK_MHZ
+        int "Clock in MHz (WR strobe on i80, SCLK on SPI)"
+        range 1 80
+        default 10 if PANEL_TEST_IFACE_I80
+        default 20
+        help
+            Start low on jumper wires. The ILI9488's write cycle is about
+            66 ns, so i80 much above 15 MHz is out of spec even if it
+            works on the bench. The shipped board runs SPI at 40 MHz.
+
+    config PANEL_TEST_IPS
+        bool "Use the IPS init table"
+        default n
+        help
+            esp_lcd_ili9488 carries two init tables. Try this if colours
+            are washed out or inverted with the default one.
+
+    config PANEL_TEST_FLIP_BYTE_ORDER
+        bool "Flip pixel byte order (i80)"
+        depends on PANEL_TEST_IFACE_I80
+        default n
+        help
+            The test sends RGB565 high byte first, which is what the
+            ILI9488 expects on an 8-bit bus. If solid red shows as a
+            speckled or wrong colour and the ramps look scrambled, flip
+            this before suspecting the wiring.
+
+    config PANEL_TEST_PIN_WR
+        int "WR (i80) / SCLK (SPI) GPIO"
+        range 0 48
+        default 9
+
+    config PANEL_TEST_PIN_DC
+        int "D/C GPIO"
+        range 0 48
+        default 10 if PANEL_TEST_BOARD_FEATHER_RTFT
+        default 7
+
+    config PANEL_TEST_PIN_CS
+        int "CS GPIO"
+        range 0 48
+        default 11 if PANEL_TEST_BOARD_FEATHER_RTFT
+        default 48
+
+    config PANEL_TEST_PIN_RST
+        int "Panel reset GPIO (-1: software reset only)"
+        range -1 48
+        default 12 if PANEL_TEST_BOARD_FEATHER_RTFT
+        default 4
+        help
+            On the dash, reset is on the MCP23S17. On a dev board, give it
+            a pin: a panel that never saw a clean hardware reset can
+            ignore everything after it.
+
+    config PANEL_TEST_PIN_BL
+        int "Backlight enable GPIO (-1: wired permanently on)"
+        range -1 48
+        default -1
+
+    menu "i80 data lines"
+        depends on PANEL_TEST_IFACE_I80
+
+        config PANEL_TEST_PIN_D0
+            int "D0"
+            range 0 48
+            default 18 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 10
+        config PANEL_TEST_PIN_D1
+            int "D1"
+            range 0 48
+            default 17 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 40
+        config PANEL_TEST_PIN_D2
+            int "D2"
+            range 0 48
+            default 16 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 38
+        config PANEL_TEST_PIN_D3
+            int "D3"
+            range 0 48
+            default 15 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 39
+        config PANEL_TEST_PIN_D4
+            int "D4"
+            range 0 48
+            default 14 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 18
+        config PANEL_TEST_PIN_D5
+            int "D5"
+            range 0 48
+            default 8 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 3
+        config PANEL_TEST_PIN_D6
+            int "D6"
+            range 0 48
+            default 5 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 45
+        config PANEL_TEST_PIN_D7
+            int "D7"
+            range 0 48
+            default 6 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 46
+    endmenu
+
+    menu "SPI data lines"
+        depends on PANEL_TEST_IFACE_SPI
+
+        config PANEL_TEST_PIN_MOSI
+            int "MOSI"
+            range 0 48
+            default 18 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 10
+        config PANEL_TEST_PIN_MISO
+            int "MISO (-1: not wired)"
+            range -1 48
+            default 17 if PANEL_TEST_BOARD_FEATHER_RTFT
+            default 40
+    endmenu
+
+endmenu

@@ -759,6 +759,7 @@ S 1
 | `T` | Title | UTF-8, truncated to 59 bytes on arrival |
 | `A` | Artist | as above |
 | `L` | aLbum | as above (`A` was taken) |
+| `Y` | lYric | current line only, as above (`L` was taken) |
 | `S` | State | `0` stop, `1` play, `2` pause |
 | `D` | Duration | track length, decimal ASCII milliseconds; `0`/absent is unknown |
 | `P` | Position | decimal ASCII milliseconds, **an anchor, not a live value** — see below |
@@ -789,6 +790,15 @@ Rules the firmware side depends on:
   track or seek change, and otherwise only as an occasional resync beat
   (alongside `S`'s existing one) to correct for drift — never on every
   position tick.
+- **`Y` is the opposite of `T`/`A`/`L`: it changes continuously during
+  playback, once per lyric line, and is never resent as a liveness beat.**
+  The phone reads the `.lrc` sitting next to the track (same file the
+  Lyrics screen already parses) and writes the line whose timestamp the
+  playhead has just reached — nothing is chunked or reassembled, so only
+  one line is ever in flight, never a whole file. The dash never stores a
+  lyric file: it holds exactly the line it was last told, same as any
+  other `Media` field, and a title change clears it immediately rather
+  than leaving the old track's last line on screen under a new song.
 
 `Media.src` records which path fed the data, so the DIAG screen can say.
 There is only one path today; the field stays because a second one would
@@ -895,6 +905,7 @@ which the IDF creates for you.
 
 ```cpp
 struct Media { char title[60]; char album[60]; char artist[60];
+               char lyric[60];       // tag `Y`, current line only
                uint8_t state;        // 0 stop 1 play 2 pause
                uint8_t src;          // 0 none 1 phone app
                uint32_t updated_ms; };   // 0 means no media at all
@@ -919,6 +930,14 @@ and `Absent` when no ID is bound.
   so it never steals space from the speed digits. **Built already** —
   the rows are laid out and drawing, and the only missing piece is the
   radio that fills the slot.
+- **Cruise → MEDIA.** The dedicated media screen: song, album, artist and
+  a fourth `MediaRow` for the current lyric line (tag `Y`), plus an
+  `AlbumArt` widget between the speed tile and the progress ring. Art is
+  matched locally against `ui/album_art.hpp` — a handful of albums baked
+  into flash at compile time — by the album title already on the wire;
+  nothing about a cover ever crosses BLE. Blank when the album is not one
+  of the baked-in ones, which is the common case for anyone's whole
+  library.
 - **Stat → all data.** TPMS front and rear pressure and temperature.
 - **Diag → a new BLE screen.** Connection state, bonded device, RSSI,
   last line accepted on the Feed characteristic, last TPMS advertisement

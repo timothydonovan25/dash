@@ -63,10 +63,33 @@ const uint8_t kArtistBits[] = {
     0xff, 0xf8,
 };
 
+// 14 wide, two bytes a row: a filled speech bubble, for the lyric line
+// streamed live from the phone (§11.1 tag `Y`) rather than the song,
+// album or artist the other three icons sit next to.
+const uint8_t kLyricBits[] = {
+    0x3f, 0xf0,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x7f, 0xf8,
+    0x3f, 0xf0,
+    0x0f, 0xc0,
+    0x1e, 0x00,
+    0x38, 0x00,
+    0x00, 0x00,
+    0x00, 0x00,
+    0x00, 0x00,
+};
+
 }  // namespace
 
 const Bitmap kSong  {kSongBits,   17, 16};
 const Bitmap kAlbum {kAlbumBits,  14, 16};
 const Bitmap kArtist{kArtistBits, 13, 16};
+const Bitmap kLyric {kLyricBits,  14, 16};
 
 }  // namespace ui::icon

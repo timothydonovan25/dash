@@ -341,15 +341,25 @@ const char* SpeedScreen::widget_name(size_t i) const {
 // rather than glancing — see media_elapsed_ms() above, shared by both.
 namespace {
 constexpr Rect kMediaSpeed  { 20,  40, 130,  90};
+// Between the speed tile and the ring, filling what would otherwise be the
+// one patch of this screen with nothing in it. Only ever holds one of the
+// handful of albums baked into `ui/album_art.hpp` — everything else in a
+// library leaves this blank.
+constexpr Rect kMediaArt    {170,  30, 120, 120};
 constexpr Rect kMediaRing   {300,  30, 150, 150};
-constexpr Rect kMediaSong   { 20, 210, 440,  28};
-constexpr Rect kMediaAlbum  { 20, 244, 440,  28};
-constexpr Rect kMediaArtist { 20, 278, 440,  28};
+constexpr Rect kMediaSong   { 20, 188, 440,  28};
+constexpr Rect kMediaAlbum  { 20, 222, 440,  28};
+constexpr Rect kMediaArtist { 20, 256, 440,  28};
+// The line streamed live from the phone's .lrc reader (§11.1 tag `Y`) — the
+// one row here that changes on its own clock, not on a track change.
+constexpr Rect kMediaLyric  { 20, 290, 440,  28};
 }  // namespace
 
 void MediaScreen::enter(Canvas&) {
     speed_.set_bounds(kMediaSpeed.inset(4));
     speed_.configure("", 0, 5);
+
+    art_.set_bounds(kMediaArt);
 
     progress_.set_bounds(kMediaRing);
 
@@ -359,9 +369,12 @@ void MediaScreen::enter(Canvas&) {
     album_.configure(MediaRow::Kind::Album, color::kDim, 3);
     artist_.set_bounds(kMediaArtist);
     artist_.configure(MediaRow::Kind::Artist, color::kDim, 3);
+    lyric_.set_bounds(kMediaLyric);
+    lyric_.configure(MediaRow::Kind::Lyric, color::kAccent, 3);
 
-    list_[0] = &speed_;  list_[1] = &song_;   list_[2] = &album_;
-    list_[3] = &artist_; list_[4] = &progress_;
+    list_[0] = &speed_;  list_[1] = &art_;    list_[2] = &song_;
+    list_[3] = &album_;  list_[4] = &artist_; list_[5] = &lyric_;
+    list_[6] = &progress_;
 }
 
 void MediaScreen::update(const Frame& f) {
@@ -370,9 +383,11 @@ void MediaScreen::update(const Frame& f) {
     speed_.set(u::speed_for_display(f.motion.best_mph, units(), nullptr), speed_ok);
 
     const bool playing = f.media.updated_ms != 0;
+    art_.set(f.media.album, playing);
     song_.set(f.media.title, playing, f.t_ms);
     album_.set(f.media.album, playing, f.t_ms);
     artist_.set(f.media.artist, playing, f.t_ms);
+    lyric_.set(f.media.lyric, playing, f.t_ms);
     progress_.set(media_elapsed_ms(f.media, f.t_ms), f.media.duration_ms,
                  f.media.state, playing);
 }
@@ -399,7 +414,7 @@ void MediaScreen::draw_background(Canvas& c) {
                 color::kDim, 1, Align::Right);
 }
 
-WidgetList MediaScreen::widgets() { return WidgetList{list_, 5}; }
+WidgetList MediaScreen::widgets() { return WidgetList{list_, 7}; }
 
 // --- MinimalScreen ------------------------------------------------------
 //

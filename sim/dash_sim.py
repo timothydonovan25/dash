@@ -119,6 +119,9 @@ BUTTONS = [
     ("E", "select"),
 ]
 
+# Keyboard stand-ins for the pod, 1-5 left to right matching A-E above.
+KEYS = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E"}
+
 SLIDERS = [
     # name,      label,        from,   to,    resolution, default
     ("speed",   "Speed  mph",     0,   90,    1,    0),
@@ -282,6 +285,7 @@ class App:
         # --- buttons -----------------------------------------------------
         pad = tk.Frame(panel_row, bg="#0d0f14")
         pad.grid(row=0, column=1, padx=(10, 0), sticky="n")
+        self.button_widgets = {}
         for i, (key, what) in enumerate(BUTTONS):
             b = tk.Button(pad, text=f"{key}\n{what}", width=6, height=2,
                           bg="#161a22", fg="#e2e8f0",
@@ -292,9 +296,22 @@ class App:
             # debounce and long-press timing decide what the press was.
             b.bind("<ButtonPress-1>", lambda e, k=key: self.sim.send(f"btn {k} down"))
             b.bind("<ButtonRelease-1>", lambda e, k=key: self.sim.send(f"btn {k} up"))
-        tk.Label(pad, text="hold for a\nlong press", fg="#788496",
-                 bg="#0d0f14", font=("TkDefaultFont", 8),
+            self.button_widgets[key] = b
+        tk.Label(pad, text="hold for a\nlong press, or 1-5",
+                 fg="#788496", bg="#0d0f14", font=("TkDefaultFont", 8),
                  justify="center").grid(row=len(BUTTONS), column=0, pady=(6, 0))
+
+        # --- 1-5 as a stand-in for the pod ---------------------------------
+        # X11 auto-repeats a held key as KeyRelease/KeyPress pairs, not one
+        # long press, so a naive binding would send down/up on every repeat.
+        # A key held down only ever produces the outer down and the final
+        # up: each release is deferred by one tick, and the matching repeat
+        # press -- which always arrives before that tick runs -- cancels it
+        # instead of sending a fresh down.
+        self.keys_down = set()
+        self.key_release_timers = {}
+        root.bind_all("<KeyPress>", self.on_key_press)
+        root.bind_all("<KeyRelease>", self.on_key_release)
 
         # Pinned to the panel row's own (fixed) width via a propagate-off
         # frame, not left to size itself to whatever the status text
@@ -366,6 +383,37 @@ class App:
 
         root.protocol("WM_DELETE_WINDOW", self.quit)
         self.pump()
+
+    def on_key_press(self, event):
+        letter = KEYS.get(event.keysym)
+        if letter is None:
+            return
+        timer = self.key_release_timers.pop(letter, None)
+        if timer is not None:
+            self.root.after_cancel(timer)
+            return  # was an auto-repeat press, not a new press
+        if letter in self.keys_down:
+            return
+        self.keys_down.add(letter)
+        self.sim.send(f"btn {letter} down")
+        b = self.button_widgets.get(letter)
+        if b is not None:
+            b.configure(bg=b["activebackground"])
+
+    def on_key_release(self, event):
+        letter = KEYS.get(event.keysym)
+        if letter is None:
+            return
+
+        def do_release():
+            self.key_release_timers.pop(letter, None)
+            self.keys_down.discard(letter)
+            self.sim.send(f"btn {letter} up")
+            b = self.button_widgets.get(letter)
+            if b is not None:
+                b.configure(bg="#161a22")
+
+        self.key_release_timers[letter] = self.root.after(1, do_release)
 
     def poll_media(self):
         """The timer. Kept separate from the refresh so that clicking the

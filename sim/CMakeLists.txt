@@ -28,6 +28,7 @@ target_include_directories(core PUBLIC ${CORE}/include)
 add_library(ui STATIC
     ${UI}/src/font5x7.cpp    ${UI}/src/framebuffer_canvas.cpp
     ${UI}/src/icons.cpp
+    ${UI}/src/album_art.cpp  ${UI}/src/album_art_gojira.cpp
     ${UI}/src/widgets.cpp    ${UI}/src/app.cpp
     ${UI}/src/screens_cruise.cpp ${UI}/src/screens_track.cpp
     ${UI}/src/screens_stat.cpp   ${UI}/src/screens_diag.cpp

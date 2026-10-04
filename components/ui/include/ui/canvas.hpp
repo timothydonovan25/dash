@@ -76,6 +76,14 @@ public:
     virtual void draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
                              int16_t w, int16_t h, Color c) = 0;
 
+    // A full-colour image: row-major RGB565, w*h entries, straight copied in
+    // with no per-pixel colour substitution — album art, not an icon. Off-
+    // screen rows and columns are clipped like everything else; there is no
+    // scaling, because the one source of these (`ui/album_art.hpp`) is
+    // baked at the exact size it is ever drawn.
+    virtual void draw_image(int16_t x, int16_t y, const uint16_t* pixels,
+                            int16_t w, int16_t h) = 0;
+
     // Confine drawing to a rectangle, in whole-screen coordinates. What this
     // is for is text that is deliberately larger than the space it is in —
     // a marquee draws its string starting off the left edge of the window,

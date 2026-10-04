@@ -83,11 +83,13 @@ public:
 
 private:
     BigNumber     speed_;
+    AlbumArt      art_;
     MediaRow      song_;
     MediaRow      album_;
     MediaRow      artist_;
+    MediaRow      lyric_;
     MediaProgress progress_;
-    Widget*       list_[5] = {};
+    Widget*       list_[7] = {};
 };
 
 // Speed and the time, and nothing else. For a long road section where the

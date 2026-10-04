@@ -530,6 +530,49 @@ int main() {
         CHECK(s.canvas.pixel(mid_x, mid_y) != color::kText);
     }
 
+    CASE("album art matches a baked-in album by title and stays blank otherwise");
+    {
+        Screen320x480 s;
+        AlbumArt art;
+        const Rect box{50, 50, 120, 120};
+        art.set_bounds(box);
+
+        // Not one of the handful baked into ui/album_art.hpp: blank tile,
+        // same "no BLE transfer, no match, no picture" story every screen
+        // gets for the other 99% of a real library.
+        art.set("Some Other Band's Album", true);
+        s.wipe();
+        art.render(s.canvas);
+        bool any_ink = false;
+        for (int16_t y = box.y; y < box.bottom(); ++y)
+            for (int16_t x = box.x; x < box.right(); ++x)
+                if (s.canvas.pixel(x, y) != color::kBg) any_ink = true;
+        CHECK(!any_ink);
+
+        // "Terra Incognita" is one of the Gojira covers baked in by
+        // tools/make_album_art.py — the exact tag ffprobe reports for that
+        // album, which is what the phone actually sends as `L`.
+        art.set("Terra Incognita", true);
+        s.wipe();
+        art.render(s.canvas);
+        any_ink = false;
+        for (int16_t y = box.y; y < box.bottom(); ++y)
+            for (int16_t x = box.x; x < box.right(); ++x)
+                if (s.canvas.pixel(x, y) != color::kBg) any_ink = true;
+        CHECK(any_ink);
+
+        // Invalid (no media at all) blanks it even for a title that would
+        // otherwise match — same gate MediaRow uses.
+        art.set("Terra Incognita", false);
+        s.wipe();
+        art.render(s.canvas);
+        any_ink = false;
+        for (int16_t y = box.y; y < box.bottom(); ++y)
+            for (int16_t x = box.x; x < box.right(); ++x)
+                if (s.canvas.pixel(x, y) != color::kBg) any_ink = true;
+        CHECK(!any_ink);
+    }
+
     CASE("the media block and its icons come and go together");
     {
         Fixture fx;
@@ -744,12 +787,30 @@ int main() {
         std::strcpy(f.media.title, "In the Forest");
         std::strcpy(f.media.album, "Terra Incognita");
         std::strcpy(f.media.artist, "Gojira");
+        std::strcpy(f.media.lyric, "Standing here, alive");
         f.media.updated_ms = 90000;
         f.media.duration_ms = 225000;
         fx.app.update(f);
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() > 0);
+
+        // "Terra Incognita" is one of the baked-in Gojira covers, so the art
+        // tile between the speed digits and the ring must actually have
+        // drawn something, not just left its background fill.
+        bool art_ink = false;
+        for (int16_t y = 30; y < 150; ++y)
+            for (int16_t x = 170; x < 290; ++x)
+                if (s.canvas.pixel(x, y) != color::kBg) art_ink = true;
+        CHECK(art_ink);
+
+        // The lyric row (icon + scrolling text, same as song/album/artist)
+        // must have drawn too.
+        bool lyric_ink = false;
+        for (int16_t y = 290; y < 318; ++y)
+            for (int16_t x = 20; x < 460; ++x)
+                if (s.canvas.pixel(x, y) != color::kBg) lyric_ink = true;
+        CHECK(lyric_ink);
     }
 
     CASE("the config screen edits settings and reports every change upward");
