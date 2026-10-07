@@ -13,7 +13,7 @@
 // | gnss    |  0   |  12  | UART      | NMEA parse, position                |
 // | logic   |  0   |  10  | 50 Hz     | lap timer, trip, command drain      |
 // | input   |  0   |   9  | 100 Hz    | pod poll, debounce                  |
-// | render  |  1   |   6  | 30 Hz     | snapshot, widgets, panel            |
+// | render  |  1   |   6  | 60 Hz     | snapshot, widgets, panel            |
 // | logger  |  1   |   5  | drain     | blackbox ring to SD                 |
 // | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, VIN sense        |
 // | storage |  1   |   3  | 2 Hz      | card mount, hotplug, USB hand-off    |

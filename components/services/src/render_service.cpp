@@ -1,4 +1,4 @@
-// `render` — core 1, priority 6, 30 Hz.
+// `render` — core 1, priority 6, 60 Hz.
 //
 // One snapshot of every slot, one update() per screen, one repaint of
 // whatever went dirty. The screen never reads a slot itself (rule 4), which
@@ -8,10 +8,12 @@
 // rate — only the parts of the screen that changed are sent to the panel.
 //
 // On the P4 board the ILI9488 is on an 8-bit 8080 bus: a full 480x320 frame
-// is 307 kB of RGB565, about 31 ms at a 10 MHz write strobe. That is just
-// inside 30 Hz on its own, but not with anything else on the frame, so the
-// widget dirty flags stay until a measured number says otherwise
-// (docs/s3-parallel-respin.md §6). On the S3 board's SPI the same frame was
+// is 307 kB of RGB565, about 31 ms at a 10 MHz write strobe — two 60 Hz
+// periods. The widget dirty flags are what make 60 Hz possible: on the
+// SPEED screen the tach bar and the speed tile together are about 47 kB,
+// 4.7 ms, so a frame where only they move fits with room to spare. A full
+// repaint simply takes two periods, and the deadline below skips ahead
+// rather than trying to catch up. On the S3 board's SPI the same frame was
 // 92 ms, and the dirty flags were the difference between 11 fps and 30.
 //
 // A whole frame still goes out on a screen change, when an alert is
@@ -30,13 +32,15 @@
 namespace services {
 namespace {
 
-// How long the loop will sit waiting before looking at the state again. A
-// button press cuts the wait short, so this only bounds how stale a *number*
-// can be, and it is cheap: a pass that finds nothing dirty sends nothing.
+// Frames are paced to a 60 Hz deadline, about the ILI9488's own refresh
+// rate: writing faster than the panel scans changes nothing on the glass.
+// A button press cuts the wait short and is drawn at once, so the pacing
+// bounds how stale a *number* can be, not how fast a menu responds. A pass
+// that finds nothing dirty sends nothing and costs one walk of the flags.
 //
-// It is not the frame rate. Frames go out when something changes, and a
-// screen where nothing has changed costs one walk of thirteen dirty flags.
-constexpr uint32_t kPollMs = 10;
+// The deadline is kept in whole frames from a fixed start, so the 16.67 ms
+// period does not drift by rounding to the 1 ms tick.
+constexpr uint32_t kFrameHz = 60;
 
 constexpr int16_t kBandLines = bsp::kTftBandLines;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
@@ -133,18 +137,35 @@ void render_task(void* arg) {
     uint32_t frames = 0;
     uint32_t last_hz_ms = d.clock->now_ms();
 
-    for (;;) {
-        const uint32_t now = d.clock->now_ms();
+    uint32_t start_ms = d.clock->now_ms();
+    uint32_t frame_no = 1;
+    auto deadline_ms = [&] { return start_ms + frame_no * 1000u / kFrameHz; };
 
+    for (;;) {
         // Wait here rather than at the bottom of the loop, so a button press
         // is acted on the moment it arrives instead of after the rest of the
         // period has run out. That is the difference between a menu that
         // feels immediate and one that feels like it is thinking about it.
+        const uint32_t before = d.clock->now_ms();
+        const int32_t left = static_cast<int32_t>(deadline_ms() - before);
         core::nav::InputEvent ev;
-        if (wait_input_event(ev, kPollMs)) {
+        if (left > 0 && wait_input_event(ev, static_cast<uint32_t>(left))) {
             app.on_input(ev, canvas);
             while (take_input_event(ev)) app.on_input(ev, canvas);
+        } else {
+            // The period ran out. Advance to the next deadline still in the
+            // future: after a full repaint that is two frames on, not a burst
+            // of catch-up frames that would each find nothing to send.
+            const uint32_t t = d.clock->now_ms();
+            while (static_cast<int32_t>(deadline_ms() - t) <= 0) {
+                // Rebase once a second so frame_no * 1000 never overflows.
+                if (++frame_no > kFrameHz) {
+                    frame_no -= kFrameHz;
+                    start_ms += 1000;
+                }
+            }
         }
+        const uint32_t now = d.clock->now_ms();
 
         // The history grows as laps are scored, so the view is handed over
         // every frame rather than once at startup.

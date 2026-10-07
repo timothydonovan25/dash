@@ -3,8 +3,8 @@
 // A widget owns a rectangle and a value. `set()` compares against what it is
 // already showing and only marks itself dirty on a change — that is the old
 // dirty-flag optimisation, in one place instead of scattered through every
-// screen, and it is what keeps a 30 Hz repaint of a 320x480 panel affordable
-// over SPI.
+// screen, and it is what keeps a 60 Hz repaint of a 320x480 panel affordable
+// over the 8080 bus.
 #pragma once
 #include <cstddef>
 #include "ui/canvas.hpp"

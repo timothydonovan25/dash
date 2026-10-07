@@ -34,15 +34,22 @@ inline constexpr int kSpiHzImu       = 24'000'000;
 inline constexpr int kSpiHzSd        = 20'000'000;
 
 // ── Display: ILI9488 on an 8-bit 8080 bus ────────────────────────────
-// RGB565, two bytes per pixel, IM[2:0] = 011 on the FPC. Note the pin
-// swap against the S3 board's SPI wiring: FPC 10 is RS (D/C) and FPC 11 is
-// WR in 8080 mode, the reverse of SCL and D/CX in SPI mode.
-inline constexpr int kTftData[8]     = {26, 27, 28, 29, 30, 31, 32, 33};  // U16-45..52 → FPC 17..24
-inline constexpr int kTftWr          = 49;   // U16-69 → FPC 11
-inline constexpr int kTftDc          = 50;   // U16-70 → FPC 10
-inline constexpr int kTftCs          = 51;   // U16-71 → FPC 9, R41 pull-up
-inline constexpr int kTftRst         = 52;   // U16-72 → FPC 15, R3 pull-up
-inline constexpr int kTftTe          = 53;   // U16-73 ← FPC 8 FMARK, optional
+// RGB565, two bytes per pixel, IM[2:0] = 011 on the FPC. "FPC n" below is
+// the PANEL's pin n. The board connector (FPC1, AFC07-S40ECA-00, top
+// contact) takes the panel's tail flipped, after it wraps round the board
+// edge, so panel pin n lands on connector pad 41-n.
+//
+// Everything below follows the board as drawn (netlist 2026-10-06 rev 5),
+// not the first plan in p4-board-pin-map.md §2: the layout reversed the
+// data bus and rotated the control pins, and the firmware follows the
+// copper rather than the copper following the plan. The i80 bus takes any
+// GPIO for any bit, so a reversed bus costs nothing.
+inline constexpr int kTftData[8]     = {33, 32, 31, 30, 29, 28, 27, 26};  // D0..D7 = U16-52..45 → FPC 17..24
+inline constexpr int kTftRst         = 53;   // U16-73 → FPC 15, R3 pull-up
+inline constexpr int kTftWr          = 52;   // U16-72 → R30 22 Ω → FPC 11
+inline constexpr int kTftDc          = 51;   // U16-71 → FPC 10
+inline constexpr int kTftCs          = 50;   // U16-70 → FPC 9, R21 pull-up
+inline constexpr int kTftTe          = 49;   // U16-69 ← FPC 8 FMARK, optional
 inline constexpr int kTftWidth       = 320;
 inline constexpr int kTftHeight      = 480;
 // BRINGUP: 10 MHz is where panel_test starts. The ILI9488's write cycle is
@@ -70,9 +77,10 @@ inline constexpr int kGpsRunBaud     = 57600;
 inline constexpr int kImuInt1        = 13;   // U16-20
 
 // ── Vehicle inputs ───────────────────────────────────────────────────
-// Tach is an inductive pickup around the ignition lead, via 100k series /
-// 1M bias / BAT54S clamp. No filter capacitor yet, so expect ringing:
-// enforce a refractory window in firmware.
+// Tach is an inductive wrap around the spark plug lead, 5-10 V at most,
+// via 100k series (R34) / 1M bias (R43) / BAT54S clamp (D2) / 470 pF (C19).
+// That RC may swallow a short spike; see p4-board-pin-map.md §6.3. Expect
+// ringing too: enforce a refractory window in firmware.
 inline constexpr int kTachSig        = 21;   // U16-22
 inline constexpr int kTachRefractoryUs = 1500;   // tune on the bench
 inline constexpr int kWheelHallFront = 22;   // U16-23

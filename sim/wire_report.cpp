@@ -111,7 +111,7 @@ Frame riding_frame(uint32_t t_ms) {
 // when it is not. This drags it up through its whole range and back.
 Frame next_frame(const Frame& prev, int n, int of) {
     Frame f = prev;
-    f.t_ms += 33;
+    f.t_ms += 17;
 
     const float sweep = static_cast<float>(n % of) / static_cast<float>(of);
     f.engine.rpm = 2500.0f + 4000.0f * sweep;
@@ -127,8 +127,8 @@ Frame next_frame(const Frame& prev, int n, int of) {
     f.att.g_lat        = 0.62f + 0.01f * n;
     f.att.g_lon        = 0.10f + 0.005f * n;
     f.trip.odo_mi      = 4821.6f + 0.01f * n;
-    f.lap.current_ms   = prev.lap.current_ms + 33;
-    f.gnss.utc_ms      = prev.gnss.utc_ms + 33;
+    f.lap.current_ms   = prev.lap.current_ms + 17;
+    f.gnss.utc_ms      = prev.gnss.utc_ms + 17;
     return f;
 }
 
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
                         static_cast<double>(m.mean_ms()));
             if (m.mean_ms() > 0.0f) {
                 std::printf("\n  mean %.2f ms/frame → %.0f fps sustainable"
-                            "   (30 Hz needs 33.33 ms)\n",
+                            "   (60 Hz needs 16.67 ms)\n",
                             m.mean_ms(), 1000.0f / m.mean_ms());
             } else {
                 std::printf("\n  nothing moved: this screen costs no wire time "

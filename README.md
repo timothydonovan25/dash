@@ -1,6 +1,7 @@
 # dash
 
-Motorcycle dashboard firmware. ESP32-S3, ESP-IDF v6.0.2, FreeRTOS.
+Motorcycle dashboard firmware. ESP32-P4 + ESP32-C6 (Guition JC-ESP32P4-M3-C6),
+ESP-IDF v6.0.2, FreeRTOS.
 
 Start with `CLAUDE.md`, then `docs/system-architecture.md`.
 
@@ -9,5 +10,5 @@ Start with `CLAUDE.md`, then `docs/system-architecture.md`.
     ctest --test-dir build-host --output-on-failure
 
     # firmware (EIM install, so activate it first)
-    . ~/.espressif/tools/activate_idf_v6.0.2.sh
-    idf.py set-target esp32s3 && idf.py build
+    . ~/.espressif/v6.0.2/esp-idf/export.sh
+    idf.py set-target esp32p4 && idf.py build

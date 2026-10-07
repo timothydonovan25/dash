@@ -12,7 +12,7 @@
 // that is arithmetic; the per-transfer overhead is an estimate and is meant
 // to be replaced with a measured number once there is a board to measure.
 // Everything it reports is per frame, so a screen can be judged against the
-// 33.3 ms that 30 Hz allows.
+// 16.7 ms that 60 Hz allows.
 #pragma once
 #include <cstdint>
 #include "ui/blit_plan.hpp"

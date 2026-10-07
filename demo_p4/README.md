@@ -4,7 +4,7 @@ A separate ESP-IDF project (own target, own `sdkconfig.defaults`, own
 `main/`) that runs the real dashboard firmware's UI and core logic on a
 Guition JC4880P443C_I_W board (ESP32-P4 + ESP32-C6, 4.3", 480x800 IPS
 capacitive touch, camera, plastic shell) for demos, since the real CRF250F
-PCB is still at fab. It exists so the UI can be shown off without real bike
+PCB has not been built yet. It exists so the UI can be shown off without real bike
 hardware; it is not a step toward running on the real board, and it never
 becomes one.
 

@@ -1,7 +1,8 @@
 # P4 board pin map — Guition JC-ESP32P4-M3-C6 (U16)
 
-**Status.** A proposed assignment for the P4 respin netlist, not yet
-drawn. Nothing here has run. The module is a Guition JC-ESP32P4-M3-C6:
+**Status.** Drawn. The netlist, layout and gerbers of 2026-10-06
+implement this map, with the four TFT control pins rotated (§2, rows
+69–72) and audited in §6. Nothing here has run. The module is a Guition JC-ESP32P4-M3-C6:
 ESP32-P4NRW32 (32 MB in-package PSRAM, 16 MB flash) plus an
 ESP32-C6-MINI-1U-N4 on SDIO, 27 × 27 mm, 80 castellated pins.
 
@@ -74,14 +75,14 @@ the GPIO matrix. At 24 MHz or less that is comfortable.
 | 40 | — | — | |
 | 42 | GPIO24 | `D-` | USB-Serial/JTAG on the USB-C, via D3: flash, console, JTAG |
 | 43 | GPIO25 | `D+` | |
-| 45 | GPIO26 | `TFT_D0` | i80 data |
-| 46 | GPIO27 | `TFT_D1` | |
-| 47 | GPIO28 | `TFT_D2` | |
-| 48 | GPIO29 | `TFT_D3` | |
-| 49 | GPIO30 | `TFT_D4` | |
-| 50 | GPIO31 | `TFT_D5` | |
-| 51 | GPIO32 | `TFT_D6` | |
-| 52 | GPIO33 | `TFT_D7` | |
+| 45 | GPIO26 | `TFT_D7` | i80 data. **The bus is reversed as drawn:** D7 on pin 45 down to D0 on pin 52 |
+| 46 | GPIO27 | `TFT_D6` | |
+| 47 | GPIO28 | `TFT_D5` | |
+| 48 | GPIO29 | `TFT_D4` | |
+| 49 | GPIO30 | `TFT_D3` | |
+| 50 | GPIO31 | `TFT_D2` | |
+| 51 | GPIO32 | `TFT_D1` | |
+| 52 | GPIO33 | `TFT_D0` | |
 | 53 | GPIO34 | `LED_SDA` | PCA9955B, own I2C bus at 1 MHz (§2.2). Strap pin, see §2.1. |
 | 54 | GPIO35 | `FLASH` | BOOT button to GND + 10 kΩ pull-up. **Moved from pin 76.** |
 | 55 | GPIO36 | 10 kΩ pull-up | required for download mode |
@@ -89,18 +90,23 @@ the GPIO matrix. At 24 MHz or less that is comfortable.
 | 57 | GPIO38 | test pad `DEBUG_RX` | UART0 |
 | 58 | — | — | `ESP_LDO_VO4`: leave unconnected |
 | 59–68 | GPIO39–48 | — | leave unconnected (§1) |
-| 69 | GPIO49 | `TFT_WR` | i80 write strobe, **FPC 11** |
-| 70 | GPIO50 | `DC/RS` | **FPC 10** |
-| 71 | GPIO51 | `TFT_CS` | keep R41's 10 kΩ pull-up: holds CS off while the pin floats at boot |
-| 72 | GPIO52 | `TFT_RST` | keep R3's pull-up. Was on the MCP23S17 on the S3 board. Now a plain GPIO, which removes the "expander before panel" trap from `bringup.md`. |
-| 73 | GPIO53 | `TFT_TE` | panel FMARK, **FPC 8**: tearing-effect output for tear-free updates. Optional. Was `TFT_BL`; the backlight is on the PCA9955B (§2.2). |
+| 69 | GPIO49 | `TFT_TE` | panel FMARK, **FPC 8**: tearing-effect output for tear-free updates. Optional. Was `TFT_BL`; the backlight is on the PCA9955B (§2.2). |
+| 70 | GPIO50 | `TFT_CS` | **FPC 9**. Keep R21's 10 kΩ pull-up: holds CS off while the pin floats at boot |
+| 71 | GPIO51 | `DC/RS` | **FPC 10** |
+| 72 | GPIO52 | `TFT_WR` | i80 write strobe, through R30 (22 Ω) to **FPC 11** |
+| 73 | GPIO53 | `TFT_RST` | **FPC 15**. Keep R3's pull-up. Was on the MCP23S17 on the S3 board. Now a plain GPIO, which removes the "expander before panel" trap from `bringup.md`. |
 | 74 | GPIO54 | C6 reset | 10 kΩ pull-up + 1 µF to GND, as the dev board's R81/C64 |
 | 75 | CHIP_PU | `ESP_EN` | R27, C30, SW3 already on the net |
 | 76 | GPIO0 | `LED_SCL` | PCA9955B. `FLASH` was here; GPIO0 is not a boot pin. |
 | 77, 78 | — | `VCC` | 3.3 V, already wired |
 
+Rows 45–52 and 69–73 are as drawn (netlist 2026-10-06 rev 5), not as first
+planned: the layout reversed the data bus and moved the control pins when
+the panel connector was changed (§6.1). All of them are plain GPIOs and the
+i80 bus takes any GPIO for any bit, so `pins.hpp` follows the board.
+
 **No MCP23S17.** Everything it did has a home: the shift-lamp gates went
-to the PCA9955B, `TFT_RST` to GPIO52, and `NEUTRAL` and
+to the PCA9955B, `TFT_RST` to GPIO53, and `NEUTRAL` and
 `SD_CARD_DETECT` to GPIO12 and GPIO1. The shared SPI bus now carries only
 the IMU and the SD card.
 
@@ -111,7 +117,7 @@ circuits (§2.2). `MCP_CS` goes with U5.
 
 ### 2.1 Spares
 
-None outright. **GPIO53** (pin 73) is free unless `TFT_TE` is wired. The
+None outright. **GPIO49** (pin 69) is free unless `TFT_TE` is used. The
 panel drives FMARK once per refresh, so `render` can start a frame just
 after the panel's scan passes, and a moving widget does not tear. The
 datasheet says to leave FMARK open if unused, so dropping it costs
@@ -258,7 +264,10 @@ power-source test `dash-v1-netlist-review.md` §3 asked for.
 4. Test pads on pins 16, 17, 56, 57. Pins 42/43 go to the USB-C instead.
 5. New net `VIN_SENSE` with the divider and clamp in §3.
 6. Delete `PPS` (U4-13 left open) and `TFT_MISO`.
-7. **FPC1, from the panel datasheet** (pin: function → net):
+7. **FPC1, from the panel datasheet** (pin: function → net). The pin
+   numbers in this table are the **panel's**. On the drawn board the
+   connector is top-contact and the panel's tail arrives flipped, so panel
+   pin n lands on connector pad 41−n (§6.1).
 
    | FPC | Function | Net | Change from today |
    |---|---|---|---|
@@ -266,7 +275,7 @@ power-source test `dash-v1-netlist-review.md` §3 asked for.
    | 5, 16, 37 | GND | GND | none |
    | 6, 7 | IOVCC 2.8–3.3 V | VCC | none |
    | 8 | FMARK (tearing effect) | `TFT_TE` | new; open if not wired |
-   | 9 | CS | `TFT_CS` | none, keep R41 |
+   | 9 | CS | `TFT_CS` | none, keep the pull-up (R21 as drawn) |
    | **10** | **RS (D/C)** in 8080; SCL in SPI | **`DC/RS`** | **was `TFT_SCLK`** |
    | **11** | **WR** in 8080; D/CX in 4-wire SPI | **`TFT_WR`** | **was `DC/RS`** |
    | 12 | RD, "fix to IOVCC when unused" | VCC via R2 | none |
@@ -312,3 +321,139 @@ Still open from the netlist review: VCC has no source until
   `CONFIG_ESP32P4_SELECTS_REV_LESS_V3`. Read it with esptool on arrival.
 - **Antenna.** The C6 is the MINI-1U, with an IPEX connector. It needs an
   external antenna routed out of the enclosure.
+
+---
+
+## 6. Audit of the drawn board (2026-10-06)
+
+The netlist, PCB and gerbers of 2026-10-06 were audited before ordering
+in four parts: power, MCU and buses, bike inputs, and layout/DFM/BOM.
+What follows is what the audit found and what was decided. Nothing here
+has been measured.
+
+**Order package, checked 2026-10-07:** netlist `Sheet_1_2026-10-07`
+(identical to rev 5), PCB `PCB_PCB_dash-v1_2026-10-07`, gerbers generated
+2026-10-07 00:33:11 from that PCB (all 344 via drills match it to
+0.002 mm), BOM `BOM_dash-v2-(P4)_2026-10-07(1)`: 112 placed parts, about
+$31.50, FPC1 = AFC07-S40ECA-00 (C262648), with U4, U16 and H1–H10
+deliberately left out. The FPC1 re-route of PCB rev 6 shorted VIN to GND
+(a bottom-layer VIN trace under the connector's via field) among others;
+this revision clears it. DRC leaves only connector-pitch pad gaps, the
+USB-C stubs, necked-down power stubs and the copper smiley; no copper of
+different nets is closer than 0.10 mm (the routed USB pair).
+
+### 6.1 Resolved
+
+- **Panel connector was bottom-contact.** The panel sits on the bottom
+  side and its FPC wraps round the right board edge to FPC1 on the top, so
+  the fingers arrive facing up and in reverse order — confirmed with a card
+  mock-up. AFC01-S40FCA-00 (bottom contact) was replaced by **AFC07-S40ECA-00
+  (C262648, top contact, slide lock, H2.0)**, and the netlist maps panel pin
+  n to connector pad 41−n: pad 1 GND (IM2), 2–3 VCC (IM1, IM0), 5–8
+  LEDK3..LEDK1, LEDA, 17–24 D7..D0, 26 RST, 29 RD (R2), 30 WR, 31 RS,
+  32 CS, 33 TE, 34–35 VCC, 37–40 open (touch). Pad 1 sits at the bottom
+  end, opening to the right edge (PCB rev 6). Checked pin by pin, and
+  IM[2:0] = 011, 8-bit 8080.
+- **TFT control pins** (superseded by the connector change, rows 45–52 and
+  69–73 now as drawn). Earlier the board had U16-69..72 as RST, WR, DC, CS; this
+  document and `pins.hpp` had WR, DC, CS, RST. Flashed as it was, the i80
+  write strobe would have driven the panel's reset. Fixed in firmware
+  (§2 rows 69–72, `pins.hpp`), no layout change.
+- **F1 is a fuse holder only** (XF-508PVS-B). The BOM has no fuse in it.
+  A **1 A** fuse is fitted by hand. Worst-case input is about 0.45 A at
+  12 V, so 1 A clears normal running and still opens on a harness short.
+- **U16 and U4 are not in the BOM** and are hand-fitted after assembly:
+  the JC-ESP32P4-M3-C6 (80 castellated pins) and the PA1616D (LCC-20).
+  JLC ships the board without them.
+- **Buck output.** VCC = 0.6 V × (1 + 100k / 22.1k) = **3.31 V**. The
+  LMR51430's reference is 0.6 V. An 0.8 V figure gives 4.42 V and was
+  wrong.
+- **C6 antenna.** The C6 is the MINI-1U with its own IPEX, so the module
+  needs no copper keep-out. It does still need an external antenna out of
+  the enclosure (§5).
+
+- **Hold-up on VIN.** C23 went from 100 µF to **220 µF** (netlist
+  2026-10-06 rev 3, footprint now `CAP-SMD_BD6.3-L6.6-W6.6-LS7.3-FD`),
+  the largest 35 V part in the same 6.3 mm can: JIERR RV35V220M6X8
+  (LCSC C48971006) or JVJ35V220M6x8 (C46550411). The BOM line must be
+  **35 V or more** — D4 lets transients reach about 29 V. About 236 µF on
+  VIN gives roughly 9 ms from 14 V to the buck's ~4.5 V cutoff at full
+  load, 17 ms with the backlight and lamps shed: enough to stop SD writes
+  and save the odometer, not enough for an `fsync`. A 470 µF / 35 V
+  8 × 10.5 mm can (C48935389) across H2 and a ground pad would add about
+  25 ms more; charge it through 10 Ω with an SS34 bypass, or use a
+  slow-blow fuse, because its switch-on inrush is borderline for a 1 A
+  fast fuse.
+
+- **Test pads H1–H10** had a 2.54 mm through-hole header (C492400) on an
+  SMD test-pad footprint in the BOM. Removed from the BOM.
+- **U5 (TLE42754D) pin 3** is on no net, and the datasheet marks it not
+  connected. The part is grounded through its tab (pad 6), so the tab has
+  to be soldered.
+- **SW2 is rated 2 A** (HX SS-12D10L3 datasheet: AC 125 V 2 A, contact
+  resistance 100 mΩ new / 500 mΩ end of life, 5000 cycles, −25 to
+  +70 °C). The audit's 0.5 A was a guess. Against about 0.45 A worst-case
+  input that is ample. It has no DC rating and is not sealed: keep it out
+  of the spray.
+- **GPS RF trace** U4-11 to JP1 widened to 0.4 mm, about 47 Ω on this
+  stackup.
+
+- **U2 thermal vias.** Seven 0.3/0.6 mm vias added in U2's exposed pad
+  (eight with the original), all on GND (PCB 2026-10-06 rev 4). In1 is
+  solid under U2 and the Top and Bottom GND pours connect to them.
+
+### 6.2 Open — check before ordering or at bring-up
+
+- **The neutral input pulls the bike's neutral wire up.** VIN → R6
+  (2.2 kΩ) → D1 → the PC817 LED → `NEUTRAL_12V`, so with the switch open
+  the wire sits near 12 V. If anything else on the bike shares that wire
+  with a 5 V pull-up, it now sees 12 V. Measure the stock harness first.
+  4.7 kΩ for R6 still saturates the opto.
+- **USB-only power is marginal.** VIN is about 4.3–4.6 V after D5, at the
+  LMR51430's 4.5 V minimum, and the backlight LDO is in dropout.
+- **GPS VBACKUP (U4-4) is tied to VCC**, so every power-up is a cold
+  start. A supercap or coin cell through a diode buys hot starts.
+- **Mechanical.** Four 3.0 mm corner holes, about 112 mm apart, nothing in
+  the middle. Stake F1, C22, C23, L1; the push-push SD slot can eject on
+  a dirt bike.
+
+### 6.3 The tach pickup
+
+The pickup is an **inductive wrap on the spark plug lead, 5–10 V at
+most**, not the coil primary, so there is no high-voltage hazard on
+`R34_1` or U11.
+
+The risk runs the other way: **the input filter may hide the pulse.**
+R34 (100 kΩ) with C19 (470 pF) is a 47 µs time constant, and a wrap
+around the lead gives a spike of a few µs or less. A 1 µs, 10 V spike
+charges C19 to about 0.2 V, far below the P4's ~2.5 V input threshold.
+
+Both parts are 0805, so this is a bench fix, not a respin:
+
+1. Scope the pickup on the running bike, at idle and at high rpm. Note
+   peak voltage and pulse width.
+2. Start with C19 at 47 pF (about 5 µs) or not fitted.
+3. If the pulse is still too small, drop R34 to 10–22 kΩ. At 10 V into
+   10 kΩ the BAT54S (D2) clamps about 1 mA.
+4. Ringing still gives several edges per spark. The PCNT glitch filter
+   plus `bsp::kTachRefractoryUs` handle that. At 13 500 rpm, one spark
+   per revolution is a 4.4 ms period.
+
+### 6.4 Numbers from the audit
+
+| Quantity | Value |
+|---|---|
+| VCC load, idle / typical / worst | 165 / 380 / 1050 mA |
+| Input at 14 V, idle / typical / worst | 85 / 175 / 400 mA (450 mA at 12 V) |
+| PCA9955B full scale (REXT 1.91 kΩ) | 30 mA per channel |
+| U5 dissipation, backlight 90 mA | 0.8–1.0 W |
+| `VIN_SENSE` at 14 V | 2.54 V |
+| Panel full frame, RGB565 at 10 MHz | 30.7 ms; 92 % of the bus at 30 Hz |
+| Panel partial (~15 % of screen) | about 14 % of the bus at 30 Hz |
+| PCA9955B update at 500 Hz | 4.6 % of I2C at 1 MHz |
+| Pod poll at 100 Hz | about 5 % of I2C at 100 kHz |
+| GPS at 10 Hz, RMC+GGA+VTG+GSA | about 2.4 kB/s: 42 % of 57 600 baud, overruns 9600 |
+| Board | 120.35 × 68.58 mm, 4 layers, 327 vias at 0.3/0.6 mm |
+| Parts | 123: 115 top, 8 bottom (LED0–LED7), 3 through-hole |
+| BOM, qty 1, without U4/U16 | about $32, of which the IMU is $19.64 |
+

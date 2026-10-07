@@ -1,5 +1,9 @@
 # Dashboard v1 — netlist review and verified pin map
 
+> **Historical — the ESP32-S3 board.** That board is superseded by the P4
+> board (`p4-board-pin-map.md`). Kept for the reasoning; its pin map,
+> MCP23S17 notes and part numbers do not describe the current hardware.
+
 Source: `FInal_v1.net`. 167 parts, 110 nets.
 
 **Electrically the netlist is clean.** No pin appears on two nets. No net

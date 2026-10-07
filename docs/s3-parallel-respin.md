@@ -1,5 +1,9 @@
 # S3 respin — ILI9488 on an 8-bit parallel bus
 
+> **Historical — superseded.** The parallel-bus panel this planned was
+> carried into the P4 board instead of an S3 respin (`p4-board-pin-map.md`).
+> The `panel_test/` procedure in §2 still applies.
+
 **Status.** A plan, not a design. Nothing here has been drawn, ordered or
 tested. The shipped S3 board (`Sheet_1_2026-09-23.net`, 167 parts, 110
 nets — the same counts as `FInal_v1.net`) is still the platform, and

@@ -1,6 +1,12 @@
 # Dashboard V2 — System Architecture
 
-Target: ESP32-S3-WROOM-1 N16R8, ESP-IDF **v6.0.2**, FreeRTOS, C++17.
+Target: ESP32-P4 + ESP32-C6 (Guition JC-ESP32P4-M3-C6 module), ESP-IDF
+**v6.0.2**, FreeRTOS, C++17. The pin map is `p4-board-pin-map.md`.
+
+This document was argued for the ESP32-S3 board and carried to the P4
+board when the platform changed (`p4-platform-selection.md`). The
+architecture did not change; the hardware sections below (§5.1, §6, §7.6,
+§11.4, §16) describe the P4 board.
 
 **Status.** This was written as a design, before any of it existed. Most of
 it is now built and the two have been reconciled where they drifted, but
@@ -10,8 +16,8 @@ file differs from the sketch in §3 it says why.
 
 Not built, deliberately: **BLE** (§11, step 9), **CAN / `engine_service`**
 (§10.1 — the board has no transceiver), **USB mass storage** (§9.3 — the
-ownership seam exists, the TinyUSB half does not). The PCB is at fab and
-nothing here has run on hardware.
+ownership seam exists, the TinyUSB half does not). The P4 board is drawn
+and audited but not built, and nothing here has run on it.
 
 Decisions already made:
 
@@ -97,11 +103,11 @@ dash/
 │   ├── drivers/                 # one file per chip, not one directory
 │   │   ├── icm42688p            # SPI, FIFO
 │   │   ├── pa1616d              # UART only; the parser is core/nmea
-│   │   ├── mcp23s17             # SPI expander, on board
 │   │   ├── pod                  # MCP23017, handlebar, over I2C
-│   │   ├── ili9488              # esp_lcd panel, RGB666, plus the backlight
+│   │   ├── ili9488              # esp_lcd panel on the 8080 bus, RGB565
+│   │   ├── pca9955b             # 16-ch LED driver: shift lamps + backlight
 │   │   ├── engine_sense         # tach, both wheel Halls, neutral
-│   │   ├── shift_lamps          # eight bits on the expander, one PWM gate
+│   │   ├── vin_sense            # VIN divider on ADC1
 │   │   ├── nvs_storage  clock
 │   │   └── sdcard               # card mount, hotplug
 │   ├── core/                    # NO esp headers. Builds for host.
@@ -149,7 +155,9 @@ replaced the IDF's and the build died three components away inside
 `espcoredump`. The include prefix and the namespace are still `hal`.
 **`tach_capture` and `hall_capture` are one `engine_sense`**, because they
 are the same three edge counters behind one latched read; `backlight` is
-part of `ili9488`, being one LEDC channel.
+three PCA9955B channels that `ili9488` forwards to. The S3 board's
+`mcp23s17` and FET `shift_lamps` went with that board: the PCA9955B is
+both now.
 
 `core/tpms/` does not exist yet — it arrives with the radio.
 
@@ -229,7 +237,7 @@ struct Media    { char title[60], album[60], artist[60];
 struct TpmsWheel{ float psi, temp_c; uint8_t batt_pct;
                   bool alarm; uint32_t age_ms; bool valid; };
 struct Tpms     { TpmsWheel front, rear; };
-struct Health   { DevState imu, gnss, mcp_board, mcp_pod, sd, ecu,
+struct Health   { DevState imu, gnss, led_driver, mcp_pod, sd, ecu,
                             display, ble_host, phone, tpms_f, tpms_r; };
 
 struct Slots {
@@ -312,7 +320,7 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | `gnss` | 0 | 12 | 20 ms poll | NMEA parse, position |
 | `logic` | 0 | 10 | 50 Hz | lap timer, trip, fuel, command drain |
 | `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue |
-| `render` | 1 | 6 | 30 Hz | frame snapshot, widgets, TFT SPI |
+| `render` | 1 | 6 | 60 Hz | frame snapshot, widgets, 8080 panel bus |
 | `logger` | 1 | 5 | drain | ring buffer to SD |
 | `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
 | `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
@@ -323,16 +331,15 @@ was measured and left alone: 10 ms on a path whose end-to-end latency is
 140 ms, which is nothing a rider can see.
 
 The IMU is not polled. It blocks on INT1 with a timeout, and the timeout
-is a fallback rather than the design — see §8. PPS on IO18 remains wired
-and unused; `bsp/pins.hpp` says why.
+is a fallback rather than the design — see §8. PPS is not wired on the P4
+board; `bsp/pins.hpp` says why.
 
 Nine tasks of your own. Each one has a single job you can say in one line.
 Stack sizes and high-water marks go on the DIAG system screen.
 
-The IDF also creates the BLE controller task (priority 23) and the NimBLE
-host task. **Both must be pinned to core 1.** The controller outranks
-every task you write, so on core 0 it would delay the shift lights. See
-§11.4.
+The P4 has no radio. When BLE lands, the controller runs on the module's
+ESP32-C6 and the P4 runs only the NimBLE host and the ESP-Hosted
+transport. **Both go on core 1.** See §11.4.
 
 The core split therefore is: **core 0 is a real-time island** with no
 radio and no filesystem in it. **Core 1 takes everything that can afford
@@ -340,51 +347,53 @@ to be late** — display, card, Bluetooth.
 
 ### 5.1 Bus ownership
 
-- **SPI2** — IMU, SD card, MCP23S17. Three tasks touch it (`imu`,
-  `logger`, `ctrl`). This is safe. The IDF `spi_master` driver serialises
+- **SPI2** — IMU and SD card (SD in SPI mode). Two tasks touch it (`imu`,
+  `logger`). This is safe. The IDF `spi_master` driver serialises
   transactions per bus on its own. Do **not** call
-  `spi_device_acquire_bus()` anywhere, or you break that.
-- **SPI3** — TFT only. Owned by `render`. DMA, no contention.
-- **I2C0** — handlebar pod only. Owned by `input`.
+  `spi_device_acquire_bus()` anywhere, or you break that. SD write-busy
+  time can stall the IMU for tens of ms; its FIFO absorbs it.
+- **i80 LCD bus** — the panel only, 8-bit 8080 via LCD_CAM. Owned by
+  `render`. DMA, no contention.
+- **I2C0** — handlebar pod only, 100 kHz. Owned by `input`.
+- **I2C1** — PCA9955B only, 1 MHz: shift lamps from `ctrl`, backlight from
+  `keeper`. A crushed pod cable cannot take the lamps with it.
 - **UART1** — GPS only. Owned by `gnss`.
 
 ### 5.2 Latency budget
 
 Tach edge to shift lamp must stay under about 3 ms, as before. Path:
-GPIO edge → `ctrl` at 500 Hz (2 ms worst) → one MCP23S17 SPI write
-(~20 µs). `ctrl` runs at priority 18, above everything. The render task
+GPIO edge → `ctrl` at 500 Hz (2 ms worst) → one PCA9955B I2C write
+(~100 µs at 1 MHz). `ctrl` runs at priority 18, above everything. The render task
 cannot delay it, because it is on the other core and lower priority.
 
 ---
 
-## 6. Boot order and the reset trap
+## 6. Boot order
 
-`TFT_RST` is on MCP23S17 **GPB6** and `SD_CARD_DETECT` is on **GPB7**, so
-the display's reset line lives behind the SPI expander.
+On the S3 board `TFT_RST` sat behind the SPI expander, which fixed the
+boot order. On the P4 board it is a plain GPIO (GPIO53, R3 pull-up), so
+the trap is gone. What fixes the order now is the backlight: it is three
+channels of the PCA9955B, so the LED driver has to answer before the
+backlight can.
 
-R3 is a 10 k pull-up on `TFT_RST`, so the panel releases itself from reset
-whether or not the MCP ever initialises — a dead expander does not brick
-the screen. But firmware cannot issue a *controlled* reset pulse without
-the MCP, and the ILI9488 wants a real hardware reset at power-up rather
-than its internal POR. So the order is fixed:
+1. `bsp::board_init()` — SPI2, I2C0, I2C1, UART1, and the i80 LCD bus.
+2. SD card and settings — the settings decide how the rest is set up.
+3. PCA9955B — comes up with every output dark. Its reset is on the P4's
+   EN, so a software reset does not reset it; `init()` rewrites it.
+4. ILI9488 — reset pulse, panel init, backlight to a low duty.
+5. Show a boot screen at once. Do not wait for the sensors.
+6. IMU, GPS, pod, engine sense, VIN sense — each reporting to `health`.
+7. Start the tasks.
 
-1. `bsp::init_buses()` — SPI2, SPI3, I2C0, UART1, LEDC.
-2. MCP23S17 — set direction, drive all shift lamps off, hold `TFT_RST` low.
-3. ILI9488 — release `TFT_RST`, panel init, backlight PWM to a low duty.
-4. Show a boot screen at once. Do not wait for the sensors.
-5. IMU, GPS, SD, pod — each in turn, each reporting to `health`.
-6. Start the tasks.
+If step 3 fails, log it loudly, mark `led_driver` as `Fault`, and carry on.
+The panel still initialises; what you lose is the backlight and the shift
+lamps, which the health table already describes. `main/wiring.cpp` is
+this sequence.
 
-If step 2 fails, log it loudly, mark `mcp_board` as `Fault`, and carry on
-to step 3 anyway. The panel will still light. What you lose is the reset
-pulse, the shift lamps, the neutral input and card detect — all
-degradations the health table already describes.
-
-**Before the first power-on**, confirm the display FPC's IM strap pins
-against the panel datasheet. FPC pins 1-4 and 8 are unconnected in the
-netlist, and pin 8 sits between two pins tied to VCC. If that is a
-floating IM line, the panel comes up in the wrong interface mode and never
-answers SPI — which looks identical to a dead panel.
+**Before the first power-on**, confirm the FPC pinout against the panel's
+own datasheet, especially IM[2:0] (FPC 38–40, wired 011 for 8-bit 8080).
+A panel in the wrong interface mode never answers — which looks identical
+to a dead panel. `bringup.md` §0.
 
 ---
 
@@ -482,14 +491,16 @@ of scattered through every screen.
 No layout engine. Each screen file declares `static constexpr Rect`
 values at the top. You can read the whole layout of a screen in ten lines.
 
-### 7.6 ILI9488 in SPI mode — one gotcha
+### 7.6 ILI9488 on an 8-bit 8080 bus
 
-The ILI9488 does **not** accept RGB565 over 4-wire SPI. It needs 18-bit
-(RGB666, 3 bytes per pixel). TFT_eSPI hid this from you. With `esp_lcd`
-you need a panel driver that converts on the fly. Use the
-`esp_lcd_ili9488` component from the IDF component registry rather than
-writing it. Budget: a full 320×480 frame is 460 kB at 3 bytes per pixel,
-so draw in bands. Two 40-line bounce buffers in PSRAM is a good start.
+Over 4-wire SPI the ILI9488 does not accept RGB565 and needs RGB666, three
+bytes per pixel — the S3 board's problem. On the P4 board the panel is on
+an 8-bit 8080 bus, where **RGB565, two bytes per pixel,** works. Use the
+`esp_lcd_ili9488` component over an i80 IO handle rather than writing the
+command set. Budget: a full 320×480 frame is 307 kB, about 31 ms at the
+10 MHz starting write clock and about 20 ms at the panel's ~15 MHz
+ceiling, so draw in bands and send only what changed. 40-line bands are
+the starting point (`bsp::kTftBandLines`).
 
 ---
 
@@ -615,17 +626,18 @@ writes nothing at all, laps included.
 Blackbox is the same ring, kept always full. On an event (a hard landing,
 a fault, an ignition-off), flush the last N seconds to a separate file.
 
-**Hardware gap.** There is no VIN sense divider into an ADC on the current
-netlist, so the firmware cannot see the ignition turning off before the
-rail collapses. Consequences:
+**Hardware gap, half closed.** The P4 board has a VIN sense divider
+(R17/R18 to GPIO20), so firmware can now see the rail falling. It has no
+run-on capacitance sized for a flush: at about 0.4 A the bulk on VIN
+lasts a few ms, not the ~50 ms a flush needs. Consequences, still:
 
 - You cannot flush the blackbox on power loss.
 - The FAT filesystem can be left dirty by a sudden cut.
 
 Mitigation now: pre-allocate log files, call `fsync` every second, and
-never leave a file handle open across a long idle. Fix for v3: one
-resistor divider from VIN to a spare ADC pin, plus enough bulk
-capacitance on the 3V3 rail for about 50 ms of run-on.
+never leave a file handle open across a long idle. Fix for the next
+revision: enough bulk capacitance on the 3V3 rail for about 50 ms of
+run-on, with VIN sense as the trigger.
 
 ### 9.3 USB mass storage — a real constraint
 
@@ -641,9 +653,10 @@ it, you corrupt it. So storage has an explicit owner state machine:
 
 Enter HOST only when: VBUS present **and** RPM is zero **and** no logging
 session is open. Unmount cleanly, then start TinyUSB MSC over the same
-block device. Note the TPS2117 gives USB priority over the bike rail, so
-VBUS being present does **not** mean the bike is off. Do not use VBUS
-alone as the trigger. Make it a CONFIG mode action, with an automatic
+block device. USB and the bike are diode-OR'd onto VIN (D5, D6), so VBUS
+being present does **not** mean the bike is off. Do not use VBUS alone as
+the trigger; VIN sense reads about 4.5 V on USB alone and 12–14 V on the
+bike, which tells the two apart. Make it a CONFIG mode action, with an automatic
 offer when VBUS appears at zero RPM.
 
 ---
@@ -672,9 +685,10 @@ you swap them.
 
 ### 10.1 The dash cannot receive CAN
 
-**The dashboard PCB now at fab has no CAN transceiver.** Its part list
-has no SN65HVD230, no TJA1050, no MCP2551. The ESP32-S3 has a TWAI
-controller, but TWAI is logic-level TX/RX only. It cannot drive a
+**The P4 dashboard board has no CAN transceiver**, and neither did the
+S3 board before it. Its part list has no SN65HVD230, no TJA1050, no
+MCP2551. The ESP32-P4 has TWAI controllers, but TWAI is logic-level TX/RX
+only. It cannot drive a
 differential pair, and CAN levels on a 3.3 V GPIO may damage the pin.
 
 So the K-line adapter, as built, has no one to talk to until dash v2.
@@ -691,15 +705,15 @@ adapter respin. Options, ranked by what they cost you today:
 | `UartEngine` | Adapter respin, 2 dash spare pins | Next adapter revision |
 | `CanEngine` | Transceiver on dash v2 | Correct end state |
 
-The dash has three clean spare pins — U2-6, U2-31, U2-32 — which is
-enough for a UART pair with one to spare, or for TWAI TX/RX into a
-dead-bug transceiver if you want to prove the path before v2.
+The P4 board leaves module pins unconnected (`p4-board-pin-map.md`
+§2.1), which is enough for a UART pair or for TWAI TX/RX into a dead-bug
+transceiver if you want to prove the path before a respin.
 
 Design the frame format now, whichever transport wins. The transport is
 20 lines; the decode and the interface are the part worth getting right.
 
 Tach RPM stays separate and always available. It comes from the inductive
-pickup on `IO17`, not from the ECU. Keep it that way even after the
+pickup on `TACH_SIG` (GPIO21), not from the ECU. Keep it that way even after the
 adapter works, so a dead adapter never blanks your RPM.
 
 **Fuel used.** With no flow sensor and no ECU, any fuel figure is a
@@ -719,8 +733,8 @@ never connects, nothing else in the dash changes behaviour.
 
 ### 11.1 The hard constraint: no Bluetooth Classic
 
-The ESP32-S3 has **BLE 5.0 only**. It has no Bluetooth Classic radio at
-all. That rules out AVRCP, which is the normal way a car stereo gets track
+The radio is the module's ESP32-C6, which has **BLE 5 only**, like the
+S3 before it. It has no Bluetooth Classic radio at all. That rules out AVRCP, which is the normal way a car stereo gets track
 metadata, and it rules out SPP, which is the normal way to get a serial
 stream. There is no workaround in firmware.
 
@@ -871,22 +885,27 @@ connection compete for the same antenna, so duty-cycle the scan:
 
 ### 11.4 Task and core placement
 
-**This is the part that can break your shift lights.** The BLE controller
-task runs at FreeRTOS priority 23 by default, which is **above** your
-`ctrl` task at 18. If the controller runs on core 0, it can delay the
-tach-to-shift-lamp path past the 3 ms budget.
+**This is the part that can break your shift lights.** On the S3 the BLE
+controller task ran at FreeRTOS priority 23 on the same chip as `ctrl`
+(priority 18). On the P4 board the controller runs on the ESP32-C6, so
+that task is off the P4 entirely. What stays on the P4 is the NimBLE
+host and the ESP-Hosted SDIO transport, and both must stay off core 0.
 
-Pin both the controller and the NimBLE host to **core 1**:
+Pin the NimBLE host to **core 1**:
 
 ```
-CONFIG_BT_CTRL_PINNED_TO_CORE=1
-CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
 ```
+
+and check the ESP-Hosted transport task's core and priority when it
+lands. `demo_p4/` is the working reference for the transport, but it
+leaves NimBLE on core 0 — fine on a demo with no real-time path, wrong
+here. Do not copy its `sdkconfig`.
 
 Core 0 stays a clean real-time island: `ctrl`, `imu`, `gnss`, `logic`,
 `input`. Core 1 absorbs the radio alongside `render`, `logger`, `keeper`.
-The render task will be preempted sometimes and drop a frame. At 30 Hz
-with a 33 ms budget, that is invisible.
+The render task will be preempted sometimes and drop a frame. At 60 Hz
+with a 16.7 ms budget, that is invisible.
 
 Your V1 build already pinned NimBLE to core 1 for exactly this reason.
 That decision was correct. Keep it.
@@ -1107,83 +1126,71 @@ timing readout. Those were the good parts.
 
 ---
 
-## 16. Pin map — verified against `FInal_v1.net`
+## 16. Pin map — the P4 board
 
-Every line below is read from the shipped netlist, not assumed. Copy it
-into `bsp/pins.hpp` and treat that file as the only place these numbers
-appear.
+`p4-board-pin-map.md` is the full map against the module's 80 pins, and
+`bsp/pins.hpp` is the only place these numbers appear in code. The
+summary:
 
-| Function | Pin |
+| Function | GPIO |
 |---|---|
-| SPI2 MOSI / SCLK / MISO | IO11 / IO12 / IO13 |
-| CS: IMU / SD / MCP23S17 | IO14 / IO21 / IO47 |
-| SPI3 TFT MOSI / SCLK / MISO | IO10 / IO9 / IO40 |
-| TFT CS / DC | IO48 / IO7 |
-| TFT RST | MCP23S17 GPB6 |
-| Backlight PWM | IO15 |
-| GPS UART RX / TX | IO4 / IO5 |
-| GPS PPS | IO18 — wired, unused |
-| IMU data ready (INT1) | IO8 |
-| Tach input | IO17 |
-| Wheel hall front / rear | IO1 / IO2 |
-| Shift-lamp master PWM | IO16 |
-| Shift lamps 1-8 | MCP23S17 GPA0-GPA7 |
-| Neutral input (**active LOW**) | MCP23S17 GPB5 |
-| SD card detect | MCP23S17 GPB7 |
-| I2C SDA / SCL (pod) | IO41 / IO42 |
-| USB D− / D+ | IO19 / IO20 |
-| Boot button / reset | IO0 / EN |
-| Debug UART RX / TX | IO44 / IO43 |
-| Spare ESP32 pins | **IO6 (ADC1)**, IO38, IO39 |
-| Strapping pins, usable with care | IO3, IO45, IO46 |
-| Do not use | IO35, IO36, IO37 — octal PSRAM |
-| Spare MCP pins | GPB0-GPB4, INTA, INTB |
+| SPI2 MOSI / SCLK / MISO | 8 / 9 / 10 |
+| CS: IMU / SD | 7 / 11 |
+| TFT D0–D7 (8080) | 33 down to 26 — reversed as drawn |
+| TFT RST / WR / DC / CS | 53 / 52 / 51 / 50 — as drawn |
+| TFT TE | 49, optional |
+| Backlight | PCA9955B OUT8–10 |
+| Shift lamps 1–8 | PCA9955B OUT0–7 |
+| PCA9955B SDA / SCL (I2C1) | 34 / 0 |
+| GPS UART RX / TX | 2 / 3 |
+| IMU data ready (INT1) | 13 |
+| Tach input | 21 |
+| Wheel hall front / rear | 22 / 23 |
+| Neutral input (**active LOW**) | 12 |
+| SD card detect (**active LOW**) | 1 |
+| VIN sense | 20, ADC1 |
+| I2C SDA / SCL (pod) | 4 / 5 |
+| USB D− / D+ (USB-Serial/JTAG) | 24 / 25 |
+| Boot button / reset | 35 (36 pulled up) / CHIP_PU |
+| Debug UART0 TX / RX | 37 / 38, test pads |
+| C6 reset / boot | 54 / module pin 18 |
 
 Notes that change firmware:
 
-- **IO6 is the only spare pin on an ADC.** IO38 and IO39 have no ADC at
-  all, and IO1/IO2 are ADC1 channels already spent on the wheel Halls. So
-  every future analogue input — a VIN sense divider above all — has to go
-  to IO6. Do not spend it on something digital.
-- **Neutral reads LOW.** The PC817B pulls GPB5 down through R64 when the
-  bike's neutral switch closes.
+- **Neutral reads LOW.** The PC817B pulls GPIO12 down through R64 when
+  the bike's neutral switch closes.
 - **The pod has no interrupt line.** CN1 is SDA, SCL, VCC, GND only, so
   buttons must be polled. The 100 Hz `input` task is required, not a
   choice.
 - **Run the pod I2C at 100 kHz.** With 4.7 k pull-ups over 0.5 m of cable
   the rise time is roughly 470 ns. Fast mode allows 300 ns; standard mode
   allows 1000 ns. 400 kHz is out of spec on this harness.
-- **The MCP23S17 caps the shared SPI bus at 10 MHz for its own
-  transactions.** Give each device its own `spi_device_interface_config_t`
-  clock — the IMU can take 24 MHz and the SD card more, and the IDF driver
-  reconfigures per transaction.
-- GPB0-GPB4 are free. If the handlebar I2C link proves unreliable, you can
-  move the five buttons onto those pins and run the pod on the SPI
-  expander instead. That is a wiring change, not a firmware rewrite, as
-  long as `input_service` sits behind `i_gpio_expander.hpp`.
+- **Give each SPI device its own clock** in its
+  `spi_device_interface_config_t`. The IMU starts at 24 MHz and the SD at
+  20 MHz; the bus is about 90 mm long with no source termination, so drop
+  toward 10 MHz if either faults.
+- **The tach is an inductive wrap on the plug lead, 5–10 V.** The
+  R34/C19 filter may swallow its spike; `p4-board-pin-map.md` §6.3.
 
 ### 16.1 Two hardware limits the firmware must live with
 
-**No power-source sense.** There is no VIN divider to an ADC, and the
-TPS2117 `ST` pin goes only to LED10, not to a GPIO. So firmware cannot
-read battery voltage, cannot tell bike power from bench USB, and cannot
-see the ignition go off. Consequences: the `Elec` slot has no source, the
-blackbox cannot flush on power loss (§9.2), and the USB-MSC handover
-(§9.3) must trigger on "USB enumerated **and** RPM is zero" rather than a
-real test. One divider to IO6 fixes all three on the next revision.
+**Power-source sense, but no run-on.** VIN sense tells bike from USB and
+sees the ignition go off, so the `Elec` slot has a source and the USB-MSC
+handover (§9.3) can use a real test. There is still no run-on
+capacitance, so the blackbox cannot flush on power loss (§9.2).
 
-**USB bench current.** D7 feeds the 5 V rail from VUSB, so on the bench
-everything runs from the port: roughly 610 mA with all eight shift lamps
-on, against a 500 mA USB 2.0 limit. Clamp the IO16 shift-lamp PWM duty
-when there is no engine RPM. This also keeps the AMS1117 out of thermal
-trouble.
+**USB bench current.** On USB, VUSB feeds VIN through D5, so VIN sits at
+about 4.3–4.6 V — at the buck's 4.5 V minimum, with the backlight LDO in
+dropout. Eight lamps at 30 mA plus the backlight plus the P4 is close to a
+500 mA port, so `ctrl` caps lamp duty at `bsp::kShiftDutyUsbMax` whenever
+VIN sense says the supply is USB.
 
 ---
 
 ## 17. Build order
 
 1. `core/` plus `test/`. Nav, lap, geo, units, trip, shift. No hardware.
-2. `bsp/` plus `drivers/mcp23s17` plus `drivers/ili9488`. Boot to a
+2. `bsp/` plus `drivers/pca9955b` plus `drivers/ili9488`. Boot to a
    colour bar on the panel.
 3. `ui/canvas` plus `ui/widgets`. Draw a fake `Frame` with static numbers.
 4. All five modes and their screens, still on the fake frame.

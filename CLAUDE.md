@@ -4,9 +4,10 @@ Guidance for Claude Code working in this repository.
 
 ## What this is
 
-Firmware for a motorcycle dashboard on a 2023 Honda CRF250F. Custom PCB,
-ESP32-S3-WROOM-1 N16R8, 3.5" 320×480 ILI9488 over SPI, GPS, IMU, shift
-lights, SD logging, BLE.
+Firmware for a motorcycle dashboard on a 2023 Honda CRF250F. Custom PCB
+built around a Guition JC-ESP32P4-M3-C6 module (ESP32-P4 + ESP32-C6), a
+3.5" 320×480 ILI9488 on an 8-bit 8080 parallel bus, GPS, IMU, shift
+lights on a PCA9955B, SD logging, BLE.
 
 This is **v2 of the firmware, a clean rewrite.** The v1 Arduino sketch is
 not in this repo and must not be copied. Read
@@ -14,8 +15,10 @@ not in this repo and must not be copied. Read
 contract for how this code is organised, and it was argued through
 deliberately.
 
-**Hardware status: the PCB is at fab and has not been tested.** Nothing in
-this repo has run on real hardware. Treat every driver as unproven.
+**Hardware status: the P4 board is drawn, audited, and about to be
+ordered.** Nothing in this repo has run on it. Treat every driver as
+unproven. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
+board is superseded; its reviews stay in `docs/` as history.
 
 ## Build
 
@@ -23,13 +26,14 @@ Firmware. ESP-IDF **v6.0.2**, installed with EIM, so it is not on PATH
 until you source its activation script:
 
 ```bash
-. ~/.espressif/tools/activate_idf_v6.0.2.sh
-idf.py set-target esp32s3
+. ~/.espressif/v6.0.2/esp-idf/export.sh
+idf.py set-target esp32p4
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-v6 is not v5. It split the peripheral drivers into `esp_driver_*`
+The P4 module is hand-fitted after assembly, so expect `/dev/ttyACM0` only
+once U16 is on. v6 is not v5. It split the peripheral drivers into `esp_driver_*`
 components, so `REQUIRES driver` no longer brings in UART or GPIO, and it is
 stricter about `gpio_num_t` in C++ — a plain `int` pin number will not
 convert on its own.
@@ -106,51 +110,64 @@ away with `fatal error: hal/efuse_hal.h: No such file or directory` inside
 
 ## Hardware truths
 
-`components/bsp/include/bsp/pins.hpp` is generated from the shipped
-netlist and is the only place pin numbers may appear. Do not hardcode a
-GPIO anywhere else.
+`components/bsp/include/bsp/pins.hpp` is the only place pin numbers may
+appear, and `docs/p4-board-pin-map.md` is the map behind it. Do not
+hardcode a GPIO anywhere else. Where the drawn board and the original plan
+disagree, `pins.hpp` follows the board.
 
 Things that will bite you:
 
-- **TFT_RST is on the MCP23S17 (GPB6), not a GPIO.** Bring the SPI
-  expander up before the panel. R3 pulls the line high, so a dead expander
-  degrades rather than bricks the screen.
-- **Neutral reads LOW.** Opto-isolated, pulled up on GPB5.
+- **The TFT pins are as the board drew them, not as first planned.** D0..D7
+  are GPIO33 down to GPIO26 (reversed); RST 53, WR 52, DC 51, CS 50, TE 49.
+  The firmware follows the board.
+- **The panel connector is top-contact and the panel's FPC arrives
+  flipped.** The panel is on the bottom side, its tail wraps the right edge
+  to FPC1 (AFC07-S40ECA-00), so panel pin n lands on pad 41−n.
+- **The panel is 8-bit 8080, RGB565, two bytes per pixel.** Not SPI. IM[2:0]
+  = 011 on the FPC. Use the `esp_lcd_ili9488` component over an i80 IO
+  handle; do not write the command set.
+- **The backlight and the shift lamps are one chip.** PCA9955B (U2) on its
+  own I2C1 bus at 1 MHz: OUT0–7 are the lamps, OUT8–10 the backlight
+  cathodes. A dead PCA9955B is a dark screen *and* dark lamps.
+- **The PCA9955B's reset is on the P4's EN.** A software or USB-JTAG reset
+  does not reset it, so `init()` must rewrite its registers.
+- **Neutral reads LOW.** Opto-isolated (U6), pulled up by R64, on GPIO12.
 - **The handlebar button pod has no interrupt line.** It must be polled.
   100 Hz.
 - **Pod I2C runs at 100 kHz, not 400 kHz.** 4.7k pull-ups over 0.5 m of
-  cable give ~470 ns rise time. Fast mode allows 300 ns.
-- **The MCP23S17 caps at 10 MHz** on the shared SPI bus. Give each device
-  its own clock in its `spi_device_interface_config_t`.
-- **Never call `spi_device_acquire_bus()`.** Three tasks share SPI2. The
-  IDF driver serialises per-transaction on its own; acquiring the bus
-  breaks that.
-- **The BLE controller runs at priority 23**, above the real-time `ctrl`
-  task. Both the controller and the NimBLE host must be pinned to core 1.
-- **IO6 is the only spare pin with an ADC.** Do not spend it on something
-  digital. A VIN sense divider needs it.
-- **Firmware cannot tell bike power from USB power.** No VIN sense on this
-  revision. See `docs/dash-v1-netlist-review.md` §3.
-- **ILI9488 in SPI mode needs RGB666, 3 bytes per pixel.** It does not
-  accept RGB565. Use the `esp_lcd_ili9488` component; do not write it.
+  cable give ~470 ns rise time. Fast mode allows 300 ns. It is I2C0 and
+  never shares with the PCA9955B.
+- **SPI2 carries only the IMU and the SD card** (SD in SPI mode). Give each
+  device its own clock. **Never call `spi_device_acquire_bus()`** — the
+  IDF driver serialises per transaction on its own.
+- **The tach is an inductive wrap on the plug lead, 5–10 V.** R34/C19 may
+  filter its spike away; see `p4-board-pin-map.md` §6.3 before blaming
+  firmware for a dead tach.
+- **VIN sense exists on this board** (GPIO20, R17/R18), so firmware can
+  tell bike power from USB. `ctrl` caps lamp duty on USB.
+- **The P4 has no radio.** BLE lives on the module's ESP32-C6, reached over
+  internal SDIO with ESP-Hosted, as `demo_p4/` does. The C6 is a MINI-1U
+  and needs an external antenna on its IPEX.
+- **USB-C is the P4's USB-Serial/JTAG** (GPIO24/25): flashing, console and
+  JTAG. The high-speed USB pins are not connected.
 
 ## Core split
 
 Core 0 is a real-time island: `ctrl` (500 Hz, shift lights), `imu`,
 `gnss`, `logic`, `input`. No radio, no filesystem.
-Core 1 absorbs what can be late: `render` (30 Hz), `logger`, `ble`,
-`keeper`, plus the BLE controller and NimBLE host.
+Core 1 absorbs what can be late: `render` (60 Hz), `logger`, `storage`,
+`keeper`, and the BLE host when it lands.
 
 Tach edge to shift lamp must stay under 3 ms. If you add anything to
 core 0 above priority 18, you have broken that.
 
-The panel is the other budget. A whole 480x320 frame is 460 kB at the
-ILI9488's 18-bit colour — 92 ms on the wire at 40 MHz, which is 11 fps no
-matter how fast the drawing is. `render` therefore sends only the widgets
-that changed, and **anything that moves must be a widget**: background
-chrome is redrawn on a full repaint and never in between, so live data
-painted there stops moving. `test_ui` checks that a partial update lands the
-same pixels as a full repaint, which is the property that catches it.
+The panel is the other budget. A whole 480x320 frame is 307 kB in RGB565
+— about 31 ms on the 8-bit bus at the 10 MHz starting write clock, two
+whole periods of the 60 Hz render loop. `render` therefore sends only the widgets that
+changed, and **anything that moves must be a widget**: background chrome
+is redrawn on a full repaint and never in between, so live data painted
+there stops moving. `test_ui` checks that a partial update lands the same
+pixels as a full repaint, which is the property that catches it.
 
 ## Conventions
 
@@ -170,7 +187,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
-20 host test suites, all passing.
+22 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -204,14 +221,14 @@ the firmware's decisions rather than a copy of them: a simulator that
 mirrors the code instead of running it drifts, and then stops being
 evidence of anything.
 
-**`bsp/`** — pins plus `buses.cpp`: SPI2, SPI3, I2C0 and UART1 are brought
-up in one place, and a driver only ever adds a device to a bus. That matters
-most for SPI2, which three drivers share.
+**`bsp/`** — pins plus `buses.cpp`: SPI2, I2C0 (pod), I2C1 (PCA9955B),
+UART1 (GPS) and the i80 LCD bus are brought up in one place, and a driver
+only ever adds a device to a bus.
 
-**`drivers/`, `services/`, `main/`** — compile clean for esp32s3 against
-IDF v6.0.2 and link into a 440 kB `dash.bin`. **Nothing has run.** Compiling
+**`drivers/`, `services/`, `main/`** — compile clean for esp32p4 against
+IDF v6.0.2 and link into a 658 kB `dash.bin`. **Nothing has run.** Compiling
 is not working: the drivers are written against datasheets and a netlist,
-and the PCB is still at fab. See `components/drivers/README.md` for the
+and the board has not been built. See `components/drivers/README.md` for the
 specific BRINGUP holes.
 
 Nine tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
@@ -221,8 +238,9 @@ storage, keeper on core 1.
 
 - **BLE** (`services/ble/`, `core/tpms/`) — step 9 of the build order, after
   the real-time path works, so a change in shift-light timing has one
-  suspect. `sdkconfig.defaults` already pins the controller and host to
-  core 1 for when it lands. The *phone* half is written, in its own repo at
+  suspect. `CONFIG_BT_ENABLED=n` for now. On this board it means
+  ESP-Hosted to the C6, which `demo_p4/` already runs; the NimBLE host goes
+  on core 1. The *phone* half is written, in its own repo at
   `~/phone-app` — along with `tools/dash_media_peripheral.py`, which stayed
   here: a laptop peripheral speaking §11.1 so the app has a working
   counterpart and the dash will later have a known-good client. Neither end
@@ -246,14 +264,15 @@ storage, keeper on core 1.
 
 Where files differ from the §3 sketch: `tach_capture` and `hall_capture` are
 one `engine_sense` driver because they are the same three counters;
-`backlight` is part of `ili9488` because it is one LEDC channel; `theme.hpp`
+`backlight` is three PCA9955B channels that `ili9488` forwards to; `theme.hpp`
 is the semantic layer over the palette in `geometry.hpp`.
 
 ## When the board arrives
 
 `docs/bringup.md` is the procedure: what to do in what order, what you
 should see, and what each failure means. Read §0 before applying power —
-the FPC pin check and the partition table are both irreversible.
+the FPC pin check and the partition table are both irreversible — and do
+§1's rail check before hand-fitting U16 and U4. F1 needs its 1 A fuse.
 
 ## Before the board arrives
 

@@ -1,5 +1,9 @@
 # Platform selection for the next board — ESP32-P4 + ESP32-C6
 
+> **Decided.** The P4 was chosen and the board is drawn:
+> `p4-board-pin-map.md`, audited in its §6. The status paragraph below is
+> as written before that decision.
+
 **Status.** This is a design argument, not a description of anything that
 exists. No P4 hardware has been ordered and no P4 code has been written.
 The ESP32-S3 board is at fab and is still the platform; see

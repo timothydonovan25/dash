@@ -98,7 +98,7 @@ BusStatus board_init() {
     // Nothing on this board draws current from a floating pin any more. The
     // shift lamps and the backlight are on the PCA9955B, whose outputs come
     // out of power-on reset with zero current and zero duty, and the panel's
-    // reset and chip select are held inactive by R3 and R41.
+    // reset and chip select are held inactive by R3 and R21.
     BusStatus s = init_buses();
     s.lcd_bus = init_lcd_bus();
     return s;
