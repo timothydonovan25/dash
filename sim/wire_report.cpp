@@ -1,8 +1,9 @@
 // What each screen costs on the wire, per frame.
 //
-// The panel is this dashboard's budget: 460 kB a frame at 18-bit colour is
-// 92 ms at 40 MHz, so a screen is affordable or not depending on how many
-// pixels it actually sends. This runs the firmware's own App, screens and
+// The panel is this dashboard's budget: 307 kB a frame of RGB565 is about
+// 31 ms on the P4 board's 8-bit 8080 bus at 10 MHz, two 60 Hz periods, so a
+// screen is affordable or not depending on how many pixels it actually
+// sends. This runs the firmware's own App, screens and
 // widgets against real Frames, asks the widgets themselves what went dirty,
 // and prices the result with ui::wire.
 //

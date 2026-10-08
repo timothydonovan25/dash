@@ -76,6 +76,26 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 d.slots->media_ctrl.publish(
                     core::state::MediaCtrl{static_cast<uint8_t>(cmd.i)});
                 break;
+            case core::state::CommandId::BleForgetPhone:
+                d.slots->ble_request.publish(core::state::BleRequest{
+                    core::state::BleRequest::ForgetPhone});
+                break;
+            case core::state::CommandId::BlePairingMode:
+                d.slots->ble_request.publish(core::state::BleRequest{
+                    core::state::BleRequest::PairingMode});
+                break;
+            case core::state::CommandId::OtaInstallSd:
+                d.slots->ota_request.publish(core::state::OtaRequest{
+                    core::state::OtaRequest::InstallSd});
+                break;
+            case core::state::CommandId::OtaBootDevOnce:
+                d.slots->ota_request.publish(core::state::OtaRequest{
+                    core::state::OtaRequest::BootDevOnce});
+                break;
+            case core::state::CommandId::OtaPromote:
+                d.slots->ota_request.publish(core::state::OtaRequest{
+                    core::state::OtaRequest::Promote});
+                break;
             default:
                 break;
         }

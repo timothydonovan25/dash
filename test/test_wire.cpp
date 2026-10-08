@@ -140,7 +140,7 @@ int main() {
         CHECK(two.ns - one.ns == p.overhead_ns + p.cmd_bytes * 8ull * 1000000000ull / p.clock_hz);
     }
 
-    CASE("a full repaint is the 11 fps ceiling the architecture doc claims");
+    CASE("a full repaint over the S3 board's SPI is the 11 fps ceiling it hit");
     {
         wire::Panel p;
         wire::Model m(p, kBand, 40);
@@ -174,7 +174,7 @@ int main() {
         CHECK_NEAR(c.ms(), 3.8845, 0.01);
     }
 
-    CASE("a full repaint over 8080 at 10 MHz is just inside 30 Hz");
+    CASE("a full repaint over 8080 at 10 MHz takes two 60 Hz periods");
     {
         wire::Model m(wire::i80_8bit(10000000u), kBand, 40);
         m.full_repaint();

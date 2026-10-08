@@ -123,10 +123,9 @@ services::Deps& build() {
     // Not fitted, and not faults: the health table distinguishes the two so
     // the keeper does not spend the ride retrying things that do not exist.
     g_health.set_absent(core::state::Dev::Ecu);       // no CAN transceiver
-    g_health.set_absent(core::state::Dev::BleHost);   // not in this build
-    g_health.set_absent(core::state::Dev::Phone);
+    g_health.set_absent(core::state::Dev::Phone);     // until one connects
     g_health.set_absent(core::state::Dev::TpmsF);
-    g_health.set_absent(core::state::Dev::TpmsR);
+    g_health.set_absent(core::state::Dev::TpmsR);     // no TPMS scan yet (§11.2)
 
     // 5. Hand out the references. This is the only place any of these
     //    objects meet each other.

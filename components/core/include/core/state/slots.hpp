@@ -19,13 +19,16 @@ struct Slots {
     Published<Trip>     trip;       // logic
     Published<Lap>      lap;        // logic
     Published<Elec>     elec;       // keeper
-    Published<Media>    media;      // ble (not in this build)
-    Published<Tpms>     tpms;       // ble (not in this build)
+    Published<Media>    media;      // ble
+    Published<Tpms>     tpms;       // ble, once the TPMS scan exists
     Published<Health>   health;     // keeper
-    Published<BleDiag>  ble_diag;   // ble (not in this build)
+    Published<BleDiag>  ble_diag;   // ble
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
+    Published<BleRequest> ble_request; // logic, for the same reason
+    Published<Ota>        ota;         // ota
+    Published<OtaRequest> ota_request; // logic, like ble_request
 };
 
 // One coherent read of everything, taken once per frame. Screens get this
@@ -43,10 +46,11 @@ struct Frame {
     Tpms     tpms;
     Health   health;
     BleDiag  ble_diag;
+    Ota      ota;
     uint32_t t_ms = 0;
 };
 
-// Ten seqlock reads. Each slot is internally consistent; the frame as a
+// Twelve seqlock reads. Each slot is internally consistent; the frame as a
 // whole is not an instant, and does not need to be — the newest lean angle
 // and a 40 ms old lap time on the same screen is not a bug.
 Frame snapshot(const Slots& s, uint32_t t_ms);

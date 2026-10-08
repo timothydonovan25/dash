@@ -11,7 +11,7 @@ menu "Panel test"
         config PANEL_TEST_IFACE_I80
             bool "8-bit 8080 parallel, RGB565"
         config PANEL_TEST_IFACE_SPI
-            bool "4-line SPI, RGB666 (as the shipped board)"
+            bool "4-line SPI, RGB666 (as the old S3 board)"
     endchoice
 
     choice PANEL_TEST_BOARD
@@ -43,7 +43,7 @@ menu "Panel test"
         help
             Start low on jumper wires. The ILI9488's write cycle is about
             66 ns, so i80 much above 15 MHz is out of spec even if it
-            works on the bench. The shipped board runs SPI at 40 MHz.
+            works on the bench. The old S3 board ran SPI at 40 MHz.
 
     config PANEL_TEST_IPS
         bool "Use the IPS init table"
@@ -85,7 +85,7 @@ menu "Panel test"
         default 12 if PANEL_TEST_BOARD_FEATHER_RTFT
         default 4
         help
-            On the dash, reset is on the MCP23S17. On a dev board, give it
+            On the P4 dash, reset is GPIO53. On a dev board, give it
             a pin: a panel that never saw a clean hardware reset can
             ignore everything after it.
 

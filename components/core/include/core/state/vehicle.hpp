@@ -9,6 +9,7 @@
 #pragma once
 #include <cstdint>
 #include "core/lap/lap.hpp"
+#include "core/ota/ota.hpp"
 
 namespace core::state {
 
@@ -19,7 +20,7 @@ struct Engine {
     float tps_pct    = 0.0f;
     bool  ecu_online = false;   // false until the CAN adapter exists
 
-    // The lamp pattern `ctrl` just sent to the MCP23S17, and whether it is
+    // The lamp pattern `ctrl` just sent to the PCA9955B, and whether it is
     // over the limit. Published rather than recomputed by the screen: the
     // pattern carries hysteresis state, so a screen working it out again
     // from `rpm` would keep its own and could show something different from
@@ -107,10 +108,10 @@ struct Elec {
     float v3v3 = 0.0f;
 };
 
-// Written by the `ble` task, which is not in this build. The fields stay at
-// their defaults and the screens render `--`, which is exactly what they do
-// for a device that is Absent. Keeping the shape here means adding the radio
-// later does not disturb the Frame contract.
+// Written by the `ble` task, from the phone's §11.1 Feed lines through
+// core::media::apply_line(). Until a phone connects the fields stay at their
+// defaults and the screens render nothing, which is also what they show for
+// ten seconds after it leaves (core::media::kDisconnectHoldMs).
 struct Media {
     char     title[60]  = {};
     char     album[60]  = {};
@@ -156,6 +157,13 @@ struct MediaCtrl {
     uint8_t cmd = 0xFF;
 };
 
+// CONFIG's phone actions, handed from `logic` to `ble` the same way as
+// MediaCtrl: not display data, and the generation says it is a new request.
+struct BleRequest {
+    enum Op : uint8_t { None = 0, ForgetPhone, PairingMode };
+    uint8_t op = None;
+};
+
 // DIAG's Radio screen (§11.6). Unlike MediaCtrl, this *is* display data —
 // what the link itself looks like, separate from what it's carrying — so
 // it lives in Frame like Media and Tpms do.
@@ -167,6 +175,37 @@ struct BleDiag {
     // a title on a diagnostics table would just be the Media row again.
     char    last_tag       = 0;
     bool    ctrl_subscribed = false;  // phone is listening for Ctrl notifies
+    bool    encrypted      = false;   // the current link, if any, is bonded and encrypted
+    uint8_t bonds          = 0;       // phones the dash will let back in
+    uint8_t pairing_s      = 0;       // seconds left in the pairing window; 0 closed
+    // The C6's ESP-Hosted firmware, "2.12.8", or "" before the link is up.
+    // DIAG's Update screen shows it beside the dash's own version.
+    char    c6_fw[12]      = {};
+};
+
+// The two firmware slots and any update in progress (§11.7). Written by
+// `ota`; the Update screen and the boot window read it.
+struct Ota {
+    bool             known = false;            // `ota` has published once
+    core::ota::Role  role = core::ota::Role::Stable;
+    char             running_ver[core::ota::kVersionLen] = {};
+    char             running_slot[8] = {};     // "ota_0" / "ota_1"
+    core::ota::Other other = core::ota::Other::Unknown;
+    char             other_ver[core::ota::kVersionLen] = {};
+    // This boot may offer the stable/dev chooser: stable, after a power-on
+    // rather than a restart the dash asked for itself.
+    bool             boot_window = false;
+    bool             promotion_failed = false;
+    core::ota::Install      install = core::ota::Install::Idle;
+    uint8_t                 install_pct = 0;
+    core::ota::InstallError error = core::ota::InstallError::None;
+    core::ota::ImageError   image_error = core::ota::ImageError::None;
+};
+
+// The Update screen's actions, handed from `logic` to `ota` like BleRequest.
+struct OtaRequest {
+    enum Op : uint8_t { None = 0, InstallSd, BootDevOnce, Promote };
+    uint8_t op = None;
 };
 
 struct TpmsWheel {

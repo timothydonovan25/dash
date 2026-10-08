@@ -45,7 +45,7 @@ public:
 
     // The band this canvas represents within the full screen. The render
     // task sets it so a screen can draw in whole-screen coordinates while
-    // only one band exists in memory (§7.6: a full frame is 460 kB).
+    // only one band exists in memory (§7.6: a full frame is 307 kB).
     void set_origin(int16_t x, int16_t y) { ox_ = x; oy_ = y; }
 
     // Point the buffer at an arbitrary rectangle of the screen, for updating

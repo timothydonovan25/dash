@@ -98,6 +98,11 @@ const ConfigItem kItems[] = {
     // Trip
     action(0x0701, "Reset trip A", "Trip", state::CommandId::TripReset),
 
+    // Phone (§11.3). Forget drops every bond, so the next phone pairs
+    // without a window; pairing mode lets one more phone bond for a minute.
+    action(0x0A01, "Forget phone", "Phone", state::CommandId::BleForgetPhone),
+    action(0x0A02, "Pairing mode", "Phone", state::CommandId::BlePairingMode),
+
     // Blackbox. 50 Hz is about 27 MB an hour and gives the ring ten seconds
     // of slack against an SD stall; 5 Hz is a hundred. Lap markers are
     // written whatever this says.

@@ -702,7 +702,7 @@ int main() {
 
     CASE("widgets only repaint when their value changes");
     {
-        // This is the whole reason set() compares: at 30 Hz over SPI, a
+        // This is the whole reason set() compares: at 60 Hz over the 8080 bus, a
         // screen that redraws every widget every frame is the render budget.
         Fixture fx;
         Screen320x480 s;
@@ -941,6 +941,9 @@ int main() {
         f.ble_diag.rssi_dbm = -61;
         f.ble_diag.last_tag = 'P';
         f.ble_diag.ctrl_subscribed = true;
+        f.ble_diag.encrypted = true;
+        f.ble_diag.bonds = 1;
+        f.ble_diag.pairing_s = 42;
         fx.app.update(f);
         s.wipe();
         fx.app.render(s.canvas, true);
@@ -949,6 +952,122 @@ int main() {
         // the unbuilt-firmware note would otherwise still pass an ink-only
         // inequality check.
         CHECK(s.ink() > silent);
+    }
+
+    CASE("the update screen shows both slots and posts its three actions");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Diag, 5);   // UPDATE
+        CHECK(std::strcmp(fx.app.current().name(), "UPDATE") == 0);
+
+        Frame f = busy_frame();
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t unknown = s.ink();
+
+        f.ota.known = true;
+        f.ota.role = core::ota::Role::Stable;
+        std::strcpy(f.ota.running_ver, "v1.0.0");
+        std::strcpy(f.ota.running_slot, "ota_0");
+        f.ota.other = core::ota::Other::Ready;
+        std::strcpy(f.ota.other_ver, "v1.1.0-dev");
+        std::strcpy(f.ble_diag.c6_fw, "2.12.8");
+        f.ota.install = core::ota::Install::Writing;
+        f.ota.install_pct = 42;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        // Not "more ink": unknown draws "stable only" on all three rows,
+        // which outweighs a version and a percentage.
+        CHECK(s.ink() != unknown);
+
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 3);
+        CHECK(fx.sink.posted[0].id == core::state::CommandId::OtaInstallSd);
+        CHECK(fx.sink.posted[1].id == core::state::CommandId::OtaBootDevOnce);
+        CHECK(fx.sink.posted[2].id == core::state::CommandId::OtaPromote);
+    }
+
+    CASE("at power-on, no input: the banner shows, then goes, and nothing is posted");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();
+        f.t_ms = 2000;
+        f.ota.known = true;
+        f.ota.boot_window = true;
+        f.ota.other = core::ota::Other::Ready;
+        fx.app.update(f);
+        CHECK(fx.app.boot_window_active());
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t with_banner = s.ink();
+
+        f.t_ms += core::ota::kBannerMs;
+        fx.app.update(f);
+        CHECK(!fx.app.boot_window_active());
+        CHECK(fx.app.needs_full_repaint());   // what it covered comes back
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != with_banner);
+        CHECK(fx.sink.posted.empty());
+    }
+
+    CASE("the boot window swallows presses, and picking dev posts the restart");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();
+        f.t_ms = 2000;
+        f.ota.known = true;
+        f.ota.boot_window = true;
+        f.ota.other = core::ota::Other::Ready;
+        fx.app.update(f);
+
+        const core::nav::State before = fx.app.nav_state();
+        fx.app.on_input(InputEvent{Button::A, Press::Short}, s.canvas);   // opens
+        CHECK(fx.app.nav_state() == before);                                // not a mode change
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        f.t_ms += 20;
+        fx.app.update(f);
+        CHECK(!fx.app.boot_window_active());
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted[0].id == core::state::CommandId::OtaBootDevOnce);
+        CHECK(fx.app.nav_state() == before);
+    }
+
+    CASE("no boot window after a restart, and a dev image wears its tag");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();
+        f.ota.known = true;
+        f.ota.boot_window = false;
+        fx.app.update(f);
+        CHECK(!fx.app.boot_window_active());
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t stable_ink = s.ink();
+
+        f.ota.role = core::ota::Role::Dev;
+        fx.app.update(f);
+        CHECK(fx.app.needs_full_repaint());
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != stable_ink);
     }
 
     CASE("a partial update lands the same pixels as a full repaint");

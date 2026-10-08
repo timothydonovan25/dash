@@ -311,6 +311,31 @@ private:
     Widget* list_[2] = {};
 };
 
+// The two firmware slots and updating them (§11.7). Three actions, each a
+// focusable row; everything else is read-only. Every action is refused by
+// `ota` unless parked, and the status line says so.
+class UpdateScreen final : public Screen {
+public:
+    const char* name() const override { return "UPDATE"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+    uint8_t focus_count() const override { return kActions; }
+    void set_focus(uint8_t f) override { focus_ = f; }
+
+private:
+    static constexpr uint8_t kActions = 3;
+    Label   running_;
+    Label   other_;
+    Label   c6_;
+    Label   status_;
+    Table   actions_;
+    Widget* list_[5] = {};
+    uint8_t focus_ = 0;
+};
+
 // --- Config -------------------------------------------------------------
 
 class ConfigScreen final : public Screen {

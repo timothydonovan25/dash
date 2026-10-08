@@ -7,7 +7,7 @@ from the `esp_lcd_ili9488` managed component rather than being written here.
 This is the P4 board's set (docs/p4-board-pin-map.md): no MCP23S17, the
 panel on an 8-bit 8080 bus, the shift lamps and backlight on a PCA9955B.
 They compile clean for esp32p4 against IDF v6.0.2. **None of it has run.**
-The P4 board is drawn but not built, and compiling is not working: they are written against
+The P4 board is ordered but not here yet, and compiling is not working: they are written against
 the datasheets and the netlist, which is not the same as correct — every class
 is the right shape, the register maps and init orders are there, and the
 places that can only be settled on a bench are marked BRINGUP rather than

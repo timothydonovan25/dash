@@ -19,12 +19,13 @@
 
 namespace ui::wire {
 
-// One panel on one bus. The defaults are this bike's.
+// One panel on one bus. The defaults model the superseded S3 board's 40 MHz
+// SPI panel, which test_wire pins; the P4 board is i80_8bit() below.
 struct Panel {
-    // 40 MHz, from drivers/src/ili9488.cpp.
+    // 40 MHz, the S3 board's SPI clock.
     uint32_t clock_hz = 40000000u;
 
-    // RGB666. The ILI9488 in SPI mode does not accept RGB565, so every
+    // RGB666 (S3/SPI only). The ILI9488 in SPI mode does not accept RGB565, so every
     // 16-bit pixel in the band buffer becomes three bytes on the wire.
     uint8_t bytes_per_px = 3;
 

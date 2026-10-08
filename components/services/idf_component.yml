@@ -1,0 +1,12 @@
+## Managed dependencies for the radio (§11).
+##
+## The P4 has no radio of its own. NimBLE runs here and the BT controller
+## runs on the module's ESP32-C6, reached over SDIO through esp_hosted.
+## esp_wifi_remote is needed despite the name and there being no Wi-Fi: it is
+## where esp_hosted's co-processor target selection lives, and without it the
+## ESP32-C6 choice is invisible and the ESP-Hosted menu falls back to another
+## chip's defaults. Same pair, same versions, as demo_p4/main.
+dependencies:
+  espressif/esp_hosted: "2.12.8"
+  espressif/esp_wifi_remote: ">=1.3.1"
+  idf: ">=5.5"

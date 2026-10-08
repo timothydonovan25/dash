@@ -29,6 +29,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.tpms   = s.tpms.get();
     f.health = s.health.get();
     f.ble_diag = s.ble_diag.get();
+    f.ota    = s.ota.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -65,6 +66,11 @@ const char* command_name(CommandId id) {
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
         case CommandId::MediaCtrl:         return "media.ctrl";
+        case CommandId::BleForgetPhone:    return "ble.forget_phone";
+        case CommandId::BlePairingMode:    return "ble.pairing_mode";
+        case CommandId::OtaInstallSd:      return "ota.install_sd";
+        case CommandId::OtaBootDevOnce:    return "ota.boot_dev_once";
+        case CommandId::OtaPromote:        return "ota.promote";
     }
     return "?";
 }

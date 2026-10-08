@@ -17,4 +17,7 @@ idf_component_register(
          "src/delta.cpp"
          "src/gear.cpp"
          "src/power.cpp"
+         "src/media.cpp"
+         "src/pairing.cpp"
+         "src/ota.cpp"
     INCLUDE_DIRS "include")

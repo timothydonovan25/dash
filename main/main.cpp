@@ -13,22 +13,33 @@ constexpr const char* kTag = "dash";
 }
 
 #if CONFIG_BT_ENABLED
-// The BLE controller runs at priority 23, above the 500 Hz `ctrl` task, and
-// core 0 is the real-time island with 3 ms from a tach edge to a shift lamp.
-// A radio that can preempt that does not belong on it (§11.4).
+// Core 0 is the real-time island, 3 ms from a tach edge to a shift lamp, and
+// the NimBLE host runs at priority 21 — above the 500 Hz `ctrl` task. A
+// radio that can preempt that does not belong on it (§11.4).
 //
 // This is a build failure rather than a line in a document because that is
 // what it took to catch: `sdkconfig.defaults` only seeds `sdkconfig` when it
-// is first created, so adding these two lines to the defaults did nothing to
-// any tree that already had a config — and both were quietly sitting at core
-// 0. The same trap ate CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY earlier.
-// Nothing starts the radio yet, so neither had any symptom to notice.
-static_assert(CONFIG_BT_CTRL_PINNED_TO_CORE == 1,
-              "BLE controller must be pinned to core 1: run idf.py menuconfig, "
-              "or delete sdkconfig and let sdkconfig.defaults rebuild it");
+// is first created, so adding the line to the defaults did nothing to a tree
+// that already had a config, and it sat at core 0 unnoticed. The same trap
+// ate CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY earlier.
+//
+// There is no controller to pin: it runs on the C6. ESP-Hosted's transport
+// tasks have no Kconfig for their core, so `ble` lowers their priority at
+// run time instead (ble_service.cpp).
 static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
               "NimBLE host must be pinned to core 1: run idf.py menuconfig, "
               "or delete sdkconfig and let sdkconfig.defaults rebuild it");
+#if !CONFIG_BT_CONTROLLER_DISABLED
+#error "the BLE controller is the C6's, over esp_hosted; the P4 has none"
+#endif
+#endif
+
+// Stable and dev firmware (§11.7) rest on the bootloader's rollback: a dev
+// image never confirms itself, so any reset returns to stable. Without it a
+// dev build that hangs is a USB reflash. Same sdkconfig trap as above, and
+// worse, because the bootloader cannot be fixed over the air afterwards.
+#if !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+#error "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE must be on: delete sdkconfig and rebuild"
 #endif
 
 extern "C" void app_main() {
@@ -59,7 +70,11 @@ extern "C" void app_main() {
     services::start_logger(deps);
     services::start_storage(deps);
     services::start_keeper(deps);
+    services::start_ota(deps);
+    // Last, so a radio that is slow to come up, or never does, delays
+    // nothing above it (§11.8).
+    services::start_ble(deps);
 
     ESP_LOGI(kTag, "running");
-    // app_main returns and its task is deleted; the nine above carry on.
+    // app_main returns and its task is deleted; the eleven above carry on.
 }

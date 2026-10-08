@@ -204,7 +204,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     g.hdop = enough ? 9.6f / static_cast<float>(c.sats) : 99.9f;
     g.course_deg = heading_deg_;
     g.speed_mph = c.speed_mph;
-    g.utc_ms = now_ms;
+    g.utc_ms = c.utc_ms;
     slots.gnss.publish(g);
 
     // What `ble` will publish once it exists, taken meanwhile from whatever
@@ -217,25 +217,30 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         copy_into(md.album,  c.media_album);
         copy_into(md.artist, c.media_artist);
         copy_into(md.lyric,  c.media_lyric);
-        md.state = 1;
+        md.state = c.media_state;
         md.updated_ms = now_ms;
-
-        // A new title restarts the clock. There is no BLE front end here
-        // to send a real §11.1 `P`, so this advances position itself —
-        // wrapping at the duration, if one was given, is what makes the
-        // progress ring worth looking at for longer than one track.
-        if (std::strcmp(c.media_title, media_title_prev_) != 0) {
-            media_position_ms_ = 0;
-            copy_into(media_title_prev_, c.media_title);
-        } else {
-            media_position_ms_ += dt_ms;
-            if (c.media_duration_ms > 0 && media_position_ms_ >= c.media_duration_ms) {
-                media_position_ms_ %= c.media_duration_ms;
-            }
-        }
-        md.position_ms = media_position_ms_;
         md.duration_ms = c.media_duration_ms;
-        md.position_at_ms = now_ms;
+
+        if (c.media_position_known) {
+            md.position_ms = c.media_position_ms;
+            md.position_at_ms = c.media_position_at_ms;
+        } else {
+            // No player to ask, so this plays the phone's part itself: a
+            // new title restarts the clock, and wrapping at the duration,
+            // if one was given, keeps the ring worth looking at for longer
+            // than one track.
+            if (std::strcmp(c.media_title, media_title_prev_) != 0) {
+                media_position_ms_ = 0;
+                copy_into(media_title_prev_, c.media_title);
+            } else if (c.media_state == 1) {
+                media_position_ms_ += dt_ms;
+                if (c.media_duration_ms > 0 && media_position_ms_ >= c.media_duration_ms) {
+                    media_position_ms_ %= c.media_duration_ms;
+                }
+            }
+            md.position_ms = media_position_ms_;
+            md.position_at_ms = now_ms;
+        }
     }
     slots.media.publish(md);
 

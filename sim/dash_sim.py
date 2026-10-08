@@ -141,13 +141,25 @@ TOGGLES = [
     ("ecu",     "ECU online",       False),
 ]
 
-# There is no BLE in this build, so nothing on the bike writes the media
-# slot. Until the radio lands the simulator uses whatever is actually
+# The simulator has no radio, so nothing plays the phone's part of §11.1.
+# Instead it uses whatever is actually
 # playing on this machine, over MPRIS -- which is the useful half of a
 # phone anyway, and gives the block real track names rather than ones
 # chosen to fit it.
 MEDIA_POLL_MS = 1000
-MEDIA_FORMAT = "{{status}}\t{{title}}\t{{album}}\t{{artist}}"
+# position and mpris:length are microseconds; length is blank for players
+# that do not report one (most radio streams).
+MEDIA_FORMAT = ("{{status}}\t{{position}}\t{{mpris:length}}"
+                "\t{{title}}\t{{album}}\t{{artist}}")
+MEDIA_STATE = {"Playing": 1, "Paused": 2}
+
+def us_to_ms(field):
+    """An MPRIS microsecond field to whole milliseconds, or None if blank."""
+    try:
+        return int(field) // 1000
+    except ValueError:
+        return None
+
 
 COMMANDS = [
     ("lapline",   "Set finish line here"),
@@ -422,8 +434,12 @@ class App:
         self.root.after(MEDIA_POLL_MS, self.poll_media)
 
     def refresh_media(self):
-        """Ask MPRIS what is playing and forward any change to the sim."""
+        """Ask MPRIS what is playing and forward it to the sim, the way a
+        phone would: the track when it changes, and the position as an
+        anchor the dash extrapolates from."""
         line = ""
+        position_ms = duration_ms = None
+        state = 0
         if self.media_var.get():
             try:
                 r = subprocess.run(
@@ -432,17 +448,27 @@ class App:
                 # Non-zero is the normal "no players found" case, not an
                 # error worth reporting -- most of the time nothing is on.
                 if r.returncode == 0:
-                    status, _, rest = r.stdout.strip("\n").partition("\t")
+                    f = r.stdout.strip("\n").split("\t", 3)
+                    status = f[0]
                     # A stopped player still reports its last track. That is
                     # not what is playing, so it is not what the dash shows.
-                    if status != "Stopped":
-                        line = rest
+                    if status != "Stopped" and len(f) == 4:
+                        line = f[3]
+                        state = MEDIA_STATE.get(status, 1)
+                        position_ms = us_to_ms(f[1])
+                        duration_ms = us_to_ms(f[2])
             except (OSError, subprocess.SubprocessError):
                 self.media_var.set(0)
 
         if line != self.media_last:
             self.media_last = line
             self.sim.send("media " + line if line else "media")
+        if not line:
+            return
+        self.sim.send(f"set duration {duration_ms or 0}")
+        self.sim.send(f"set playstate {state}")
+        if position_ms is not None:
+            self.sim.send(f"set position {position_ms}")
 
     def pump(self):
         frame = self.sim.read_frame()

@@ -20,6 +20,9 @@ public:
     bool   present() const override { return mounted_; }
     hal::Status append(const char* path, const void* data, size_t len) override;
     hal::Status sync() override;
+    hal::Status size_of(const char* path, size_t& out) override;
+    hal::Status read_at(const char* path, size_t offset, void* buf,
+                        size_t len, size_t& got) override;
 
     void unmount();
 

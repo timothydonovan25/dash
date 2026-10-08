@@ -30,7 +30,10 @@ add_library(core STATIC
     ${CORE}/src/log.cpp
     ${CORE}/src/delta.cpp
     ${CORE}/src/gear.cpp
-    ${CORE}/src/power.cpp)
+    ${CORE}/src/power.cpp
+    ${CORE}/src/media.cpp
+    ${CORE}/src/pairing.cpp
+    ${CORE}/src/ota.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -58,7 +61,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear power wire ui)
+          attitude jump nmea input tach log delta gear power media pairing ota wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

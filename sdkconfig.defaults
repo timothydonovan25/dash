@@ -15,6 +15,12 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Stable and dev firmware in the two app slots (system-architecture §11.7).
+# Rollback is what makes dev one-shot: a dev image never confirms itself, so
+# the bootloader returns to stable on the next reset. The bootloader cannot
+# be updated over the air, so this has to be in the first image ever flashed.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # PSRAM: 32 MB in the P4NRW32's own package, hex mode.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
@@ -34,7 +40,49 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 # GPIO37/38 stays on test pads as a fallback for when USB is wedged.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# No BLE in this build. The P4 has no radio: BLE reaches the module's C6
-# over SDIO through esp_hosted, and that is step 9 of the build order, after
-# the real-time path works (§11.4). demo_p4/ shows the working setup.
-CONFIG_BT_ENABLED=n
+# BLE (§11). The P4 has no radio: NimBLE runs here as the host and the
+# controller runs on the module's ESP32-C6, reached over SDIO through
+# esp_hosted's VHCI transport. demo_p4/sdkconfig.defaults is where every line
+# of the esp_hosted block was found the hard way; do not trust its choice
+# defaults, which picked SPI and an ESP32-H2 when the top-level gate was off.
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+# The module's internal P4-to-C6 wiring, not this board's: CLK 18, CMD 19,
+# D0-D3 14-17, C6 reset on GPIO54 active high. These pins never reach
+# pins.hpp because nothing on the PCB touches them.
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1=18
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1=19
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=14
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=15
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=16
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=17
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+# Off core 0 (§11.4). main.cpp fails the build if this is ever lost.
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+# Peripheral only. No central or GATT client (they were only for AMS,
+# §11.3). Observer comes back with the TPMS scan.
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_GATT_CLIENT=n
+# One phone. `ble` tracks a single connection for Ctrl.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+# §11.1: a 60-byte title fits one write, no chunking.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
+# Bonds survive a power cycle, so the phone reconnects every ride.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y

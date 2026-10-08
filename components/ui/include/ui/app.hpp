@@ -38,6 +38,7 @@ public:
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
 
     AlertOverlay& alert() { return alert_; }
+    bool boot_window_active() const { return boot_.active(); }
 
     // Wiring for the things a screen reads but does not own.
     void set_trip_source(const IPointSource* s)  { trip_map_.set_source(s); }
@@ -74,9 +75,19 @@ private:
     SystemScreen     system_;
     BusScreen        bus_;
     RadioScreen      radio_;
+    UpdateScreen     update_;
     ConfigScreen     config_;
 
     AlertOverlay     alert_;
+
+    // The stable/dev chooser (§11.7): offered once, at the first frame that
+    // says this boot may, and never again until the next power-on.
+    core::ota::BootWindow boot_;
+    BootChooser      chooser_;
+    DevTag           dev_tag_;
+    bool             boot_seen_ = false;
+    bool             dev_running_ = false;
+    uint32_t         last_t_ms_ = 0;
     Screen*          entered_ = nullptr;
     bool             needs_full_ = true;
 };

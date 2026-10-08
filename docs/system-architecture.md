@@ -14,10 +14,11 @@ read it as the argument for the shape of the thing rather than as a
 description of the tree. `CLAUDE.md` holds the current state, and where a
 file differs from the sketch in §3 it says why.
 
-Not built, deliberately: **BLE** (§11, step 9), **CAN / `engine_service`**
+Built but never run: **BLE media** (§11, step 9 — the TPMS scan is not
+written). Not built, deliberately: **CAN / `engine_service`**
 (§10.1 — the board has no transceiver), **USB mass storage** (§9.3 — the
-ownership seam exists, the TinyUSB half does not). The P4 board is drawn
-and audited but not built, and nothing here has run on it.
+ownership seam exists, the TinyUSB half does not). The P4 board was
+ordered on 2026-10-07 and has not arrived; nothing here has run on it.
 
 Decisions already made:
 
@@ -131,7 +132,7 @@ dash/
 │   │   ├── storage_service      # NVS + SD files + USB MSC owner
 │   │   ├── keeper_service       # health retry, NVS writes, backlight
 │   │   ├── queues.cpp           # the command and input queues
-│   │   ├── ble/                 # NOT BUILT — step 9
+│   │   ├── ble_service.cpp      # Dash Media GATT over the C6; no TPMS yet
 │   │   └── engine_service/      # NOT BUILT — no CAN transceiver (§10.1)
 │   └── ui/
 │       ├── canvas.hpp  framebuffer_canvas.cpp   # primitives, clipping
@@ -324,7 +325,7 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | `logger` | 1 | 5 | drain | ring buffer to SD |
 | `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
 | `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
-| `ble` | 1 | 4 | event | media Feed characteristic, TPMS scan (§11) — **not built** |
+| `ble` | 1 | 4 | event | media Feed and Ctrl characteristics (§11); TPMS scan not written |
 
 The GPS is polled at 20 ms rather than reading a UART event queue. That
 was measured and left alone: 10 ms on a path whose end-to-end latency is
@@ -334,12 +335,13 @@ The IMU is not polled. It blocks on INT1 with a timeout, and the timeout
 is a fallback rather than the design — see §8. PPS is not wired on the P4
 board; `bsp/pins.hpp` says why.
 
-Nine tasks of your own. Each one has a single job you can say in one line.
+Ten tasks of your own. Each one has a single job you can say in one line.
 Stack sizes and high-water marks go on the DIAG system screen.
 
-The P4 has no radio. When BLE lands, the controller runs on the module's
-ESP32-C6 and the P4 runs only the NimBLE host and the ESP-Hosted
-transport. **Both go on core 1.** See §11.4.
+The P4 has no radio. The controller runs on the module's ESP32-C6, and
+the P4 runs only the NimBLE host and the ESP-Hosted transport. NimBLE is
+pinned to core 1. ESP-Hosted's tasks cannot be pinned, so `ble` lowers
+them below every core-0 task instead. See §11.4.
 
 The core split therefore is: **core 0 is a real-time island** with no
 radio and no filesystem in it. **Core 1 takes everything that can afford
@@ -791,9 +793,11 @@ Rules the firmware side depends on:
   breaking a phone app that predates it.
 - **`updated_ms` is set on every accepted line.** Screens use it as the
   "is there any media" gate.
-- **On disconnect, `ble` must publish a zeroed `Media`.** A dash still
-  showing what was playing forty minutes ago is worse than one showing
-  nothing, and nothing downstream can tell stale from current.
+- **On disconnect, `ble` must publish a zeroed `Media`** — after a
+  ten-second hold (§11.8, `core::media::kDisconnectHoldMs`), so a link that
+  blinks out and straight back keeps its title. A dash still showing what
+  was playing forty minutes ago is worse than one showing nothing, and
+  nothing downstream can tell stale from current.
 - **`P` is not resent every second of playback.** A `MediaController`
   position callback fires continuously on the phone, and turning that into
   a BLE write a second would be most of the link's traffic for a number
@@ -869,9 +873,8 @@ The dash needs two BLE roles at once:
 **Not Central, and not a GATT client.** Both were only there for AMS
 (§11.1), and dropping them is worth real flash: NimBLE and the controller
 together add about 268 kB of image and 33 kB of internal RAM as configured
-today, measured by linking them in. `CONFIG_BT_NIMBLE_ROLE_CENTRAL` and
-`CONFIG_BT_NIMBLE_GATT_CLIENT` are both still `y` in `sdkconfig` and can
-go when the radio work starts.
+today, measured by linking them in. Both are now off in `sdkconfig.defaults`, and so is the observer role
+until the TPMS scan exists.
 
 NimBLE supports this. The cost is radio time. Scanning and an active
 connection compete for the same antenna, so duty-cycle the scan:
@@ -880,8 +883,34 @@ connection compete for the same antenna, so duty-cycle the scan:
 |---|---|---|
 | Scan interval / window | 300 ms / 30 ms | 10% duty. TPMS beacons repeat, so you catch them within a few seconds. |
 | Connection interval | 100–200 ms | Metadata is not latency-critical. Long intervals save radio time and phone battery. |
-| Max connections | 2 | Phone, plus headroom. |
-| Bonding | Stored in NVS | So it reconnects without re-pairing every ride. |
+| Max connections | 1 | One phone. `ble` tracks a single connection for Ctrl, and advertising stops while it is connected. |
+| Bonding | Required, stored in NVS | The bond is the phone's identity; see below. |
+
+**Which phone gets in.** One connection means a stranger's phone holding
+it is a dash with no media, and Android rotates its address every fifteen
+minutes, so the dash cannot recognise a phone by address. Only the
+identity key that bonding exchanges does that. So the dash asks for
+encryption the moment a phone connects (`ble_gap_security_initiate`), Feed
+needs an encrypted link (`BLE_GATT_CHR_F_WRITE_ENC`), and the policy in
+`core/ble/pairing.hpp` decides who stays:
+
+- The first phone ever bonds freely — a new dash, or one whose bonds were
+  just forgotten, must be reachable without a menu.
+- After that a new phone bonds only inside CONFIG → Phone → **Pairing mode**,
+  a 60 s window that admits one phone. Opening it lets the current phone
+  go, and bonded phones are held off (not forgotten) until it closes, or
+  the rider's own phone would reconnect into the slot first.
+- A bond made outside a window is deleted and the link dropped. NimBLE may
+  only evict an old bond to make room while a window is open, so repeated
+  attempts cannot push the rider's phone out of the store.
+- A link that has not encrypted within 30 s is dropped.
+- **Forget phone** clears every bond. The phone keeps its half until the
+  rider forgets "CRF250F-Dash" in Android's Bluetooth settings too; until
+  then its encryption fails and the app says so.
+
+A Just Works bond has no MITM protection, and this is not trying to be
+security: it stops the dash's one slot going to whoever connects first.
+nRF Connect still works for bring-up; it bonds when asked.
 
 ### 11.4 Task and core placement
 
@@ -897,8 +926,14 @@ Pin the NimBLE host to **core 1**:
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
 ```
 
-and check the ESP-Hosted transport task's core and priority when it
-lands. `demo_p4/` is the working reference for the transport, but it
+The ESP-Hosted transport is the catch. Its SDIO and RPC tasks
+(`sdio_read`, `sdio_write`, `rpc_rx`, …) are created inside the component
+at priority 23 with **no core affinity**, and there is no Kconfig for
+either. Left alone, they can run on core 0 above `ctrl`. `ble` lowers each
+one by name to priority 8 once the link is up: below everything on core 0,
+so any real-time task preempts them at once, and above `render`, so the
+radio still beats the panel on core 1. It logs how many it found, which is
+how a future esp_hosted that renames them would show up. `demo_p4/` is the working reference for the transport, but it
 leaves NimBLE on core 0 — fine on a demo with no real-time path, wrong
 here. Do not copy its `sdkconfig`.
 
@@ -935,7 +970,7 @@ struct Tpms { TpmsWheel front, rear; };
 ```
 
 Both go in `Slots` as their own `Published<T>`, written only by `ble`.
-`Media` is 188 bytes, so the seqlock copy is cheap enough at 30 Hz.
+`Media` is 188 bytes, so the seqlock copy is cheap enough at 60 Hz.
 
 Add to `Health`: `ble_host`, `phone`, `tpms_f`, `tpms_r`. A TPMS wheel is
 `Degraded` when its reading is older than about 5 minutes while moving,
@@ -962,46 +997,93 @@ and `Absent` when no ID is bound.
   last line accepted on the Feed characteristic, last TPMS advertisement
   age per wheel, decoder hit and miss counts. This screen is what you will actually use to work out
   why a sensor is not showing up.
-- **Config.** Forget phone, pairing mode, learn front sensor, learn rear
-  sensor, TPMS low-pressure alarm thresholds.
+- **Config.** Forget phone and pairing mode (built, §11.3); learn front
+  sensor, learn rear sensor, TPMS low-pressure alarm thresholds (with TPMS).
 
 A TPMS low-pressure alarm should be a mode-independent overlay, not a
 screen. Losing air is worth interrupting the trip map for.
 
-### 11.7 Partition table and sdkconfig
+### 11.7 Partition table, firmware slots and updates
 
-BLE adds roughly 300 kB of flash and needs NVS space for bonding keys. You
-have 16 MB, so this is easy, but the table must be set before you flash
-the first time. Suggested `partitions.csv`:
-
-```
-# name     type  subtype   offset    size
-nvs        data  nvs       0x9000    0x10000    # 64K — settings + BLE bonds
-phy_init   data  phy       0x19000   0x1000
-coredump   data  coredump  0x1a000   0x10000    # 64K — panic dumps for DIAG
-factory    app   factory   0x30000   0x600000   # 6M
-```
-
-No OTA partitions. With no Wi-Fi, an update means USB-C, and you already
-wanted to flash over USB. BLE OTA is possible later, but it is slow and it
-is not worth two 6 MB partitions today. If you think you may want it, add
-`ota_0` and `ota_1` now — changing the table later wipes NVS, which means
-losing your odometer.
-
-`sdkconfig.defaults` additions:
+The table is `partitions.csv`, and it must be final before the first flash:
+moving NVS later erases it, and NVS holds the odometer.
 
 ```
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
-CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2
-CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
-CONFIG_BT_CTRL_PINNED_TO_CORE=1
-CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+# name     type  subtype   offset     size
+nvs        data  nvs       0x9000     0x10000    # settings, odometer, BLE bonds
+otadata    data  ota       0x19000    0x2000     # which app slot boots
+coredump   data  coredump  0x1B000    0x15000
+ota_0      app   ota_0     0x30000    0x600000   # 6 MB
+ota_1      app   ota_1     0x630000   0x600000   # 6 MB
+slave_fw   data  0x40      0xC30000   0x200000   # the C6's firmware
+# 0xE30000-0x1000000 (1.8 MB) unallocated: room for an assets partition
 ```
+
+`dash.bin` is about 1.1 MB, so a slot is under a fifth full.
+
+**Stable and dev.** The two slots hold a stable image and a dev image. Which
+is which is never stored: it is read off the bootloader's own state for the
+running slot (`core/ota/`, host-tested), because that is the one record a
+crash cannot leave out of date. It rests on
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, which `main.cpp` refuses to build
+without, and which has to be in the first image flashed: the bootloader is
+not updated over the air.
+
+- **Stable** is whatever runs with state Valid, or with no state at all.
+  `idf.py flash` erases otadata, so a USB flash is always the new stable:
+  USB is the recovery path.
+- **Dev** is the other slot. "Boot dev once" sets it to boot and restarts.
+  The bootloader marks it pending, and a dev image never confirms itself,
+  so the next reset of any kind (crash, watchdog, ignition) marks it
+  aborted and boots stable. A dev build that hangs costs one key cycle.
+- **Promote** does the same boot with a marker in NVS (`ota`/0x0001) naming
+  the slot. That image confirms itself once it has run the dash for 20 s
+  (render loop drawing, `ctrl` publishing) and becomes stable. If it dies
+  first, the bootloader returns to the old stable, which finds the marker,
+  clears it, and DIAG → Update says the promotion failed.
+- Dev cannot install anything: IDF refuses `esp_ota_begin` while the running
+  image is pending. Installs run from stable and only ever write the dev
+  slot, so **stable is never overwritten while it is the fallback.**
+
+**Choosing at power-on.** Stable boots normally, with no added boot time,
+and for the first 3 s shows "STABLE · any button: choose firmware". No press
+and the ride carries on. A press opens a two-row chooser (Stable / Dev, C/D
+to move, E to start), which falls back to stable after 10 s. Only after a
+power-on or brownout, never after a restart the dash asked for. A dev image
+wears a red DEV tag in the top-right corner of every screen.
+
+**Getting an image into the dev slot**, from DIAG → Update:
+
+| Path | How |
+|---|---|
+| SD card | `update/dash.bin` on the card → Install from SD. Header checked first (chip, project, size), then written a sector at a time, then the image's own hash checked by `esp_ota_end`. |
+| USB | `tools/flash_dev.py` reads otadata, works out stable as the bootloader would, and writes the other slot without touching otadata. (`idf.py flash` is the other USB path: it makes a new stable.) |
+| Wi-Fi | Not built. Needs `CONFIG_ESP_HOSTED_CP_WIFI` in the C6 firmware, credentials in NVS, and an HTTP fetch into the same install path. |
+
+Every write is refused unless parked (not moving, engine off): an erase
+stops the flash cache on both cores, long enough to break the 3 ms
+tach-to-lamp budget.
+
+**What the two images share, and the rules for it:**
+
+- **NVS.** Dev must never write anything stable cannot read. CONFIG keys are
+  permanent IDs, enforced by `test_config`'s shipped-key list; any new NVS
+  data follows the same rule.
+- **The C6.** Its firmware is in one place, and an upgrade outlives the dev
+  image that pushed it. `c6_firmware.cpp` refuses to move the C6 across an
+  ESP-Hosted major version from a dev image.
+
+**The bootloader is nearly full**: 0x5B70 of 0x6000 with rollback, about
+1.1 kB free. If it ever overflows, drop `CONFIG_BOOTLOADER_LOG_LEVEL` to
+WARN before moving the partition table — and only before the first flash.
+
+`sdkconfig.defaults` carries the whole block, with comments: the
+ESP-Hosted SDIO settings copied from `demo_p4/` (do not trust that
+component's choice defaults), then NimBLE as host only
+(`CONFIG_BT_CONTROLLER_DISABLED=y`, since the controller is the C6's),
+pinned to core 1, peripheral and broadcaster roles only, one connection,
+MTU 256, bonds persisted to NVS. The partition table already has `slave_fw`
+for the C6's own firmware.
 
 ### 11.8 Failure rules
 
@@ -1014,6 +1096,9 @@ CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
   able to overflow a widget.
 - If the phone drops, keep the last title on screen for about 10 seconds,
   then clear it. Do not leave a stale song showing for the whole ride.
+- NimBLE's callbacks run on its host task and only queue what happened.
+  `ble` drains the queue and is the one writer of `media` and `ble_diag`.
+  A full queue drops the event and counts it. It never waits.
 
 ---
 
@@ -1232,7 +1317,7 @@ erases NVS, and NVS holds your odometer.
 - Which TPMS sensors? The decoder is trivial once you know the layout, but
   it is guesswork until you have a sensor to sniff. Buy the set before you
   write `core/tpms/`.
-- Do you want OTA over BLE later? If there is any chance, add `ota_0` and
-  `ota_1` to the partition table now. Adding them later wipes NVS.
+- OTA over Wi-Fi through the C6 (§11.7)? The slots, the install path and
+  the Update screen are built; only the transport is missing.
 - Should the media strip show on any screen other than Cruise big-speed?
   Track mode should probably stay clean.

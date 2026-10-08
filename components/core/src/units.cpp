@@ -6,7 +6,7 @@ namespace {
 
 // Everything here formats with integer maths rather than snprintf("%f").
 //
-// Two reasons. The render task walks every widget at 30 Hz and this is on
+// Two reasons. The render task walks every widget at 60 Hz and this is on
 // that path. More importantly, ESP-IDF can be built against newlib-nano,
 // where `%f` silently prints nothing at all — a dashboard that shows blank
 // speeds only on a release build is a bad afternoon. Integer digits cannot

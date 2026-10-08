@@ -1,12 +1,12 @@
 // Engine data, from two sources that must not be confused.
 //
-// `IEngine` is the ECU. The dash cannot talk to it yet: the PCB at fab has
+// `IEngine` is the ECU. The dash cannot talk to it yet: the P4 board has
 // no CAN transceiver, and the K-line adapter's CANH/CANL run through an
 // SN65HVD230 so those wires cannot be repurposed as a UART without a respin
 // (§10.1). `NullEngine` is therefore what ships today, and every screen
 // already renders `--` for an offline ECU.
 //
-// `IEngineSense` is the inductive pickup on IO17, the neutral switch and the
+// `IEngineSense` is the inductive pickup on TACH_SIG (GPIO21), the neutral switch and the
 // two wheel sensors. It is always available and owes nothing to the ECU.
 // Keep it that way even after the adapter works, so a dead adapter never
 // blanks the rider's RPM.
@@ -73,7 +73,7 @@ public:
     // One latched read, so the counts and the timestamp agree. Reading them
     // separately at 500 Hz is how you get an RPM spike every few seconds.
     //
-    // Neutral reads LOW on the wire — opto-isolated, pulled up on GPB5. The
+    // Neutral reads LOW on the wire — opto-isolated, pulled up by R64 on GPIO12. The
     // driver inverts it here so nothing above ever has to know that.
     virtual Status read(Counts& out) = 0;
 };

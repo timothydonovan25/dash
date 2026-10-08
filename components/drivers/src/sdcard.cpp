@@ -5,6 +5,7 @@
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
 #include <cstring>
@@ -122,6 +123,39 @@ hal::Status SdCard::append(const char* path, const void* data, size_t len) {
 
     if (++unsynced_ >= kSyncEveryWrites) return sync();
     return hal::Status::Ok;
+}
+
+hal::Status SdCard::size_of(const char* path, size_t& out) {
+    out = 0;
+    if (!mounted_) return hal::Status::NotPresent;
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    struct stat st;
+    if (stat(full, &st) != 0) return hal::Status::NotPresent;
+    out = static_cast<size_t>(st.st_size);
+    return hal::Status::Ok;
+}
+
+hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
+                            size_t len, size_t& got) {
+    got = 0;
+    if (!mounted_) return hal::Status::NotPresent;
+    if (!path || !buf) return hal::Status::Unsupported;
+    // Its own FILE*, never the logger's: the two run on different tasks,
+    // and FATFS in IDF is reentrant but a shared FILE* is not.
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    FILE* f = std::fopen(full, "rb");
+    if (!f) return hal::Status::NotPresent;
+    hal::Status s = hal::Status::Ok;
+    if (std::fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
+        s = hal::Status::IoError;
+    } else {
+        got = std::fread(buf, 1, len, f);
+        if (got < len && std::ferror(f)) s = hal::Status::IoError;
+    }
+    std::fclose(f);
+    return s;
 }
 
 hal::Status SdCard::sync() {

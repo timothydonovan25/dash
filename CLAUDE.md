@@ -15,8 +15,9 @@ not in this repo and must not be copied. Read
 contract for how this code is organised, and it was argued through
 deliberately.
 
-**Hardware status: the P4 board is drawn, audited, and about to be
-ordered.** Nothing in this repo has run on it. Treat every driver as
+**Hardware status: the P4 board was ordered on 2026-10-07** (JLCPCB,
+top side assembled) **and has not arrived.** Nothing in this repo has run
+on it. Treat every driver as
 unproven. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
 board is superseded; its reviews stay in `docs/` as history.
 
@@ -93,9 +94,10 @@ components/ui/         canvas, widgets, screens, render task
 test/                  host build, plain CMake + ctest
 docs/                  architecture, hardware reviews, bring-up
 tools/                 host-side helpers, e.g. the BLE peripheral stand-in
+v2 pcb files/          the gerbers, BOM and pick-and-place JLCPCB built from
 ```
 
-The Android companion app is **not in this repo.** It lives in `~/phone-app`,
+The Android companion app is **not in this repo.** It lives in `~/phone`,
 its own Gradle/Kotlin tree, because nothing here builds it and the only thing
 the two share is the §11.1 GATT contract in `docs/system-architecture.md`.
 That document is still the contract, and it stays here.
@@ -147,7 +149,8 @@ Things that will bite you:
   tell bike power from USB. `ctrl` caps lamp duty on USB.
 - **The P4 has no radio.** BLE lives on the module's ESP32-C6, reached over
   internal SDIO with ESP-Hosted, as `demo_p4/` does. The C6 is a MINI-1U
-  and needs an external antenna on its IPEX.
+  and needs an external antenna on its IPEX. Never call `start_ble` earlier
+  in the boot order: it is last so a radio that will not come up delays nothing.
 - **USB-C is the P4's USB-Serial/JTAG** (GPIO24/25): flashing, console and
   JTAG. The high-speed USB pins are not connected.
 
@@ -156,7 +159,7 @@ Things that will bite you:
 Core 0 is a real-time island: `ctrl` (500 Hz, shift lights), `imu`,
 `gnss`, `logic`, `input`. No radio, no filesystem.
 Core 1 absorbs what can be late: `render` (60 Hz), `logger`, `storage`,
-`keeper`, and the BLE host when it lands.
+`keeper`, `ota`, `ble` and the NimBLE host.
 
 Tach edge to shift lamp must stay under 3 ms. If you add anything to
 core 0 above priority 18, you have broken that.
@@ -186,8 +189,8 @@ dependency to install; swap it for Catch2 if you want more.
 
 ## Current state
 
-Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
-22 host test suites, all passing.
+Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
+the media half of step 9 is written. 25 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -204,6 +207,11 @@ Build-order steps 1, 3, 4 and the host-testable half of 8 are done.
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
 - `log/` the blackbox ring, its CSV format, and the rate decimator
+- `media/` the §11.1 Feed line parser: bounded, UTF-8-safe, `P` as an anchor
+- `ota/` stable/dev slot roles from the bootloader's rollback state, the
+  image header check, the power-on boot window, parked-only gating
+- `ble/` which phone may connect: first bond free, then only in the
+  pairing window; the 30 s encrypt deadline
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below
@@ -226,22 +234,43 @@ UART1 (GPS) and the i80 LCD bus are brought up in one place, and a driver
 only ever adds a device to a bus.
 
 **`drivers/`, `services/`, `main/`** — compile clean for esp32p4 against
-IDF v6.0.2 and link into a 658 kB `dash.bin`. **Nothing has run.** Compiling
+IDF v6.0.2 and link into a 1.09 MB `dash.bin` (NimBLE and esp_hosted are about 430 kB of it). **Nothing has run.** Compiling
 is not working: the drivers are written against datasheets and a netlist,
-and the board has not been built. See `components/drivers/README.md` for the
+and the board has not arrived yet. See `components/drivers/README.md` for the
 specific BRINGUP holes.
 
-Nine tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
-storage, keeper on core 1.
+Eleven tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
+storage, keeper, ota, ble on core 1.
+
+**Stable and dev firmware are built, and have never run on the board**
+(architecture §11.7). The two 6 MB app slots hold a stable and a dev image;
+which is which is read off the bootloader's rollback state, never stored. A
+dev image never confirms itself, so any reset returns to stable. `ota`
+installs `update/dash.bin` from the card into the dev slot, boots dev once,
+or promotes it; DIAG → Update drives it, and a 3 s window at power-on offers
+the choice. `tools/flash_dev.py` writes the dev slot over USB; `idf.py
+flash` makes a new stable. Wi-Fi is not built. **Rollback must be in the
+first bootloader flashed** — `main.cpp` will not build without it — and the
+bootloader has about 1.1 kB left.
+
+**BLE media is built, and has never run on this board.** `services/src/ble_service.cpp`
+brings up ESP-Hosted to the C6, NimBLE on core 1, and the §11.1 Dash Media
+service (Feed in, Ctrl out). The phone must bond: Feed needs an encrypted
+link, and `core/ble/` decides which phone may (first one freely, then only
+in CONFIG's pairing window; Forget phone clears them). NimBLE's callbacks only queue;
+`ble` is the one writer of `media` and `ble_diag`, and the line parser is
+`core/media/`, host-tested. ESP-Hosted makes its SDIO/RPC tasks at
+priority 23 with no core affinity and no Kconfig for either, so `ble`
+lowers them to 8 by name. **If esp_hosted is upgraded, check the boot log
+still says it found them.** It also pushes `demo_p4/c6_cp`'s firmware to the C6
+from `slave_fw` when the C6 is older than 2.12; build that project first.
 
 ### What is deliberately not here
 
-- **BLE** (`services/ble/`, `core/tpms/`) — step 9 of the build order, after
-  the real-time path works, so a change in shift-light timing has one
-  suspect. `CONFIG_BT_ENABLED=n` for now. On this board it means
-  ESP-Hosted to the C6, which `demo_p4/` already runs; the NimBLE host goes
-  on core 1. The *phone* half is written, in its own repo at
-  `~/phone-app` — along with `tools/dash_media_peripheral.py`, which stayed
+- **TPMS** (`core/tpms/`, the observer scan) — waits on a sensor to
+  capture (§11.2, §18); the observer role is off in sdkconfig until then.
+  The *phone* half is written, in its own repo at
+  `~/phone` — along with `tools/dash_media_peripheral.py`, which stayed
   here: a laptop peripheral speaking §11.1 so the app has a working
   counterpart and the dash will later have a known-good client. Neither end
   has talked to the other.

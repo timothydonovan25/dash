@@ -25,8 +25,8 @@ struct Controls {
     bool  gps_fix    = true;
     int   sats       = 11;
 
-    // There is no BLE in this build, so the media slot has no writer on the
-    // bike yet. The front end fills it from whatever is actually playing on
+    // The simulator has no radio, so nothing here plays the phone's part of
+    // §11.1. The front end fills the media slot from whatever is actually playing on
     // the machine running the simulator, which is the closest thing to a
     // real phone available before the radio lands -- and real track names
     // are the ones that turn out not to fit.
@@ -39,11 +39,22 @@ struct Controls {
     // this: the front end sets whatever one line it wants shown.
     char  media_lyric [60] = {};
     // Total track length; 0 means unknown, same as a real §11.1 phone that
-    // hasn't said. Position is not a control — `Bike::step` advances it on
-    // its own while a title is set, wrapping at the duration, so the
-    // progress ring has something to show without a front end that can
-    // drive a fourth slider off an actual phone.
+    // hasn't said.
     uint32_t media_duration_ms = 0;
+    // §11.1 `P` and `S`, as the front end reads them off the local player:
+    // `media_position_ms` was true at sim time `media_position_at_ms`, and
+    // the screens extrapolate from there while playing, exactly as they do
+    // from a phone. Until a position arrives `Bike::step` advances one on
+    // its own from the title change, so a scripted run with no player still
+    // has a ring that moves.
+    bool     media_position_known = false;
+    uint32_t media_position_ms    = 0;
+    uint32_t media_position_at_ms = 0;
+    uint8_t  media_state          = 1;   // 0 stop 1 play 2 pause
+
+    // Milliseconds since UTC midnight, from the host clock, so the dash
+    // clock reads the time of day rather than how long the sim has run.
+    uint32_t utc_ms = 0;
 
     // Drives the bike round a synthetic circuit at `speed_mph`, so the lap
     // timer, the delta matcher and the map screens have something real to

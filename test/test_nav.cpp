@@ -33,8 +33,9 @@ int main() {
     CHECK(!s.menu_open);
 
     CASE("B walks screens forward and wraps within the mode");
-    s = State{Mode::Diag, 0, 0, false};          // diag has 5 screens
-    for (int i = 0; i < 5; ++i) {
+    s = State{Mode::Diag, 0, 0, false};
+    const int diag_n = l.screens[static_cast<uint8_t>(Mode::Diag)];
+    for (int i = 0; i < diag_n; ++i) {
         CHECK(s.screen == i);
         s = press(s, Button::B, Press::Short, l);
     }

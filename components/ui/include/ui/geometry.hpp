@@ -4,8 +4,8 @@
 
 namespace ui {
 
-// RGB565, because that is what the UI thinks in everywhere. The panel driver
-// converts to the ILI9488's 18-bit format on its way out (§7.6).
+// RGB565, because that is what the UI thinks in everywhere, and what the
+// ILI9488 takes as is on the P4 board's 8-bit 8080 bus (§7.6).
 using Color = uint16_t;
 
 constexpr Color rgb(uint8_t r, uint8_t g, uint8_t b) {

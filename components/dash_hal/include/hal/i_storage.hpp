@@ -51,6 +51,14 @@ public:
     virtual bool   present() const = 0;
     virtual Status append(const char* path, const void* data, size_t len) = 0;
     virtual Status sync() = 0;
+
+    // Reading, for the firmware update (§11.7). Paths are relative to the
+    // card's root, as for append. NotPresent for a missing file. Each read
+    // stands alone -- nothing is held open between calls -- so a card pulled
+    // mid-read is an error on the next call, not a dangling handle.
+    virtual Status size_of(const char* path, size_t& out) = 0;
+    virtual Status read_at(const char* path, size_t offset, void* buf,
+                           size_t len, size_t& got) = 0;
 };
 
 }  // namespace hal

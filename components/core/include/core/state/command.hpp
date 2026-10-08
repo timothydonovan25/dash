@@ -24,6 +24,11 @@ enum class CommandId : uint8_t {
     ImuCalibrate,
     ImuSetMountOffset,
     MediaCtrl,        // i: 0 previous, 1 play/pause, 2 next — §11 "Ctrl"
+    BleForgetPhone,   // drop every bond; the next phone pairs freely (§11.3)
+    BlePairingMode,   // let one new phone bond, for core::ble::kPairingWindowMs
+    OtaInstallSd,     // write update/dash.bin from the card into the dev slot
+    OtaBootDevOnce,   // restart into dev; the next reset returns to stable
+    OtaPromote,       // dev becomes stable, once it proves it runs (§11.7)
 };
 
 struct Command {

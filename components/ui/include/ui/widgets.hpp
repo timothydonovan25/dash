@@ -20,7 +20,8 @@ struct TextBuf {
     bool empty() const { return s[0] == '\0'; }
 };
 
-// A caption. Static text, drawn once, redrawn when the screen is entered.
+// A line of text. Wide enough for a firmware version (31 characters) with a
+// word in front of it.
 class Label : public Widget {
 public:
     void configure(const char* text, Color c = color::kDim,
@@ -29,7 +30,7 @@ public:
     void render(Canvas& c) override;
 
 private:
-    TextBuf<24> text_;
+    TextBuf<48> text_;
     Color       color_ = color::kDim;
     uint8_t     scale_ = 1;
     Align       align_ = Align::Left;
@@ -415,6 +416,32 @@ private:
     TextBuf<28> text_;
     Color       color_ = color::kAlarm;
     bool        active_ = false;
+};
+
+// The stable/dev chooser at power-on (§11.7). Two looks: a banner for the
+// first three seconds, and the chooser if a button was pressed in them. Like
+// the alert, it is drawn over the screen rather than being part of it.
+class BootChooser : public Widget {
+public:
+    // `left_s` is the countdown on whichever phase is showing.
+    void set(bool chooser, uint8_t focus, bool dev_available, uint8_t left_s,
+             const char* stable_ver, const char* dev_ver);
+    void render(Canvas& c) override;
+
+private:
+    bool        chooser_ = false;
+    uint8_t     focus_ = 0;
+    bool        dev_ = false;
+    uint8_t     left_s_ = 0;
+    TextBuf<32> stable_;
+    TextBuf<32> dev_ver_;
+};
+
+// "DEV", in a corner, on every frame a dev image is running, so nobody rides
+// a test build thinking it is the real one.
+class DevTag : public Widget {
+public:
+    void render(Canvas& c) override;
 };
 
 }  // namespace ui

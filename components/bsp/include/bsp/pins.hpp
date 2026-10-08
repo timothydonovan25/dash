@@ -124,6 +124,9 @@ inline constexpr uint8_t kLedAddr    = 0x15;   // AD2,AD1,AD0 = GND,VDD,GND
 // output. That is both the lamps' chosen maximum and the panel's specified
 // 30 mA per backlight pin, so IREF 255 is in spec for both. These ceilings
 // are hardware facts and nothing above the driver can raise them.
+// The lamps are OSRAM LR T67F.01 (LCSC C37981853): 50 mA max up to an
+// 85 °C solder point, derating to 30 mA at 100 °C (datasheet v1.2, p.10),
+// so 30 mA is inside the rating across the whole operating range.
 inline constexpr int     kLedLamp0        = 0;    // OUT0..OUT7 = lamps 1..8
 inline constexpr int     kLedLampCount    = 8;
 inline constexpr int     kLedBacklight0   = 8;    // OUT8..OUT10 = LEDK1..3

@@ -11,7 +11,9 @@
 //
 //   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
 //                                vbat, sats, neutral, ecu, fix, auto,
-//                                duration (media track length, ms)
+//                                duration (media track length, ms),
+//                                position (ms into the track, now),
+//                                playstate (0 stop 1 play 2 pause)
 //        btn <A-E> down|up       real debounce and long-press timing
 //        cmd <lapline|laparm|lapclear|tripreset|jump>
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
@@ -33,6 +35,7 @@
 #include "ui/wire_cost.hpp"
 
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -102,6 +105,97 @@ bool poll_line(std::string& out) {
     }
 }
 
+// The host's time of day, standing in for the GPS's UTC field.
+uint32_t host_utc_ms_of_day() {
+    using namespace std::chrono;
+    const auto ms = duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()).count();
+    return static_cast<uint32_t>(ms % (24LL * 60 * 60 * 1000));
+}
+
+// The host's UTC offset in whole hours, which is all the dash's setting
+// holds. Half-hour zones round toward zero.
+int host_tz_offset_h() {
+    const std::time_t t = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&t, &local);
+    return static_cast<int>(local.tm_gmtoff / 3600);
+}
+
+// `ota`'s part, faked. The sim has no flash and no second slot, so this
+// answers the Update screen's requests the way the dash would if each one
+// worked, and instantly: enough to see every state the screen can show and
+// to drive the boot window from the pod buttons.
+struct FakeOta {
+    core::state::Ota o;
+    uint32_t gen = 0;
+    uint32_t confirm_at_ms = 0;
+
+    void begin(core::state::Slots& slots) {
+        o.known = true;
+        o.role = core::ota::Role::Stable;
+        std::snprintf(o.running_ver, sizeof o.running_ver, "sim");
+        std::snprintf(o.running_slot, sizeof o.running_slot, "ota_0");
+        o.other = core::ota::Other::Empty;
+        // The sim starting is a power-on.
+        o.boot_window = true;
+        gen = slots.ota_request.generation();
+        slots.ota.publish(o);
+    }
+
+    void step(core::state::Slots& slots, uint32_t now) {
+        namespace ota = core::ota;
+        bool dirty = false;
+        if (o.role == ota::Role::Confirming && now >= confirm_at_ms) {
+            o.role = ota::Role::Stable;
+            dirty = true;
+        }
+        const uint32_t g = slots.ota_request.generation();
+        if (g != gen) {
+            gen = g;
+            dirty = true;
+            const core::state::Motion m = slots.motion.get();
+            const core::state::Engine e = slots.engine.get();
+            const bool parked = ota::may_write(m.best_mph, e.rpm);
+            auto fail = [&](ota::InstallError err) {
+                o.install = ota::Install::Failed;
+                o.error = err;
+            };
+            const uint8_t op = slots.ota_request.get().op;
+            if (o.role != ota::Role::Stable) {
+                fail(ota::InstallError::NotStable);
+            } else if (!parked) {
+                fail(ota::InstallError::Moving);
+            } else if (op == core::state::OtaRequest::InstallSd) {
+                o.other = ota::Other::Ready;
+                std::snprintf(o.other_ver, sizeof o.other_ver, "sim-dev");
+                o.install = ota::Install::Done;
+                o.error = ota::InstallError::None;
+            } else if (o.other != ota::Other::Ready) {
+                fail(ota::InstallError::NoDev);
+            } else {
+                // A restart into the other slot: swap what each one holds.
+                char tmp[sizeof o.running_ver];
+                std::memcpy(tmp, o.running_ver, sizeof tmp);
+                std::memcpy(o.running_ver, o.other_ver, sizeof tmp);
+                std::memcpy(o.other_ver, tmp, sizeof tmp);
+                std::snprintf(o.running_slot, sizeof o.running_slot,
+                              o.running_slot[4] == '0' ? "ota_1" : "ota_0");
+                o.install = ota::Install::Idle;
+                o.error = ota::InstallError::None;
+                o.boot_window = false;
+                if (op == core::state::OtaRequest::Promote) {
+                    o.role = ota::Role::Confirming;
+                    confirm_at_ms = now + ota::kConfirmAfterMs;
+                } else {
+                    o.role = ota::Role::Dev;
+                }
+            }
+        }
+        if (dirty) slots.ota.publish(o);
+    }
+};
+
 void apply_set(sim::Controls& c, const std::string& name, float v) {
     if (name == "speed")        c.speed_mph = v;
     else if (name == "rpm")     c.rpm = v;
@@ -116,6 +210,7 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "fix")     c.gps_fix = v != 0.0f;
     else if (name == "auto")    c.auto_ride = v != 0.0f;
     else if (name == "duration") c.media_duration_ms = static_cast<uint32_t>(v);
+    else if (name == "playstate") c.media_state = static_cast<uint8_t>(v);
 }
 
 template <size_t N>
@@ -149,6 +244,9 @@ void apply_media(sim::Controls& c, const char* rest) {
 int main() {
     core::state::Slots     slots;
     core::config::Settings settings;
+    // The default is the bike's home zone; the laptop running this may not
+    // be in it, and a clock an hour off reads as a bug in the clock.
+    settings.tz_offset_h = host_tz_offset_h();
     core::health::Tracker  health;
     ui::SystemInfo         system;
     DequeSource            commands;
@@ -242,6 +340,8 @@ int main() {
 
     uint32_t now = 0;
     uint32_t last_frame = 0;
+    FakeOta fake_ota;
+    fake_ota.begin(slots);
     std::vector<unsigned char> rgb(static_cast<size_t>(ui::kScreenW) *
                                    ui::kScreenH * 3);
 
@@ -266,7 +366,15 @@ int main() {
                 if (*rest == ' ') ++rest;
                 apply_media(controls, rest);
             } else if (std::sscanf(line.c_str(), "set %31s %f", a, &v) == 2) {
-                apply_set(controls, a, v);
+                // Position is an anchor, so it needs the sim clock and
+                // cannot go through apply_set with the plain controls.
+                if (std::strcmp(a, "position") == 0) {
+                    controls.media_position_known = true;
+                    controls.media_position_ms = v > 0.0f ? static_cast<uint32_t>(v) : 0;
+                    controls.media_position_at_ms = now;
+                } else {
+                    apply_set(controls, a, v);
+                }
             } else if (std::sscanf(line.c_str(), "btn %31s %31s", a, b) == 2) {
                 const int idx = a[0] - 'A';
                 if (idx >= 0 && idx < core::input::kButtonCount) {
@@ -290,7 +398,9 @@ int main() {
 
         // --- one tick of the bike and the firmware ----------------------
         now += kTickMs;
+        controls.utc_ms = host_utc_ms_of_day();
         bike.step(slots, controls, now, kTickMs);
+        fake_ota.step(slots, now);
 
         // What `input` does: poll the pod, debounce, hand events to the UI.
         core::nav::InputEvent ev[core::input::kButtonCount];

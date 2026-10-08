@@ -1,8 +1,8 @@
 # P4 board pin map — Guition JC-ESP32P4-M3-C6 (U16)
 
-**Status.** Drawn. The netlist, layout and gerbers of 2026-10-06
-implement this map, with the four TFT control pins rotated (§2, rows
-69–72) and audited in §6. Nothing here has run. The module is a Guition JC-ESP32P4-M3-C6:
+**Status.** Ordered 2026-10-07 from the package listed in §6. The board
+implements this map as drawn (§2, rows 45–52 and 69–73 moved from the first
+plan) and was audited before ordering (§6). Nothing here has run. The module is a Guition JC-ESP32P4-M3-C6:
 ESP32-P4NRW32 (32 MB in-package PSRAM, 16 MB flash) plus an
 ESP32-C6-MINI-1U-N4 on SDIO, 27 × 27 mm, 80 castellated pins.
 
@@ -258,6 +258,11 @@ power-source test `dash-v1-netlist-review.md` §3 asked for.
 
 ## 4. Netlist changes this implies
 
+This is the change list from the S3 board to the P4 board as first planned,
+kept for the reasoning. Reference designators in it (R28, R29, R30, R63, Q10)
+are the S3 board's. The drawn P4 board ties IM0/IM1 straight to VCC and IM2
+to GND, and its panel connector is the flipped top-contact part in §6.1.
+
 1. `FLASH`: U16-76 → **U16-54**. Add 10 kΩ to VCC on pin 54 and on pin 55.
 2. `ESP_EN` → **U16-75**.
 3. Pin 74: 10 kΩ to VCC, 1 µF to GND. Pin 18: 10 kΩ to VCC.
@@ -326,21 +331,36 @@ Still open from the netlist review: VCC has no source until
 
 ## 6. Audit of the drawn board (2026-10-06)
 
-The netlist, PCB and gerbers of 2026-10-06 were audited before ordering
+The netlist, PCB and gerbers were audited before ordering
 in four parts: power, MCU and buses, bike inputs, and layout/DFM/BOM.
 What follows is what the audit found and what was decided. Nothing here
 has been measured.
 
-**Order package, checked 2026-10-07:** netlist `Sheet_1_2026-10-07`
-(identical to rev 5), PCB `PCB_PCB_dash-v1_2026-10-07`, gerbers generated
-2026-10-07 00:33:11 from that PCB (all 344 via drills match it to
-0.002 mm), BOM `BOM_dash-v2-(P4)_2026-10-07(1)`: 112 placed parts, about
-$31.50, FPC1 = AFC07-S40ECA-00 (C262648), with U4, U16 and H1–H10
-deliberately left out. The FPC1 re-route of PCB rev 6 shorted VIN to GND
-(a bottom-layer VIN trace under the connector's via field) among others;
-this revision clears it. DRC leaves only connector-pitch pad gaps, the
-USB-C stubs, necked-down power stubs and the copper smiley; no copper of
-different nets is closer than 0.10 mm (the routed USB pair).
+**Ordered 2026-10-07** from JLCPCB: 4 layers, 1.6 mm FR-4 TG155, stackup
+JLC04161H-7628, ENIG, epoxy filled and capped vias, top side assembled,
+depanelled. Hand-fitted on arrival: U16 and U4 (not in the BOM), the 1 A
+fuse in F1, the bottom-side LED0–LED7, and any through-hole part
+deselected at assembly (SW2, U8, U11).
+
+**As ordered:** the files JLCPCB received are in `v2 pcb files/` at the
+repository root — gerbers generated 2026-10-07 00:53:17, the BOM, and the
+pick-and-place file. They come from PCB `PCB_PCB_dash-v1_2026-10-07` and
+netlist `Sheet_1_2026-10-07` (identical to rev 5), and were checked against
+both:
+
+- all 344 via drills match the PCB to 0.002 mm, and every via has a net;
+- BOM: 112 placed parts, about $31.50, FPC1 = AFC07-S40ECA-00 (C262648),
+  C23 = C48971006, with U4, U16 and H1–H10 deliberately left out;
+- the top and bottom GND pours (270 and 79 regions) were rasterised and no
+  copper of another net lies inside them; the 00:33 export checked first
+  had those pours cleared, and is otherwise identical shape for shape;
+- no tracks or vias of different nets touch anywhere; the closest pair is
+  the routed USB D+/D− at 0.10 mm. DRC leaves only connector-pitch pad
+  gaps, the USB-C stubs, necked-down power stubs and the copper smiley.
+
+The FPC1 re-route of PCB rev 6 had shorted VIN to GND (a bottom-layer VIN
+trace under the connector's via field) among others; the ordered revision
+clears it.
 
 ### 6.1 Resolved
 
@@ -402,7 +422,7 @@ different nets is closer than 0.10 mm (the routed USB pair).
   (eight with the original), all on GND (PCB 2026-10-06 rev 4). In1 is
   solid under U2 and the Top and Bottom GND pours connect to them.
 
-### 6.2 Open — check before ordering or at bring-up
+### 6.2 Open — check at bring-up
 
 - **The neutral input pulls the bike's neutral wire up.** VIN → R6
   (2.2 kΩ) → D1 → the PC817 LED → `NEUTRAL_12V`, so with the switch open
@@ -448,8 +468,8 @@ Both parts are 0805, so this is a bench fix, not a respin:
 | PCA9955B full scale (REXT 1.91 kΩ) | 30 mA per channel |
 | U5 dissipation, backlight 90 mA | 0.8–1.0 W |
 | `VIN_SENSE` at 14 V | 2.54 V |
-| Panel full frame, RGB565 at 10 MHz | 30.7 ms; 92 % of the bus at 30 Hz |
-| Panel partial (~15 % of screen) | about 14 % of the bus at 30 Hz |
+| Panel full frame, RGB565 at 10 MHz | 30.7 ms: two periods of the 60 Hz render loop |
+| Panel partial (~15 % of screen) | about 4.7 ms, 28 % of a 60 Hz period |
 | PCA9955B update at 500 Hz | 4.6 % of I2C at 1 MHz |
 | Pod poll at 100 Hz | about 5 % of I2C at 100 kHz |
 | GPS at 10 Hz, RMC+GGA+VTG+GSA | about 2.4 kB/s: 42 % of 57 600 baud, overruns 9600 |

@@ -264,20 +264,41 @@ void RadioScreen::enter(Canvas&) {
     note_.set_bounds(kRadioNote);
     note_.configure("", color::kDim, 1, Align::Left);
     table_.set_bounds(kRadioTable);
-    table_.configure(8, 2);
+    table_.configure(11, 2);
     list_[0] = &note_;
     list_[1] = &table_;
 }
 
 void RadioScreen::update(const Frame& f) {
-    // On the real S3 firmware `Dev::BleHost` never leaves Absent — nothing
-    // there calls ble_media_start() (step 9 of the build order; see
-    // CLAUDE.md) — so this note still reads exactly as it always has there.
-    // It only changes where BLE is actually running (demo_p4).
+    // `ble` reports the host Ok once NimBLE has synced with the C6's
+    // controller, and Fault if the SDIO link or the controller never came
+    // up. The details are in the console log; the screen only says which.
+    const bool host_fault =
+        f.health[Dev::BleHost].state == core::state::DevState::Fault;
     note_.set_text(f.health.ok(Dev::BleHost) ? "BLE up"
-                                             : "BLE not built in this firmware");
+                   : host_fault              ? "BLE failed to start"
+                                             : "BLE not running");
     table_.set_row(0, "Host", f.health.ok(Dev::BleHost) ? "up" : "--");
-    table_.set_row(1, "Phone", f.health.ok(Dev::Phone) ? "bonded" : "--");
+    // Connected is not the same as let in: a phone that has not encrypted
+    // yet is on its way to being dropped (core::ble::kEncryptTimeoutMs).
+    table_.set_row(1, "Phone", !f.health.ok(Dev::Phone) ? "--"
+                               : f.ble_diag.encrypted  ? "bonded"
+                                                       : "connected");
+
+    char bonds[4] = {static_cast<char>('0' + (f.ble_diag.bonds % 10)), '\0'};
+    table_.set_row(2, "Bonds", f.health.ok(Dev::BleHost) ? bonds : "--");
+
+    char pairing[12] = "closed";
+    if (f.ble_diag.pairing_s > 0) {
+        size_t k = core::units::fmt_value(pairing, sizeof pairing,
+                                          static_cast<float>(f.ble_diag.pairing_s),
+                                          0, false);
+        for (const char* p = " s left"; *p && k + 1 < sizeof pairing; ++p) {
+            pairing[k++] = *p;
+        }
+        pairing[k] = '\0';
+    }
+    table_.set_row(3, "Pairing", pairing);
 
     char rssi[12] = "--";
     if (f.ble_diag.has_rssi) {
@@ -289,19 +310,154 @@ void RadioScreen::update(const Frame& f) {
             rssi[k] = '\0';
         }
     }
-    table_.set_row(2, "RSSI", rssi);
+    table_.set_row(4, "RSSI", rssi);
 
     // The one byte, not the line: a title here would just repeat the Media
     // row below. '\0' before anything has ever arrived.
     char last[2] = {f.ble_diag.last_tag, '\0'};
-    table_.set_row(3, "Last tag", f.ble_diag.last_tag ? last : "--");
-    table_.set_row(4, "Ctrl", f.ble_diag.ctrl_subscribed ? "subscribed" : "--");
-    table_.set_row(5, "TPMS front", f.tpms.front.valid ? "seen" : "--");
-    table_.set_row(6, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
-    table_.set_row(7, "Media", f.media.updated_ms ? f.media.title : "--");
-    table_.set_row_count(8);
+    table_.set_row(5, "Last tag", f.ble_diag.last_tag ? last : "--");
+    table_.set_row(6, "Ctrl", f.ble_diag.ctrl_subscribed ? "subscribed" : "--");
+    table_.set_row(7, "TPMS front", f.tpms.front.valid ? "seen" : "--");
+    table_.set_row(8, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
+    table_.set_row(9, "Media", f.media.updated_ms ? f.media.title : "--");
+    table_.set_row_count(10);
 }
 
 WidgetList RadioScreen::widgets() { return WidgetList{list_, 2}; }
+
+// --- UpdateScreen -------------------------------------------------------
+namespace {
+constexpr int16_t kUpdValueX = 96;
+constexpr Rect kUpdRunning {kUpdValueX,  40, 370, 10};
+constexpr Rect kUpdOther   {kUpdValueX,  58, 370, 10};
+constexpr Rect kUpdC6      {kUpdValueX,  76, 370, 10};
+constexpr Rect kUpdStatus  {14,          100, 452, 10};
+constexpr Rect kUpdActions {14,          124, 452, 66};
+constexpr int16_t kUpdNoteY = 268;
+
+// "<a> <b> <c>", for the version lines.
+void join(char* out, size_t n, const char* a, const char* b, const char* c) {
+    const char* parts[] = {a, b, c};
+    size_t k = 0;
+    for (const char* part : parts) {
+        if (!part || !*part) continue;
+        if (k > 0 && k + 1 < n) out[k++] = ' ';
+        for (const char* p = part; *p && k + 1 < n; ++p) out[k++] = *p;
+    }
+    out[k] = '\0';
+}
+}  // namespace
+
+void UpdateScreen::enter(Canvas&) {
+    running_.set_bounds(kUpdRunning);
+    other_.set_bounds(kUpdOther);
+    c6_.set_bounds(kUpdC6);
+    status_.set_bounds(kUpdStatus);
+    running_.configure("--", color::kText);
+    other_.configure("--", color::kText);
+    c6_.configure("--", color::kText);
+    status_.configure("", color::kDim);
+    actions_.set_bounds(kUpdActions);
+    actions_.configure(kActions, 2);
+    list_[0] = &running_;
+    list_[1] = &other_;
+    list_[2] = &c6_;
+    list_[3] = &status_;
+    list_[4] = &actions_;
+}
+
+void UpdateScreen::update(const Frame& f) {
+    namespace ota = core::ota;
+    const core::state::Ota& o = f.ota;
+
+    char line[48];
+    if (!o.known) {
+        running_.set_text("--");
+    } else {
+        join(line, sizeof line, ota::role_name(o.role), o.running_slot, o.running_ver);
+        running_.set_text(line);
+    }
+    other_.set_text(!o.known                         ? "--"
+                    : o.other == ota::Other::Ready   ? o.other_ver
+                    : o.other == ota::Other::Invalid ? "invalid image"
+                                                     : "empty");
+    c6_.set_text(f.ble_diag.c6_fw[0] ? f.ble_diag.c6_fw : "--");
+
+    // One line for whatever matters most right now.
+    Color sc = color::kDim;
+    const char* st = "";
+    char err[48];
+    if (o.promotion_failed) {
+        st = "promotion failed: still on the old stable";
+        sc = color::kAlarm;
+    } else if (o.install == ota::Install::Failed) {
+        join(err, sizeof err, "failed:", ota::install_error_name(o.error),
+             o.error == ota::InstallError::BadImage ? ota::image_error_name(o.image_error)
+                                                    : nullptr);
+        st = err;
+        sc = color::kAlarm;
+    } else if (o.install == ota::Install::Done) {
+        st = "installed: boot dev once to try it";
+        sc = color::kAccent;
+    } else if (o.role == ota::Role::Confirming) {
+        st = "new stable: proving itself before it confirms";
+        sc = color::kAccent;
+    } else if (o.role == ota::Role::Dev) {
+        st = "dev: any reset goes back to stable";
+        sc = color::kAlarm;
+    }
+    status_.configure(st, sc);
+
+    // The right-hand column says why a row will not do anything, before
+    // the rider presses it.
+    const bool stable = o.known && o.role == ota::Role::Stable;
+    const bool has_dev = o.other == ota::Other::Ready;
+    char pct[8] = "";
+    const char* install = "";
+    if (!stable) {
+        install = "stable only";
+    } else if (o.install == ota::Install::Writing) {
+        size_t k = u::fmt_value(pct, sizeof pct, static_cast<float>(o.install_pct), 0, true);
+        if (k + 1 < sizeof pct) { pct[k++] = '%'; pct[k] = '\0'; }
+        install = pct;
+    } else if (o.install == ota::Install::Checking) {
+        install = "checking";
+    }
+    const char* boot = !stable ? "stable only" : has_dev ? "" : "no dev";
+    actions_.set_row(0, "Install from SD", install);
+    actions_.set_row(1, "Boot dev once", boot);
+    actions_.set_row(2, "Promote dev", boot);
+    actions_.set_row_count(kActions);
+    actions_.set_focus(focus_);
+}
+
+bool UpdateScreen::handle(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::nav::Press;
+    if (e.button != Button::E || e.press != Press::Short) return false;
+    // `ota` decides whether it can; this only asks. A refusal comes back on
+    // the status line rather than being second-guessed here.
+    static constexpr core::state::CommandId kIds[kActions] = {
+        core::state::CommandId::OtaInstallSd,
+        core::state::CommandId::OtaBootDevOnce,
+        core::state::CommandId::OtaPromote,
+    };
+    return post(core::state::Command(kIds[focus_ < kActions ? focus_ : 0]));
+}
+
+void UpdateScreen::draw_background(Canvas& c) {
+    c.draw_text(14, kUpdRunning.y, "Running", theme::secondary, 1, Align::Left);
+    c.draw_text(14, kUpdOther.y, "Other slot", theme::secondary, 1, Align::Left);
+    c.draw_text(14, kUpdC6.y, "C6", theme::secondary, 1, Align::Left);
+    c.draw_text(14, kUpdNoteY, "Parked only: not moving, engine off. Card file: update/dash.bin",
+                theme::secondary, 1, Align::Left);
+    c.draw_text(14, static_cast<int16_t>(kUpdNoteY + 14),
+                "USB: idf.py flash = new stable, tools/flash_dev.py = dev slot",
+                theme::secondary, 1, Align::Left);
+    c.draw_text(14, static_cast<int16_t>(kUpdNoteY + 28), "Wi-Fi: not built yet",
+                theme::secondary, 1, Align::Left);
+}
+
+WidgetList UpdateScreen::widgets() { return WidgetList{list_, 5}; }
 
 }  // namespace ui

@@ -15,15 +15,17 @@
 // | input   |  0   |   9  | 100 Hz    | pod poll, debounce                  |
 // | render  |  1   |   6  | 60 Hz     | snapshot, widgets, panel            |
 // | logger  |  1   |   5  | drain     | blackbox ring to SD                 |
+// | ble     |  1   |   4  | event     | media GATT server, BLE diag         |
 // | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, VIN sense        |
 // | storage |  1   |   3  | 2 Hz      | card mount, hotplug, USB hand-off    |
 //
 // Core 0 is a real-time island: no radio, no filesystem. Anything added to
 // it above priority 18 breaks the 3 ms tach-to-lamp budget.
 //
-// `ble` is not in this build. It is step 9 of the build order, deliberately
-// after the real-time path works, so that if the shift light timing changes
-// you know the radio caused it.
+// The radio's own tasks — the NimBLE host and ESP-Hosted's SDIO transport —
+// are not in this table because the IDF and esp_hosted create them. NimBLE
+// is pinned to core 1 by sdkconfig; `ble` lowers ESP-Hosted's below every
+// core-0 task, because it creates them at priority 23 with no affinity.
 #pragma once
 #include "hal/hal.hpp"
 #include "core/state/slots.hpp"
@@ -112,6 +114,9 @@ void start_render(Deps& d, CommandQueue& q);
 void start_keeper(Deps& d);
 void start_logger(Deps& d);
 void start_storage(Deps& d);
+// Stable/dev slots and updates (§11.7). Core 1, priority 2.
+void start_ota(Deps& d);
+void start_ble(Deps& d);
 
 // Where the input task puts decoded button events for the render task to
 // apply to the UI. Kept separate from the command queue: one is "the rider

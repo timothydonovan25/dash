@@ -33,6 +33,11 @@ erases NVS, and NVS holds your odometer. `partitions.csv` is already in
 the tree and `sdkconfig.defaults` points at it; just confirm it is what
 you want before the first `idf.py flash`.
 
+**Rollback has to be in the first bootloader.** Stable/dev firmware
+(architecture §11.7) depends on `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, and
+the bootloader is never updated over the air. `main.cpp` refuses to build
+without it; if it errors, delete `sdkconfig` and rebuild (§11).
+
 **Fit the fuse.** F1 is only a holder; the BOM has no fuse. A 1 A fuse
 goes in it. Without one the board runs from USB and is dead from the
 bike, which looks like a supply fault.
@@ -50,7 +55,8 @@ A bench supply on the bike input (12–14 V) removes the doubt.
 ## 1. Rails, before the modules go on
 
 U16 (the P4 module) and U4 (the PA1616D) are not in the BOM; they are
-hand-fitted after assembly. That is an opportunity: **check the rails
+hand-fitted after assembly, along with the bottom-side shift LEDs
+(LED0–LED7) and any through-hole part not assembled (SW2, U8, U11). That is an opportunity: **check the rails
 with neither fitted**, when a wrong voltage costs a resistor rather than
 a module.
 
@@ -89,9 +95,11 @@ pads H8/H9 (U16-56/57) as a fallback.
 the demo board was v1.3. If yours is v3 or later, that setting has to
 change (§11 explains why editing the defaults alone is not enough).
 
-**What you should see.** `dash v2 — N config items`, then nine tasks
+**What you should see.** `dash v2 — N config items`, then eleven tasks
 starting (`ctrl`, `imu`, `gnss`, `logic`, `input` on core 0; `render`,
-`logger`, `storage`, `keeper` on core 1), then `running`. If the config
+`logger`, `storage`, `keeper`, `ota`, `ble` on core 1), then `running`.
+`ota: running <version> from ota_0, stable; other slot empty` says the
+rollback bookkeeping is reading the bootloader's state. If the config
 table is malformed it says so here rather than weeks later as a setting
 that will not save.
 
@@ -140,7 +148,7 @@ be an I2C fault (§4).
 | Backlight off entirely | The PCA9955B on I2C1 (§4), then LEDA at about 5 V, then FPC 33–36. |
 | Image mirrored or upside down | `ili9488.cpp:94` — `swap_xy` plus **one** mirror. Marked BRINGUP; this is the one you are expected to fix here. `panel_test`'s corners screen shows which. |
 | Torn, speckled, or wrong colours | Drop `bsp::kTftWrHz` (starts at 10 MHz) before suspecting anything else. Swapped red/blue is the byte order, not wiring. |
-| Colours right, garbage in places | A data line: D0–D7 are FPC 17–24 in order. |
+| Colours right, garbage in places | A data line: D0–D7 are panel pins 17–24, which land on connector pads 24–17, from GPIO33 down to GPIO26. |
 
 The panel runs **RGB565, two bytes per pixel**, on this bus: 30.7 ms per
 full frame at 10 MHz, about 15 MHz in spec. `render` runs at 60 Hz and sends only
@@ -157,7 +165,8 @@ managed component's job.
 
 DIAG → Sensors is one row per device: `absent` / `init` / `ok` /
 `degraded` / `FAULT`. Work down it. Anything `absent` is either genuinely
-not fitted (ECU, BLE, TPMS on this revision) or never reported at all.
+not fitted (ECU and TPMS on this revision; Phone until one connects) or
+never reported at all.
 
 DIAG → Bus answers a different and more useful question: *is the device
 dead, or is the bus dead?* Four buses to tell apart:
@@ -333,9 +342,74 @@ The C6 has its own reset (GPIO54, U16-74) and boot (U16-18, R1) lines.
 Its UART is on test pads H1/H3; its boot pin has no pad, so forcing it
 into download mode means clipping onto R1.
 
-The §11.1 "Dash Media" GATT service has run on real hardware on
-`demo_p4/` and advertised as "CRF250F-Dash". Nothing has connected to
-either side yet — that still needs the phone.
+The `ble` service is built in (`services/src/ble_service.cpp`) and starts
+last at boot. It has not run on this board. The same GATT code advertised
+as "CRF250F-Dash" on `demo_p4/`, and nothing has connected to either yet.
+
+1. **Build the C6's firmware first**:
+   `idf.py -C demo_p4/c6_cp set-target esp32c6 build`. `idf.py flash` writes
+   it into `slave_fw`, and on boot the dash pushes it to the C6 over SDIO
+   if the C6 reports anything older than 2.12. That boot restarts once
+   after the push, and only once.
+2. **Fit the antenna** on the C6's IPEX before judging range.
+3. On the console expect `ble: C6 firmware 2.12.x`, then
+   `ble: advertising as "CRF250F-Dash"`. DIAG → Radio says **BLE up**.
+   **BLE failed to start** is the SDIO link or the C6's controller; the
+   log line before it says which.
+4. **Poke it from nRF Connect** before trusting the phone app. Connect,
+   and accept the pairing request: Feed needs a bonded, encrypted link
+   (architecture §11.3), and a write before that is refused. DIAG → Radio
+   should say Phone **bonded**, Bonds **1**. Find service `6e5f0001-…`,
+   write the text `T hello` to `6e5f0002-…`. The title appears on SPEED
+   and MEDIA, and DIAG → Radio's last tag reads `T`. Disconnect: the title
+   stays about ten seconds, then clears.
+5. **Check the gate.** With nRF Connect bonded, connect from a second
+   phone: it should be dropped (`ble: unknown phone outside pairing mode,
+   refused`). Open CONFIG → Phone → Pairing mode, connect it again: it
+   bonds, and Bonds reads 2. CONFIG → Forget phone sets Bonds to 0; both
+   phones must then forget the dash in their own settings before pairing
+   again.
+6. **Re-measure tach to lamp with a phone connected and streaming**, on
+   the same scope setup as §8. The budget is still 3 ms. ESP-Hosted
+   creates its SDIO tasks at priority 23 with no core pinning, and `ble`
+   lowers them to 8 after start-up. The log says so:
+   `ble: esp_hosted tasks: N found, …`. After the link is up N should be
+   at least 6. If it reads 0, a newer esp_hosted renamed its tasks and
+   they are still at 23.
+
+### 9.1 Firmware slots: stable and dev
+
+Do this before trusting any of it with a ride. Each step is something only
+the real bootloader can prove. The UI and the decisions are host-tested;
+the flash calls are not.
+
+1. **USB flash**, and confirm `ota: ... stable`. DIAG → Update shows the
+   version, `ota_0`, and Other slot `empty`.
+2. **Install from SD.** Build a second image with a visible change (tag it:
+   the version string is `git describe`), copy `build/dash.bin` to the
+   card as `update/dash.bin`, then Install from SD, parked. Expect a
+   percentage, then "installed". Other slot shows the new version.
+3. **Refusals.** Spin the rear wheel (or set rpm) and try again: "failed:
+   park first". Put `network_adapter.bin` there instead: "bad image: wrong
+   chip".
+4. **Boot dev once.** The dash restarts into dev: red DEV tag, Running says
+   `dev`. Power-cycle it: it must come back stable with no input. Then a
+   panic in dev (or a watchdog) must do the same.
+5. **The boot window.** Power on: the banner shows for 3 s. Press a button:
+   the chooser opens on Stable; D, E boots dev. No press: stable, and the
+   banner goes. Boot dev once from the menu must *not* show the window on
+   its restart.
+6. **USB to dev.** `python3 tools/flash_dev.py` writes the other slot and
+   the dash still boots stable afterwards.
+7. **Promote.** Running says `confirming` for 20 s, then `stable`;
+   power-cycle and it stays. Then promote an image that panics at boot:
+   the dash must come back on the old stable, and DIAG → Update must say
+   "promotion failed".
+8. **Pull the card mid-install**: "read failed", the other slot reads
+   empty or invalid, and stable is unaffected.
+9. **Tach to lamp** with an install refused while moving: unchanged. An
+   install while parked is allowed to make `ctrl` late (DIAG → System's
+   late count); that is why it is parked only.
 
 ---
 
@@ -350,6 +424,8 @@ either side yet — that still needs the phone.
 | `bsp/pins.hpp:51` | `kTftWrHz` 10 MHz — raise to what `panel_test` stays clean at |
 | `ili9488.cpp:94` | Panel rotation — `swap_xy` plus one mirror |
 | `drivers.hpp:10` | The general warning that none of this has run |
+| `ble_service.cpp` `kHostedPrio` | ESP-Hosted's tasks lowered from 23 to 8. Check SDIO keeps up and `ctrl` is unaffected |
+| `ota_service.cpp` | Rollback, install and promote: never run against the real bootloader (§9.1) |
 
 And the hardware values to settle on the bench, from
 `p4-board-pin-map.md` §6: C19 and R34 (tach), R6 (neutral pull-up), and
