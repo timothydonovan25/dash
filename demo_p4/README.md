@@ -10,8 +10,9 @@ becomes one.
 
 **Status: fully working**, confirmed on real hardware — the dashboard UI
 renders correctly (scaled 1.5x), all five on-screen button zones respond
-to touch, the demo runs the built-in circuit with live lean/g-force and a
-working lap timer/delta, and BLE (§11.1 Dash Media) is up and connected
+to touch, the bike data reads parked with no sensors (zeros and `--`,
+as the real dash shows with nothing connected), so the start-up gauge
+sweep plays at every boot, and BLE (§11.1 Dash Media) is up and connected
 to the phone app (`~/phone-app`): the C6 co-processor's stock firmware
 gets upgraded automatically at boot over the existing SDIO link if it's
 behind what this host expects (no UART adapter needed — see
@@ -25,8 +26,8 @@ accepted tag, and whether the phone has subscribed to Ctrl. See
 `docs/bringup-p4-demo.md` for the full story.
 
 It depends on `../components/core`, `../components/ui` and
-`../components/dash_hal` unmodified, and reuses `services::logic_tick`,
-`services::CommandQueue` and `sim::Bike` by source (see `main/CMakeLists.txt`
+`../components/dash_hal` unmodified, and reuses `services::logic_tick` and
+`services::CommandQueue` by source (see `main/CMakeLists.txt`
 for why: pulling in the `services` IDF component itself would drag in
 `bsp`/`drivers`, which are wired for the real board's S3 pin map and have no
 business in a P4 build). `components/bsp/`, `components/drivers/`, `main/`
@@ -43,9 +44,9 @@ New code, all under `main/`:
   mask `core::input::Decoder` already knows how to debounce.
 - `demo_render.{hpp,cpp}` — the render loop, simplified from the real
   `render_service.cpp` because this panel has no SPI wire budget to protect.
-- `demo_bike_task.{hpp,cpp}` — drives `sim::Bike` and `services::logic_tick`
-  from an animated (not slider-driven) `Controls`, so the demo runs
-  unattended.
+- `demo_bike_task.{hpp,cpp}` — runs `services::logic_tick` and hands BLE
+  media in and Ctrl out. It no longer fakes a ride: the board has no bike
+  sensors, so those slots are never written.
 - `main.cpp` — wiring: the same one-function, no-globals job
   `main/wiring.cpp` does for the real board, trimmed to what a screen-only
   demo needs.

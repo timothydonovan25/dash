@@ -14,11 +14,9 @@ idf_component_register(
          "../../components/services/src/queues.cpp"
          "../../components/services/src/logic_tick.cpp"
          "../../components/drivers/src/clock.cpp"
-         "../../sim/sim_bike.cpp"
     INCLUDE_DIRS "."
                  "../../components/services/include"
                  "../../components/drivers/include"
-                 "../../sim"
     REQUIRES core dash_hal ui
              esp_lcd esp_driver_i2c esp_driver_gpio esp_driver_ledc
              esp_timer freertos

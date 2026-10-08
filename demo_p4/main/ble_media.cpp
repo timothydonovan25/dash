@@ -415,6 +415,8 @@ void ble_media_start(core::health::Tracker& health) {
 
 core::state::Media ble_media_snapshot() {
     core::state::Media out;
+    // Asked before ble_media_start() has run: nothing to report yet.
+    if (!g_mutex) return out;
     xSemaphoreTake(g_mutex, portMAX_DELAY);
     out = g_media;
     xSemaphoreGive(g_mutex);
@@ -423,6 +425,7 @@ core::state::Media ble_media_snapshot() {
 
 core::state::BleDiag ble_media_diag() {
     core::state::BleDiag out;
+    if (!g_mutex) return out;
     xSemaphoreTake(g_mutex, portMAX_DELAY);
     out.last_tag = g_last_tag;
     out.ctrl_subscribed = g_ctrl_subscribed;
@@ -441,6 +444,7 @@ core::state::BleDiag ble_media_diag() {
 
 void ble_media_send_ctrl(uint8_t cmd) {
     if (cmd > 2) return;   // unknown values are not sent (§11.1 convention)
+    if (!g_mutex) return;  // BLE not started yet
 
     xSemaphoreTake(g_mutex, portMAX_DELAY);
     const bool ready = g_ctrl_subscribed && g_ctrl_conn_handle != BLE_HS_CONN_HANDLE_NONE;
