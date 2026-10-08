@@ -117,10 +117,19 @@ hal::Status TouchButtons::read_mask(uint8_t& mask_out) {
     esp_lcd_touch_get_coordinates(tp, xs, ys, strength, &count, 5);
 
     for (uint8_t i = 0; i < count; ++i) {
+        // Off the screen is a bad report, not a press. mirror_y is
+        // y_max - raw_y on the raw axis, so a glitch point at raw (0, 0)
+        // comes out as x = 800 -- inside the strip -- with y = 0, which is
+        // band A; and a raw y past 800 underflows to a huge x that also
+        // passes the strip test. Either one used to fire A while the finger
+        // was on B..E. Clamping y into the last band hid the same thing at
+        // the bottom edge.
+        if (xs[i] >= kViewW || ys[i] >= kViewH) {
+            ESP_LOGW(kTag, "ignored off-screen point %u,%u", xs[i], ys[i]);
+            continue;
+        }
         if (xs[i] < kViewW - kZoneWidth) continue;   // outside the button strip
-        int band = ys[i] / kBandH;
-        if (band < 0) band = 0;
-        if (band >= kButtonCount) band = kButtonCount - 1;
+        const int band = ys[i] / kBandH;              // 0..4, ys < kViewH
         mask_out |= static_cast<uint8_t>(1u << band);
     }
     return hal::Status::Ok;

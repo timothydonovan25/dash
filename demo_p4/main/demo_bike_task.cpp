@@ -1,6 +1,6 @@
 #include "demo_bike_task.hpp"
 #include "services/logic_tick.hpp"
-#include "ble_media.hpp"
+#include "services/settings_store.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -28,34 +28,27 @@ void bike_task(void* arg) {
     // No made-up ride: this board has no bike sensors, so the slots for
     // engine, motion, attitude and GPS are never written and every screen
     // shows what the real dash shows with nothing connected -- zeros and
-    // `--`. That also leaves the start-up gauge sweep free to play.
+    // `--`. That also leaves the start-up gauge sweep free to play. Media
+    // and Ctrl belong to the production `ble` task now, not to this one.
     services::LogicState logic;
     services::logic_restore(d, logic);
     QueueCommandSource commands(q);
 
     uint32_t now = d.clock->now_ms();
-    // generation(), not the value itself: media_ctrl has no way to tell "a
-    // new one arrived" from "still the last one" other than this, since it
-    // is deliberately not a queue (see core::state::MediaCtrl).
-    uint32_t ctrl_gen = 0;
+    // keeper's settings half, at keeper's 1 Hz: the production code that
+    // gets a CONFIG change into NVS.
+    services::SettingsSaver saver;
+    uint32_t last_save_ms = now;
 
     for (;;) {
         now += kTickMs;
-        // The single write of media — ble_media.cpp's own callback never
-        // touches the slot directly, only this cache (rule 2: one writer).
-        d.slots->media.publish(demo::ble_media_snapshot());
-        d.slots->ble_diag.publish(demo::ble_media_diag());
-
         services::logic_tick(d, logic, commands, now);
 
-        // Ctrl: whatever the rider just pressed on the speed screen, one
-        // BLE notify per press. logic_tick is the one writer of this slot
-        // (§4.5's rule 2); this is just the one task that already loops
-        // continuously and already has ble_media in scope to hand it off to.
-        const uint32_t gen = d.slots->media_ctrl.generation();
-        if (gen != ctrl_gen) {
-            ctrl_gen = gen;
-            demo::ble_media_send_ctrl(d.slots->media_ctrl.get().cmd);
+        if (d.storage && now - last_save_ms >= 1000) {
+            last_save_ms = now;
+            if (saver.save_changed(*d.storage, *d.settings) > 0) {
+                d.storage->commit();
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(kTickMs));

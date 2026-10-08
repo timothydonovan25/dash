@@ -9,6 +9,7 @@
 // externs; the replacement is not "no state", it is "all the state in one
 // function, handed out by reference".
 #include "wiring.hpp"
+#include "services/settings_store.hpp"
 
 #include "bsp/buses.hpp"
 #include "drivers/drivers.hpp"
@@ -68,21 +69,6 @@ void bring_up(core::state::Dev dev, hal::Status s) {
     }
 }
 
-void load_settings() {
-    // Every value that has ever been saved comes back through the same table
-    // that the config screen renders and that validates the ranges. A key
-    // that is not in NVS keeps its default, which is what a fresh board and
-    // a newly added setting both look like.
-    for (size_t i = 0; i < core::config::item_count(); ++i) {
-        const core::config::ConfigItem& it = core::config::items()[i];
-        if (it.kind == core::config::Kind::Action) continue;
-        float v = 0.0f;
-        if (hal::ok(g_storage.read_f32(hal::kNsCfg, it.key, v))) {
-            core::config::set(g_settings, it, v);      // clamps on the way in
-        }
-    }
-}
-
 }  // namespace
 
 services::Deps& build() {
@@ -100,7 +86,7 @@ services::Deps& build() {
     // 2. Storage first, because the settings decide how everything else is
     //    set up.
     bring_up(core::state::Dev::Sd, g_storage.init());
-    load_settings();
+    services::load_settings(g_storage, g_settings);
 
     // 3. What the shift lamps need, and nothing else: the LED driver, the
     //    tach counters and VIN sense. main starts `ctrl` the moment this

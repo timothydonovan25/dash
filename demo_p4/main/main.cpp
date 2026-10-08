@@ -7,7 +7,10 @@
 #include "services/logic_tick.hpp"
 #include "demo_render.hpp"
 #include "demo_bike_task.hpp"
-#include "ble_media.hpp"
+#include "ctrl_probe.hpp"
+#include "serial_buttons.hpp"
+#include "services/settings_store.hpp"
+#include "drivers/nvs_storage.hpp"
 #include "p4_panel.hpp"
 #include "touch_buttons.hpp"
 #include "drivers/clock.hpp"
@@ -21,6 +24,15 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+// The same two guards as the real main.cpp: a stale sdkconfig that lost
+// either would build clean and test the wrong thing.
+#if !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+#error "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE must be on: delete sdkconfig and rebuild"
+#endif
+#if !CONFIG_BT_NIMBLE_PINNED_TO_CORE_1
+#error "NimBLE must be pinned to core 1: delete sdkconfig and rebuild"
+#endif
 
 namespace {
 
@@ -43,7 +55,8 @@ EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_t
 drivers::EspClock g_clock;
 demo::P4Panel     g_panel;
 demo::TouchButtons g_touch;
-hal::NullEngine   g_engine;   // no ECU here, same as the real board (§10.1)
+hal::NullEngine   g_engine;
+drivers::NvsStorage g_storage;   // the real driver: settings and BLE bonds   // no ECU here, same as the real board (§10.1)
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
@@ -87,6 +100,14 @@ extern "C" void app_main(void) {
                               static_cast<int32_t>(panel_status), g_clock.now_ms());
     }
 
+    // NVS, then the saved settings, before anything reads them -- the same
+    // order and the same code as the real wiring.
+    const hal::Status nvs_status = g_storage.init();
+    const size_t loaded = hal::ok(nvs_status)
+                              ? services::load_settings(g_storage, g_settings) : 0;
+    ESP_LOGI(kTag, "nvs: %s, %u saved settings", hal::status_name(nvs_status),
+             static_cast<unsigned>(loaded));
+
     const hal::Status touch_status = g_touch.init();
     ESP_LOGI(kTag, "touch: %s", hal::status_name(touch_status));
 
@@ -100,6 +121,7 @@ extern "C" void app_main(void) {
     g_deps.slots    = &g_slots;
     g_deps.settings = &g_settings;
     g_deps.health   = &g_health;
+    g_deps.storage  = hal::ok(nvs_status) ? &g_storage : nullptr;
     g_deps.system   = &g_system;
     g_deps.lap_history = &g_lap_history;
     g_deps.delta       = &g_delta;
@@ -109,14 +131,24 @@ extern "C" void app_main(void) {
     g_slots.health.publish(g_health.publish());
     g_commands.begin();
 
+    demo::start_ctrl_probe(g_deps);
     demo::start_demo_render(g_deps, g_commands);
     demo::start_demo_bike(g_deps, g_commands);
     xTaskCreatePinnedToCore(touch_input_task, "touch", 3072, nullptr, 9,
                             nullptr, 1);
+    demo::start_serial_buttons();
 
-    // Last: the render/bike tasks are already running and useful on their
-    // own, and this is the one piece of the board that talks to another
-    // chip (the C6, over SDIO) rather than just local peripherals — if
-    // bring-up here goes wrong, the dashboard itself should already be up.
-    demo::ble_media_start(g_health);
+#ifdef DASH_CRASH_TEST
+    // A dev image that dies at boot, for testing the fall back to stable:
+    // build with -DDASH_CRASH_TEST=1, flash_dev.py it, Boot dev once.
+    ESP_LOGE(kTag, "DASH_CRASH_TEST: aborting on purpose");
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    abort();
+#endif
+
+    // The production `ota` and `ble` tasks, by source: stable/dev slots,
+    // DIAG -> Update, bonding, and the C6 firmware updater all run here
+    // exactly as on the real board. BLE last, as there.
+    services::start_ota(g_deps);
+    services::start_ble(g_deps);
 }

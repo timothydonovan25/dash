@@ -8,7 +8,14 @@ CONFIG_IDF_TARGET="esp32p4"
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# The real dash's partition table and boot settings, not a demo's own, so
+# the stable/dev slots, rollback and boot time are tested on this board
+# exactly as they will run on the real one (system-architecture §11.7).
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON=y
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
 # The listing advertises 32MB PSRAM / 16MB flash for this board family; both
 # knobs are here to change once the actual module is confirmed.
@@ -72,4 +79,22 @@ CONFIG_BT_NIMBLE_TRANSPORT_UART=n
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
-CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+# The rest of the real dash's NimBLE block: ble_service.cpp runs here.
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+CONFIG_BT_NIMBLE_GATT_CLIENT=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+
+# No core dump checksum at boot. With a dump in flash, IDF verifies it with
+# the SHA engine during startup and leaves that engine clock-gated and held
+# in reset; a reset in that state (a brownout while cranking, a flash from a
+# laptop) left the ESP32-P4 v1.x ROM unable to boot until power was removed.
+# Found on the demo board: it began the moment the first crash saved a dump.
+# The dump is still written on a crash and checked by `idf.py coredump-info`;
+# skipping the check also takes ~35 ms off the boot. components/p4_restart_fix
+# covers the panic path, which writes the dump with SHA just before restarting.
+CONFIG_ESP_COREDUMP_CHECK_BOOT=n

@@ -1,4 +1,5 @@
 #include "demo_render.hpp"
+#include "esp_log.h"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 
@@ -67,6 +68,7 @@ void render_task_impl(void* arg) {
     ui::FrameBufferCanvas canvas(buf, ui::kScreenW, ui::kScreenH);
     app.begin(canvas);
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
+    uint8_t applied_brightness = d.settings->brightness_pct;
 
     // DIAG's System screen (ui::SystemInfo) was reading this struct's
     // untouched, default-constructed zeros — heap/PSRAM/uptime/render Hz
@@ -93,10 +95,21 @@ void render_task_impl(void* arg) {
                                 d.lap_history->best_ms);
         }
 
+        // CONFIG -> Display -> Brightness takes effect as it is changed,
+        // which the real dash gets from `keeper`; this demo has no keeper.
+        if (d.panel && d.settings->brightness_pct != applied_brightness) {
+            applied_brightness = d.settings->brightness_pct;
+            d.panel->set_backlight(applied_brightness);
+        }
+
         const core::state::Frame frame = core::state::snapshot(*d.slots, now);
         app.update(frame);
         app.render(canvas, true);
         app.clear_full_repaint();
+        if (d.system && d.system->first_frame_ms == 0) {
+            d.system->first_frame_ms = now ? now : 1;
+            ESP_LOGI("render", "first frame at %u ms", static_cast<unsigned>(now));
+        }
 
         hal::Status s = hal::Status::Ok;
         if (d.panel) {

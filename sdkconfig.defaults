@@ -98,3 +98,13 @@ CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
 CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+
+# No core dump checksum at boot. With a dump in flash, IDF verifies it with
+# the SHA engine during startup and leaves that engine clock-gated and held
+# in reset; a reset in that state (a brownout while cranking, a flash from a
+# laptop) left the ESP32-P4 v1.x ROM unable to boot until power was removed.
+# Found on the demo board: it began the moment the first crash saved a dump.
+# The dump is still written on a crash and checked by `idf.py coredump-info`;
+# skipping the check also takes ~35 ms off the boot. components/p4_restart_fix
+# covers the panic path, which writes the dump with SHA just before restarting.
+CONFIG_ESP_COREDUMP_CHECK_BOOT=n

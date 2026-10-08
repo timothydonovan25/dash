@@ -5,6 +5,7 @@
 // what turns a loose GH1.25 connector into a self-healing problem instead of
 // a dead sensor for the rest of the ride (§12).
 #include "services/services.hpp"
+#include "services/settings_store.hpp"
 #include "drivers/pca9955b.hpp"
 #include "drivers/pod.hpp"
 #include "core/power/power.hpp"
@@ -30,13 +31,7 @@ void keeper_task(void* arg) {
     double last_saved_odo = -1.0;
     double last_saved_hours = -1.0;
 
-    // A shadow copy of the settings as they were last written to flash.
-    // Diffing against it once a second is how a changed setting reaches NVS:
-    // the config screen edits Settings in place, and nothing on the 50 Hz
-    // path should ever touch flash. It also coalesces a rider holding the
-    // button and running a value up twenty clicks into a single write.
-    core::config::Settings saved;
-    bool saved_valid = false;
+    SettingsSaver settings_saver;
 
     for (;;) {
         const uint32_t now = d.clock->now_ms();
@@ -85,23 +80,8 @@ void keeper_task(void* arg) {
                 d.storage->write_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
                 last_saved_hours = hours;
             }
-            // Settings that have changed since the last pass. Comparing
-            // through the table rather than memcmp means padding bytes and
-            // fields nobody can edit never cause a spurious write.
-            if (!saved_valid) {
-                saved = *d.settings;
-                saved_valid = true;
-            } else {
-                for (size_t i = 0; i < core::config::item_count(); ++i) {
-                    const core::config::ConfigItem& it = core::config::items()[i];
-                    if (it.kind == core::config::Kind::Action) continue;
-                    const float now_v = core::config::get(*d.settings, it);
-                    if (now_v == core::config::get(saved, it)) continue;
-                    if (hal::ok(d.storage->write_f32(hal::kNsCfg, it.key, now_v))) {
-                        core::config::set(saved, it, now_v);
-                    }
-                }
-            }
+            // Settings that have changed since the last pass.
+            settings_saver.save_changed(*d.storage, *d.settings);
 
             d.storage->commit();
         }

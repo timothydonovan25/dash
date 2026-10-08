@@ -104,8 +104,11 @@ def main():
     stable = stable_slot(read_otadata(args.port))
     dev = 1 - stable
     print(f"stable is {SLOTS[stable]}; writing {SLOTS[dev]}, otadata untouched")
-    subprocess.run([sys.executable, idf_tool("components", "app_update", "otatool.py"),
-                    "--port", args.port, "write_ota_partition", "--slot", str(dev),
+    # parttool, not otatool: IDF v6.0.2's otatool write_ota_partition passes
+    # its file as `input=` to a function that takes `input_file`, and dies
+    # with a TypeError before writing anything. Same write, by slot name.
+    subprocess.run([sys.executable, idf_tool("components", "partition_table", "parttool.py"),
+                    "--port", args.port, "write_partition", "--partition-name", SLOTS[dev],
                     "--input", args.image], check=True)
     print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
           "DIAG -> Update -> Boot dev once to run it.")

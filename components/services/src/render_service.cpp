@@ -24,6 +24,7 @@
 #include "ui/framebuffer_canvas.hpp"
 #include "bsp/pins.hpp"
 
+#include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,6 +32,8 @@
 
 namespace services {
 namespace {
+
+constexpr const char* kTag = "render";
 
 // Frames are paced to a 60 Hz deadline, about the ILI9488's own refresh
 // rate: writing faster than the panel scans changes nothing on the glass.
@@ -194,6 +197,8 @@ void render_task(void* arg) {
             app.clear_full_repaint();
             if (d.system && d.system->first_frame_ms == 0) {
                 d.system->first_frame_ms = now ? now : 1;
+                // The boot-time number: switch to a picture, less the rails.
+                ESP_LOGI(kTag, "first frame at %u ms", static_cast<unsigned>(now));
             }
         } else {
             // Only what moved. Each widget clears its own bounds before

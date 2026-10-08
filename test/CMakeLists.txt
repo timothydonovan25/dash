@@ -69,6 +69,13 @@ foreach(t nav shift geo published lap state units trip config health
     add_test(NAME ${t} COMMAND test_${t})
 endforeach()
 
+# The settings half of `keeper`: board-free, so it is tested here.
+set(SVC ${CMAKE_CURRENT_SOURCE_DIR}/../components/services)
+add_executable(test_settings_store test_settings_store.cpp ${SVC}/src/settings_store.cpp)
+target_include_directories(test_settings_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_settings_store PRIVATE core hal)
+add_test(NAME settings_store COMMAND test_settings_store)
+
 foreach(t ui wire)
     target_link_libraries(test_${t} PRIVATE ui hal)
 endforeach()

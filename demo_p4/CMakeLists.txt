@@ -5,4 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(dash_demo_p4)
+# Named "dash", like the real firmware, because the stable/dev slot code
+# refuses any other project name (core/ota check_header, tools/flash_dev.py)
+# and testing that code on this board is what this build is for.
+project(dash)
