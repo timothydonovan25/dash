@@ -190,7 +190,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 25 host test suites, all passing.
+the media half of step 9 is written. 26 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -202,16 +202,18 @@ the media half of step 9 is written. 25 host test suites, all passing.
   turn a geometric crossing into a real lap
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
-- `config/` the one ConfigItem table · `health/` DevState and the retry policy
+- `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy
 - `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
 - `log/` the blackbox ring, its CSV format, and the rate decimator
 - `media/` the §11.1 Feed line parser: bounded, UTF-8-safe, `P` as an anchor
 - `ota/` stable/dev slot roles from the bootloader's rollback state, the
-  image header check, the power-on boot window, parked-only gating
+  image header check, parked-only gating
 - `ble/` which phone may connect: first bond free, then only in the
   pairing window; the 30 s encrypt deadline
+- `sweep/` the key-on gauge sweep: rpm, speed and gear to full scale and
+  back, applied to the Frame by `ui::App`, never to a slot
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below
@@ -246,9 +248,10 @@ storage, keeper, ota, ble on core 1.
 (architecture §11.7). The two 6 MB app slots hold a stable and a dev image;
 which is which is read off the bootloader's rollback state, never stored. A
 dev image never confirms itself, so any reset returns to stable. `ota`
-installs `update/dash.bin` from the card into the dev slot, boots dev once,
-or promotes it; DIAG → Update drives it, and a 3 s window at power-on offers
-the choice. `tools/flash_dev.py` writes the dev slot over USB; `idf.py
+installs `update/dash.bin` from the card into the dev slot and boots dev
+once; promoting is manual only, from inside dev via DIAG → Update → Promote
+to stable. DIAG → Update drives all of it; power-on always boots stable,
+with no chooser, so nothing slows the boot. `tools/flash_dev.py` writes the dev slot over USB; `idf.py
 flash` makes a new stable. Wi-Fi is not built. **Rollback must be in the
 first bootloader flashed** — `main.cpp` will not build without it — and the
 bootloader has about 1.1 kB left.

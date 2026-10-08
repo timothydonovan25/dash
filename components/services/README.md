@@ -16,8 +16,8 @@ creates at priority 23 with no core affinity, below everything on core 0.
 The TPMS scan is not written: it waits on a sensor to capture.
 
 `ota` owns the two app slots (§11.7): it works out at boot whether this
-image is stable, dev or a promotion on probation, confirms a promotion once
-it has run the dash, and installs from the card into the dev slot. Every
+image is stable or dev, installs from the card into the dev slot, and
+promotes dev to stable only when the rider asks, from DIAG → Update. Every
 flash write is parked-only. The decisions are `core::ota`'s.
 
 `storage_service` owns the card and holds the seam where USB mass storage

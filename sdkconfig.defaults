@@ -21,6 +21,14 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # be updated over the air, so this has to be in the first image ever flashed.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
+# Boot speed: a power-on does not hash the whole 1.1 MB image first, which
+# is most of the bootloader's time. The trade: a stable image corrupted in
+# flash is not caught, so there is no automatic fallback for it -- USB
+# reflash is the recovery. Every software restart still validates, so a dev
+# image booted from DIAG -> Update is checked before it runs, and an install
+# is hashed by esp_ota_end() before it is ever bootable.
+CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON=y
+
 # PSRAM: 32 MB in the P4NRW32's own package, hex mode.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
@@ -28,6 +36,10 @@ CONFIG_SPIRAM_SPEED_200M=y
 # Lets EXT_RAM_BSS_ATTR put the map traces and the blackbox in PSRAM, which
 # keeps internal SRAM for the panel's staging buffer and the task stacks.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# No pattern test of all 32 MB at every boot: it is the largest single cost
+# between power and the first frame. Turn it back on for bring-up if PSRAM
+# is suspect (bringup.md).
+CONFIG_SPIRAM_MEMTEST=n
 
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

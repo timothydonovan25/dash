@@ -37,6 +37,11 @@ struct Settings {
     int32_t tz_offset_h    = -5;
     bool    dim_at_night   = false;
 
+    // The start-up gauge sweep (core/sweep): on or off, and how long the
+    // needles take to go up and come back.
+    bool     gauge_sweep    = true;
+    uint16_t sweep_ms       = 2000;
+
     // Wheels — the front sensor counts spokes, the rear counts sprocket bolts
     uint16_t front_circumference_mm = 2130;
     uint16_t rear_circumference_mm  = 2050;
@@ -55,6 +60,8 @@ struct Settings {
     uint16_t shift_span_rpm  = 2400;
     uint16_t shift_hyst_rpm  = 120;
     uint16_t shift_flash_rpm = 8800;
+    // The lamps' brightness. On USB it is also capped (core::power).
+    uint8_t  shift_brightness_pct = 100;
 
     // Lap timer — mirrors core::lap::Config
     float    lap_half_width_ft = 50.0f;
@@ -99,6 +106,14 @@ struct ConfigItem {
 // The table, and how much of it there is.
 const ConfigItem* items();
 size_t            item_count();
+
+// The submenus CONFIG opens on: one per distinct `group`, in the order the
+// group first appears in the table. Item `i` of group `g` is the i-th item
+// of that group in table order. Nullptr / 0 past the end.
+size_t            group_count();
+const char*       group_name(size_t g);
+size_t            group_size(size_t g);
+const ConfigItem* group_item(size_t g, size_t i);
 
 // Nullptr if no item owns that key — which is what loading an NVS blob
 // written by a newer firmware looks like, and is not an error.

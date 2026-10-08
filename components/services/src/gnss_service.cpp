@@ -1,6 +1,6 @@
 // `gnss` — core 0, priority 12.
 //
-// Reads bytes and feeds core/nmea. That is the whole task: the parser is
+// Brings the receiver up, then reads bytes and feeds core/nmea. That is the whole task: the parser is
 // host-tested against captured sentences, so nothing here has to be clever
 // about degrees and minutes.
 #include "services/services.hpp"
@@ -18,6 +18,18 @@ void gnss_task(void* arg) {
     core::nmea::Parser parser;
     core::state::Gnss  fix;
     uint32_t last_fix_ms = 0;
+
+    // The receiver is brought up here, not in wiring::build(): agreeing a
+    // baud rate takes half a second of waiting, and nothing else in the boot
+    // needs the GPS. A missing receiver fails here and the keeper retries it.
+    if (d.gnss) {
+        uint32_t now = d.clock->now_ms();
+        d.health->begin_init(core::state::Dev::Gnss, now);
+        const hal::Status s = d.gnss->init();
+        now = d.clock->now_ms();
+        if (hal::ok(s)) d.health->report_ok(core::state::Dev::Gnss, now);
+        else d.health->report_error(core::state::Dev::Gnss, static_cast<int32_t>(s), now);
+    }
 
     for (;;) {
         char buf[256];

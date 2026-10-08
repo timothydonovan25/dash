@@ -13,4 +13,10 @@ Source classify(float vin_v, const Thresholds& t) {
     return vin_v >= t.bike_v ? Source::Bike : Source::Usb;
 }
 
+uint8_t lamp_master_pct(bool on_bike, uint8_t setting_pct, uint8_t usb_cap_pct) {
+    const uint8_t want = setting_pct > 100 ? 100 : setting_pct;
+    if (on_bike) return want;
+    return want < usb_cap_pct ? want : usb_cap_pct;
+}
+
 }  // namespace core::power

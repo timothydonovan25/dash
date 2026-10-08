@@ -5,8 +5,8 @@
 the new stable: the recovery path. This is the other one. It reads otadata
 off the dash, works out which slot is stable the way the bootloader would,
 and writes the image into the *other* slot without touching otadata, so the
-dash still boots stable. Then DIAG -> Update -> Boot dev once, or the boot
-window, runs it (system-architecture.md section 11.7).
+dash still boots stable. Then DIAG -> Update -> Boot dev once runs it
+(system-architecture.md section 11.7).
 
     . ~/.espressif/v6.0.2/esp-idf/export.sh
     idf.py build
@@ -108,7 +108,7 @@ def main():
                     "--port", args.port, "write_ota_partition", "--slot", str(dev),
                     "--input", args.image], check=True)
     print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
-          "pick Dev at the boot window, or DIAG -> Update -> Boot dev once.")
+          "DIAG -> Update -> Boot dev once to run it.")
 
 
 if __name__ == "__main__":

@@ -106,7 +106,20 @@ that will not save.
 **If it reboots in a loop**, read the coredump —
 `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` is already on. A panic before the
 first log line is almost always PSRAM, the chip revision, or the
-partition table, not your code.
+partition table, not your code. If PSRAM is the suspect, turn
+`CONFIG_SPIRAM_MEMTEST` back on for a build: it is off so the boot does not
+pattern-test all 32 MB every time (§11 for how to change it).
+
+**Boot time.** The order is built for it: the LED driver, tach and VIN
+come up and `ctrl` starts before the panel is touched, then the panel, IMU
+and pod, then the other tasks. The GPS (half a second of baud negotiation)
+and the SD mount happen on `gnss` and `storage`, after the dash is already
+drawing. A power-on also skips the bootloader's hash of the image
+(`CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON`); a software restart still
+checks it. The estimate is about half a second from the switch to lamps
+and screen, never measured: the log's millisecond stamps from the first
+`I (` line to `main: running` are the number to write down here, and a
+scope on 12 V against the backlight gives the rails as well.
 
 **If nothing enumerates on USB**, hold BOOT (SW1, GPIO35) and tap reset
 (SW3) for download mode. GPIO36 must be high for that, which R20 does.
@@ -395,16 +408,14 @@ the flash calls are not.
 4. **Boot dev once.** The dash restarts into dev: red DEV tag, Running says
    `dev`. Power-cycle it: it must come back stable with no input. Then a
    panic in dev (or a watchdog) must do the same.
-5. **The boot window.** Power on: the banner shows for 3 s. Press a button:
-   the chooser opens on Stable; D, E boots dev. No press: stable, and the
-   banner goes. Boot dev once from the menu must *not* show the window on
-   its restart.
+5. **No boot pause.** Power on with a dev image installed: the dash goes
+   straight to stable, with nothing on screen asking for input.
 6. **USB to dev.** `python3 tools/flash_dev.py` writes the other slot and
    the dash still boots stable afterwards.
-7. **Promote.** Running says `confirming` for 20 s, then `stable`;
-   power-cycle and it stays. Then promote an image that panics at boot:
-   the dash must come back on the old stable, and DIAG → Update must say
-   "promotion failed".
+7. **Promote.** Boot dev once, then DIAG → Update → Promote to stable:
+   Running says `stable` at once, with no restart, and the DEV tag goes.
+   Power-cycle and it stays. From stable, Promote must say "run dev first";
+   in dev and moving, "park first".
 8. **Pull the card mid-install**: "read failed", the other slot reads
    empty or invalid, and stable is unaffected.
 9. **Tach to lamp** with an install refused while moving: unchanged. An

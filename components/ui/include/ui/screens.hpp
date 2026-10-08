@@ -312,7 +312,8 @@ private:
 };
 
 // The two firmware slots and updating them (§11.7). Three actions, each a
-// focusable row; everything else is read-only. Every action is refused by
+// focusable row; everything else is read-only. Promotion is only ever done
+// here, by hand, from the dev image being kept. Every action is refused by
 // `ota` unless parked, and the status line says so.
 class UpdateScreen final : public Screen {
 public:
@@ -348,6 +349,7 @@ public:
     WidgetList widgets() override;
     uint8_t focus_count() const override;
     void set_focus(uint8_t f) override { focus_ = f; }
+    int focus_now() const override { return focus_; }
 
     // The screen edits the caller's Settings in place and reports changes
     // upward as ConfigSet commands, so the keeper can write NVS and every
@@ -359,6 +361,10 @@ private:
     Label                   hint_;
     Widget*                 list_[2] = {};
     core::config::Settings* settings_ = nullptr;
+    // Two levels: the list of submenus, then one submenu's items. `group_`
+    // is the submenu open, or the one to put the cursor back on.
+    bool                    in_group_ = false;
+    uint8_t                 group_ = 0;
     uint8_t                 focus_ = 0;
     bool                    editing_ = false;
 };

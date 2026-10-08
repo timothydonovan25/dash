@@ -184,7 +184,7 @@ struct BleDiag {
 };
 
 // The two firmware slots and any update in progress (§11.7). Written by
-// `ota`; the Update screen and the boot window read it.
+// `ota`; the Update screen reads it.
 struct Ota {
     bool             known = false;            // `ota` has published once
     core::ota::Role  role = core::ota::Role::Stable;
@@ -192,10 +192,6 @@ struct Ota {
     char             running_slot[8] = {};     // "ota_0" / "ota_1"
     core::ota::Other other = core::ota::Other::Unknown;
     char             other_ver[core::ota::kVersionLen] = {};
-    // This boot may offer the stable/dev chooser: stable, after a power-on
-    // rather than a restart the dash asked for itself.
-    bool             boot_window = false;
-    bool             promotion_failed = false;
     core::ota::Install      install = core::ota::Install::Idle;
     uint8_t                 install_pct = 0;
     core::ota::InstallError error = core::ota::InstallError::None;

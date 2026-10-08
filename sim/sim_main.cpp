@@ -29,6 +29,7 @@
 #include "core/input/input.hpp"
 #include "core/gear/gear.hpp"
 #include "core/shift/shift.hpp"
+#include "core/sweep/sweep.hpp"
 #include "services/logic_tick.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
@@ -125,11 +126,10 @@ int host_tz_offset_h() {
 // `ota`'s part, faked. The sim has no flash and no second slot, so this
 // answers the Update screen's requests the way the dash would if each one
 // worked, and instantly: enough to see every state the screen can show and
-// to drive the boot window from the pod buttons.
+// drive it from the pod buttons.
 struct FakeOta {
     core::state::Ota o;
     uint32_t gen = 0;
-    uint32_t confirm_at_ms = 0;
 
     void begin(core::state::Slots& slots) {
         o.known = true;
@@ -137,19 +137,13 @@ struct FakeOta {
         std::snprintf(o.running_ver, sizeof o.running_ver, "sim");
         std::snprintf(o.running_slot, sizeof o.running_slot, "ota_0");
         o.other = core::ota::Other::Empty;
-        // The sim starting is a power-on.
-        o.boot_window = true;
         gen = slots.ota_request.generation();
         slots.ota.publish(o);
     }
 
-    void step(core::state::Slots& slots, uint32_t now) {
+    void step(core::state::Slots& slots) {
         namespace ota = core::ota;
         bool dirty = false;
-        if (o.role == ota::Role::Confirming && now >= confirm_at_ms) {
-            o.role = ota::Role::Stable;
-            dirty = true;
-        }
         const uint32_t g = slots.ota_request.generation();
         if (g != gen) {
             gen = g;
@@ -162,7 +156,15 @@ struct FakeOta {
                 o.error = err;
             };
             const uint8_t op = slots.ota_request.get().op;
-            if (o.role != ota::Role::Stable) {
+            if (op == core::state::OtaRequest::Promote) {
+                if (o.role != ota::Role::Dev) fail(ota::InstallError::NotDev);
+                else if (!parked) fail(ota::InstallError::Moving);
+                else {
+                    o.role = ota::Role::Stable;
+                    o.install = ota::Install::Idle;
+                    o.error = ota::InstallError::None;
+                }
+            } else if (o.role != ota::Role::Stable) {
                 fail(ota::InstallError::NotStable);
             } else if (!parked) {
                 fail(ota::InstallError::Moving);
@@ -183,13 +185,7 @@ struct FakeOta {
                               o.running_slot[4] == '0' ? "ota_1" : "ota_0");
                 o.install = ota::Install::Idle;
                 o.error = ota::InstallError::None;
-                o.boot_window = false;
-                if (op == core::state::OtaRequest::Promote) {
-                    o.role = ota::Role::Confirming;
-                    confirm_at_ms = now + ota::kConfirmAfterMs;
-                } else {
-                    o.role = ota::Role::Dev;
-                }
+                o.role = ota::Role::Dev;
             }
         }
         if (dirty) slots.ota.publish(o);
@@ -400,7 +396,7 @@ int main() {
         now += kTickMs;
         controls.utc_ms = host_utc_ms_of_day();
         bike.step(slots, controls, now, kTickMs);
-        fake_ota.step(slots, now);
+        fake_ota.step(slots);
 
         // What `input` does: poll the pod, debounce, hand events to the UI.
         core::nav::InputEvent ev[core::input::kButtonCount];
@@ -418,7 +414,17 @@ int main() {
         sc.span_rpm = sv.span_rpm;
         sc.hysteresis_rpm = sv.hysteresis_rpm;
         sc.flash_rpm = sv.flash_rpm;
-        const uint16_t rpm = static_cast<uint16_t>(controls.rpm);
+        uint16_t rpm = static_cast<uint16_t>(controls.rpm);
+        // ...including the start-up sweep, timed from the first frame.
+        if (system.first_frame_ms != 0) {
+            core::sweep::Config wc;
+            wc.enabled = settings.gauge_sweep;
+            wc.duration_ms = settings.sweep_ms;
+            wc.peak_rpm = settings.shift_flash_rpm;
+            const float sw = core::sweep::lamp_rpm(now - system.first_frame_ms,
+                                                   controls.speed_mph, wc);
+            if (sw > rpm) rpm = static_cast<uint16_t>(sw);
+        }
         lamp_mask = core::shift::pattern(rpm, sc, lamp_mask);
         const bool flash = core::shift::over_limit(rpm, sc);
         controls.shift_mask = lamp_mask;
@@ -479,6 +485,7 @@ int main() {
         // What was just costed is what the panel would have sent.
         app.render(canvas, true);
         app.clear_full_repaint();
+        if (system.first_frame_ms == 0) system.first_frame_ms = now ? now : 1;
 
         for (size_t i = 0; i < px.size(); ++i) {
             const ui::Color c = px[i];

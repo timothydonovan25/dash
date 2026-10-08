@@ -14,7 +14,7 @@ bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
 const uint16_t kShippedKeys[] = {
     0x0101, 0x0102, 0x0103, 0x0104,
     0x0201, 0x0202, 0x0203, 0x0204,
-    0x0301, 0x0302, 0x0303, 0x0304,
+    0x0301, 0x0302, 0x0303, 0x0304, 0x0305,
     0x0401, 0x0402, 0x0403, 0x0404, 0x0405,
     0x0501, 0x0502, 0x0503,
     0x0601, 0x0602, 0x0603,
@@ -22,6 +22,7 @@ const uint16_t kShippedKeys[] = {
     0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806, 0x0807,
     0x0901,
     0x0A01, 0x0A02,
+    0x0B01, 0x0B02,
 };
 }  // namespace
 
@@ -186,6 +187,39 @@ int main() {
         format(s, *it, buf, sizeof buf);
         CHECK(eq(buf, "50 Hz"));
         CHECK(core::log::rate_interval_ms(s.log_rate) == 20);
+    }
+
+    CASE("the submenus cover every item exactly once, in table order");
+    {
+        size_t total = 0;
+        CHECK(group_count() >= 10);
+        CHECK(eq(group_name(0), "Display"));
+        CHECK(group_name(group_count()) == nullptr);
+        for (size_t g = 0; g < group_count(); ++g) {
+            CHECK(group_size(g) > 0);
+            for (size_t i = 0; i < group_size(g); ++i) {
+                const ConfigItem* it = group_item(g, i);
+                CHECK(it != nullptr);
+                CHECK(eq(it->group, group_name(g)));
+            }
+            CHECK(group_item(g, group_size(g)) == nullptr);
+            total += group_size(g);
+        }
+        CHECK(total == item_count());
+    }
+
+    CASE("the start-up sweep has its own submenu: on, 2 s");
+    {
+        Settings s;
+        CHECK(s.gauge_sweep);
+        CHECK(s.sweep_ms == 2000);
+        size_t g = 0;
+        while (g < group_count() && !eq(group_name(g), "Startup")) ++g;
+        CHECK(g < group_count());
+        CHECK(group_size(g) == 2);
+        CHECK(group_item(g, 0)->key == 0x0B01);
+        char buf[32];
+        format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "2000 ms"));
     }
 
     CASE("the modules that keep their own config read it from here");

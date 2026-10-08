@@ -47,6 +47,10 @@ struct SystemInfo {
     // Times the imu task fell back to polling because no data-ready edge
     // arrived. Climbing at the sample rate means INT1 is not working.
     uint32_t imu_timeouts  = 0;
+    // When render pushed its first whole frame, 0 until then. The start-up
+    // sweep is timed from it, so `ctrl`'s lamps and the screen's tach sweep
+    // together even though ctrl starts first.
+    uint32_t first_frame_ms = 0;
 };
 
 struct Context {
@@ -99,6 +103,9 @@ public:
     // wrap the cursor, and it changes with the data on some screens.
     virtual uint8_t focus_count() const { return 0; }
     virtual void set_focus(uint8_t) {}
+    // A screen that moves its own cursor -- CONFIG does, opening and closing
+    // a submenu -- says where it put it, so nav's copy follows. -1: never.
+    virtual int focus_now() const { return -1; }
 
     void bind(const Context& ctx) { ctx_ = &ctx; }
 

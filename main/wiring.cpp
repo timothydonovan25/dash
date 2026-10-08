@@ -102,23 +102,20 @@ services::Deps& build() {
     bring_up(core::state::Dev::Sd, g_storage.init());
     load_settings();
 
-    // 3. The LED driver, then the panel. The driver comes up dark — every
-    //    duty at zero — and the panel's backlight is three of its channels,
-    //    so it has to answer before the backlight can. The panel's reset is
-    //    a plain GPIO on this board; nothing else has to come up first.
+    // 3. What the shift lamps need, and nothing else: the LED driver, the
+    //    tach counters and VIN sense. main starts `ctrl` the moment this
+    //    returns, so the lamps are live before the panel has woken up. The
+    //    driver comes up dark, every duty at zero.
     bring_up(core::state::Dev::LedDriver, g_leds.init());
-    bring_up(core::state::Dev::Display, panel.init());
-    panel.set_backlight(20);
-
-    // 4. The sensors. Any of these may be absent; none of them stop the boot.
-    bring_up(core::state::Dev::Imu, g_imu.init());
-    bring_up(core::state::Dev::Gnss, g_gnss.init());
-    bring_up(core::state::Dev::McpPod, g_pod.init());
     g_sense.init();
-    g_card.init();
     // VIN sense has no health slot: a failed init leaves `rails` reading
     // nothing, which ctrl and the screens already treat as "unknown supply".
     if (!hal::ok(g_vin.init())) ESP_LOGW(kTag, "VIN sense: no ADC");
+
+    // Not here, on purpose: the GPS and the SD card. The GPS spends half a
+    // second agreeing a baud rate and the card can take longer than that to
+    // mount, so `gnss` and `storage` bring them up on their own tasks while
+    // the dash is already running. Neither is needed for the first frame.
 
     // Not fitted, and not faults: the health table distinguishes the two so
     // the keeper does not spend the ride retrying things that do not exist.
@@ -127,7 +124,7 @@ services::Deps& build() {
     g_health.set_absent(core::state::Dev::TpmsF);
     g_health.set_absent(core::state::Dev::TpmsR);     // no TPMS scan yet (§11.2)
 
-    // 5. Hand out the references. This is the only place any of these
+    // Hand out the references. This is the only place any of these
     //    objects meet each other.
     g_deps.clock      = &g_clock;
     g_deps.imu        = &g_imu;
@@ -153,6 +150,19 @@ services::Deps& build() {
     g_slots.health.publish(g_health.publish());
     g_commands.begin();
     return g_deps;
+}
+
+void finish() {
+    // 4. The panel, then the sensors render and input need. The panel's
+    //    reset is a plain GPIO on this board, and its backlight is three of
+    //    the LED driver's channels, which build() has already brought up.
+    bring_up(core::state::Dev::Display, g_deps.panel->init());
+    g_deps.panel->set_backlight(20);
+
+    // Any of these may be absent; none of them stop the boot.
+    bring_up(core::state::Dev::Imu, g_imu.init());
+    bring_up(core::state::Dev::McpPod, g_pod.init());
+    g_slots.health.publish(g_health.publish());
 }
 
 services::CommandQueue& commands() { return g_commands; }

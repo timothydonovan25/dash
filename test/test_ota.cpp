@@ -92,52 +92,14 @@ int main() {
 
     CASE("a USB-flashed or confirmed image is stable");
     {
-        CHECK(role_of(SlotState::None, 0, -1).role == Role::Stable);
-        CHECK(role_of(SlotState::Valid, 1, -1).role == Role::Stable);
-        const Boot b = role_of(SlotState::Valid, 0, -1);
-        CHECK(!b.clear_marker);
-        CHECK(!b.promotion_failed);
+        CHECK(role_of(SlotState::None) == Role::Stable);
+        CHECK(role_of(SlotState::Valid) == Role::Stable);
     }
 
-    CASE("an image booted by request with no marker is dev");
+    CASE("an image booted by request is dev until the rider promotes it");
     {
-        CHECK(role_of(SlotState::PendingVerify, 1, -1).role == Role::Dev);
-        CHECK(role_of(SlotState::New, 1, -1).role == Role::Dev);
-        // A marker for the other slot does not promote this one.
-        const Boot b = role_of(SlotState::PendingVerify, 1, 0);
-        CHECK(b.role == Role::Dev);
-        CHECK(!b.clear_marker);
-    }
-
-    CASE("a promoted image is on probation until it confirms");
-    {
-        const Boot b = role_of(SlotState::PendingVerify, 1, 1);
-        CHECK(b.role == Role::Confirming);
-        CHECK(!b.clear_marker);           // cleared only once it confirms
-    }
-
-    CASE("stable with a marker for the other slot: the promotion failed");
-    {
-        const Boot b = role_of(SlotState::Valid, 0, 1);
-        CHECK(b.role == Role::Stable);
-        CHECK(b.clear_marker);
-        CHECK(b.promotion_failed);
-    }
-
-    CASE("stable with a marker for itself: confirmed, then lost power");
-    {
-        const Boot b = role_of(SlotState::Valid, 1, 1);
-        CHECK(b.role == Role::Stable);
-        CHECK(b.clear_marker);
-        CHECK(!b.promotion_failed);
-    }
-
-    CASE("a promoted image confirms only once it is running the dash");
-    {
-        CHECK(!should_confirm(kConfirmAfterMs - 1, 600, true));
-        CHECK(!should_confirm(kConfirmAfterMs, 0, true));       // no frames
-        CHECK(!should_confirm(kConfirmAfterMs, 600, false));    // ctrl stalled
-        CHECK(should_confirm(kConfirmAfterMs, 600, true));
+        CHECK(role_of(SlotState::PendingVerify) == Role::Dev);
+        CHECK(role_of(SlotState::New) == Role::Dev);
     }
 
     CASE("the other slot: an aborted dev is still a dev");
@@ -146,90 +108,6 @@ int main() {
         CHECK(other_from(true, SlotState::None) == Other::Ready);
         CHECK(other_from(false, SlotState::None) == Other::Empty);
         CHECK(other_from(true, SlotState::Invalid) == Other::Invalid);
-    }
-
-    CASE("no input: the banner goes and stable carries on");
-    {
-        BootWindow w;
-        CHECK(w.phase() == Phase::Off);
-        CHECK(!w.active());
-        w.begin(500, true);
-        CHECK(w.active());
-        CHECK(w.left_ms(500) == kBannerMs);
-        w.tick(500 + kBannerMs - 1);
-        CHECK(w.phase() == Phase::Banner);
-        w.tick(500 + kBannerMs);
-        CHECK(w.phase() == Phase::Done);
-        CHECK(!w.active());
-        CHECK(w.take_choice() == Choice::Stable);
-        CHECK(w.take_choice() == Choice::None);   // once
-    }
-
-    CASE("any button opens the chooser, which starts on stable");
-    {
-        BootWindow w;
-        w.begin(0, true);
-        CHECK(w.press(Key::A, 1000));
-        CHECK(w.phase() == Phase::Chooser);
-        CHECK(w.focus() == 0);
-        CHECK(w.left_ms(1000) == kChooserMs);
-    }
-
-    CASE("picking dev");
-    {
-        BootWindow w;
-        w.begin(0, true);
-        w.press(Key::E, 100);       // opens, does not pick
-        CHECK(w.phase() == Phase::Chooser);
-        w.press(Key::D, 200);
-        CHECK(w.focus() == 1);
-        w.press(Key::E, 300);
-        CHECK(w.phase() == Phase::Done);
-        CHECK(w.take_choice() == Choice::Dev);
-    }
-
-    CASE("C and D both move between the two rows");
-    {
-        BootWindow w;
-        w.begin(0, true);
-        w.press(Key::B, 0);
-        w.press(Key::C, 0);
-        CHECK(w.focus() == 1);
-        w.press(Key::C, 0);
-        CHECK(w.focus() == 0);
-    }
-
-    CASE("dev cannot be picked when there is none");
-    {
-        BootWindow w;
-        w.begin(0, false);
-        w.press(Key::A, 0);
-        w.press(Key::D, 0);
-        CHECK(w.focus() == 0);
-        w.press(Key::E, 0);
-        CHECK(w.take_choice() == Choice::Stable);
-    }
-
-    CASE("an abandoned chooser falls back to stable, and presses keep it open");
-    {
-        BootWindow w;
-        w.begin(0, true);
-        w.press(Key::A, 1000);
-        w.press(Key::D, 1000 + kChooserMs - 1);              // restarts the clock
-        w.tick(1000 + kChooserMs);
-        CHECK(w.phase() == Phase::Chooser);
-        w.tick(1000 + 2 * kChooserMs - 1);
-        CHECK(w.phase() == Phase::Done);
-        CHECK(w.take_choice() == Choice::Stable);
-    }
-
-    CASE("once done, the window lets presses through to the dash");
-    {
-        BootWindow w;
-        CHECK(!w.press(Key::A, 0));           // never opened
-        w.begin(0, true);
-        w.tick(kBannerMs);
-        CHECK(!w.press(Key::A, kBannerMs + 1));
     }
 
     CASE("only parked: not moving, engine off");

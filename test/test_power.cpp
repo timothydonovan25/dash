@@ -53,5 +53,14 @@ int main() {
         CHECK(classify(t.bike_v - 0.01f, t) == Source::Usb);
     }
 
+    CASE("lamp brightness: the setting on the bike, capped on USB");
+    {
+        CHECK(lamp_master_pct(true, 100, 30) == 100);
+        CHECK(lamp_master_pct(true, 40, 30) == 40);
+        CHECK(lamp_master_pct(false, 100, 30) == 30);   // cap wins
+        CHECK(lamp_master_pct(false, 20, 30) == 20);    // setting can go lower
+        CHECK(lamp_master_pct(true, 250, 30) == 100);
+    }
+
     return check::report("power");
 }

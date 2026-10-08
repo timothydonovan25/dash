@@ -934,65 +934,6 @@ void AlertOverlay::render(Canvas& c) {
                 "E to dismiss", color::kDim, 1, Align::Center);
 }
 
-// --- BootChooser --------------------------------------------------------
-
-void BootChooser::set(bool chooser, uint8_t focus, bool dev_available, uint8_t left_s,
-                      const char* stable_ver, const char* dev_ver) {
-    const bool a = assign_t(chooser_, chooser);
-    const bool b = assign_t(focus_, focus);
-    const bool d = assign_t(dev_, dev_available);
-    const bool e = assign_t(left_s_, left_s);
-    const bool g = stable_.set(stable_ver);
-    const bool h = dev_ver_.set(dev_ver);
-    if (a || b || d || e || g || h) touch();
-}
-
-void BootChooser::render(Canvas& c) {
-    c.fill_rect(bounds, color::kPanel);
-    c.draw_rect(bounds, color::kAccent);
-    const int16_t x = static_cast<int16_t>(bounds.x + 10);
-    const int16_t right = static_cast<int16_t>(bounds.right() - 10);
-    char secs[4];
-    size_t k = 0;
-    if (left_s_ >= 10) secs[k++] = static_cast<char>('0' + (left_s_ / 10) % 10);
-    secs[k++] = static_cast<char>('0' + left_s_ % 10);
-    secs[k++] = 's';
-    secs[k] = '\0';
-
-    if (!chooser_) {
-        c.draw_text(x, static_cast<int16_t>(bounds.y + 10), "STABLE", color::kText, 2,
-                    Align::Left);
-        c.draw_text(right, static_cast<int16_t>(bounds.y + 10), secs, color::kDim, 2,
-                    Align::Right);
-        c.draw_text(x, static_cast<int16_t>(bounds.y + 34), stable_.s, color::kDim, 1,
-                    Align::Left);
-        c.draw_text(x, static_cast<int16_t>(bounds.bottom() - 16),
-                    "any button: choose firmware", color::kDim, 1, Align::Left);
-        return;
-    }
-
-    const int16_t row_h = 30;
-    for (uint8_t i = 0; i < 2; ++i) {
-        const int16_t y = static_cast<int16_t>(bounds.y + 8 + i * row_h);
-        const bool on = focus_ == i;
-        const bool usable = i == 0 || dev_;
-        if (on) {
-            c.fill_rect(Rect{static_cast<int16_t>(bounds.x + 4), static_cast<int16_t>(y - 3),
-                             static_cast<int16_t>(bounds.w - 8), static_cast<int16_t>(row_h - 4)},
-                        color::kGrid);
-        }
-        const Color col = !usable ? color::kDim : on ? color::kAccent : color::kText;
-        c.draw_text(x, y, i == 0 ? "Stable" : "Dev", col, 2, Align::Left);
-        const char* ver = i == 0 ? stable_.s : (dev_ ? dev_ver_.s : "none installed");
-        c.draw_text(static_cast<int16_t>(x + 90), static_cast<int16_t>(y + 4), ver,
-                    usable ? color::kText : color::kDim, 1, Align::Left);
-    }
-    c.draw_text(x, static_cast<int16_t>(bounds.bottom() - 16), "C/D move   E start",
-                color::kDim, 1, Align::Left);
-    c.draw_text(right, static_cast<int16_t>(bounds.bottom() - 16), secs, color::kDim, 1,
-                Align::Right);
-}
-
 // --- DevTag -------------------------------------------------------------
 
 void DevTag::render(Canvas& c) {

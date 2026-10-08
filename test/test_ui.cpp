@@ -821,6 +821,8 @@ int main() {
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
 
+        // CONFIG opens on its submenus; Display is the first.
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open
         const uint8_t before = fx.settings.brightness_pct;
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
         // C is up and D is down, on the value as much as on the list.
@@ -842,6 +844,7 @@ int main() {
         // And the edit marker only shows while editing: the same frame
         // rendered in and out of edit mode must differ.
         go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open
         fx.app.update(busy_frame());
         s.wipe();
         fx.app.render(s.canvas, true);
@@ -851,6 +854,76 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() != not_editing);
+    }
+
+    CASE("config submenus: E opens one, B goes back to it, C/D stay in it");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+        const uint8_t groups = fx.app.current().focus_count();
+        CHECK(groups == core::config::group_count());
+
+        // Down to the second submenu (Startup), open it, and the cursor and
+        // the row count are that submenu's.
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.app.current().focus_count() == core::config::group_size(1));
+        CHECK(fx.app.nav_state().focus == 0);
+
+        // Toggling the sweep off goes up as a ConfigSet for its key.
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        CHECK(!fx.settings.gauge_sweep);
+        CHECK(fx.sink.posted.back().cfg.key == 0x0B01);
+
+        // B ends the edit, then leaves the submenu with the cursor on it.
+        fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
+        CHECK(fx.app.current().focus_count() == core::config::group_size(1));
+        fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
+        CHECK(fx.app.current().focus_count() == groups);
+        CHECK(fx.app.nav_state().focus == 1);
+        CHECK(fx.app.nav_state().mode == Mode::Config);
+    }
+
+    CASE("at key-on the speed screen sweeps, then shows the bike");
+    {
+        core::state::Frame parked;                     // a bike at rest
+        parked.t_ms = 400;
+
+        // What the screen looks like with the sweep turned off.
+        size_t at_rest = 0;
+        {
+            Fixture off;
+            off.settings.gauge_sweep = false;
+            Screen320x480 s;
+            off.app.begin(s.canvas);
+            go_to(off.app, s.canvas, Mode::Cruise, 0);
+            off.app.update(parked);
+            s.wipe();
+            off.app.render(s.canvas, true);
+            at_rest = s.ink();
+        }
+
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        fx.app.update(parked);                         // the sweep starts
+
+        parked.t_ms = 400 + fx.settings.sweep_ms / 2;  // the top of the sweep
+        fx.app.update(parked);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != at_rest);
+
+        parked.t_ms = 400 + fx.settings.sweep_ms;      // over, for good
+        fx.app.update(parked);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() == at_rest);
     }
 
     CASE("an alert draws over whatever screen is up, and E dismisses it");
@@ -997,67 +1070,14 @@ int main() {
         CHECK(fx.sink.posted[2].id == core::state::CommandId::OtaPromote);
     }
 
-    CASE("at power-on, no input: the banner shows, then goes, and nothing is posted");
-    {
-        Fixture fx;
-        Screen320x480 s;
-        fx.app.begin(s.canvas);
-        Frame f = busy_frame();
-        f.t_ms = 2000;
-        f.ota.known = true;
-        f.ota.boot_window = true;
-        f.ota.other = core::ota::Other::Ready;
-        fx.app.update(f);
-        CHECK(fx.app.boot_window_active());
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        const size_t with_banner = s.ink();
-
-        f.t_ms += core::ota::kBannerMs;
-        fx.app.update(f);
-        CHECK(!fx.app.boot_window_active());
-        CHECK(fx.app.needs_full_repaint());   // what it covered comes back
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        CHECK(s.ink() != with_banner);
-        CHECK(fx.sink.posted.empty());
-    }
-
-    CASE("the boot window swallows presses, and picking dev posts the restart");
-    {
-        Fixture fx;
-        Screen320x480 s;
-        fx.app.begin(s.canvas);
-        Frame f = busy_frame();
-        f.t_ms = 2000;
-        f.ota.known = true;
-        f.ota.boot_window = true;
-        f.ota.other = core::ota::Other::Ready;
-        fx.app.update(f);
-
-        const core::nav::State before = fx.app.nav_state();
-        fx.app.on_input(InputEvent{Button::A, Press::Short}, s.canvas);   // opens
-        CHECK(fx.app.nav_state() == before);                                // not a mode change
-        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
-        f.t_ms += 20;
-        fx.app.update(f);
-        CHECK(!fx.app.boot_window_active());
-        CHECK(fx.sink.posted.size() == 1);
-        CHECK(fx.sink.posted[0].id == core::state::CommandId::OtaBootDevOnce);
-        CHECK(fx.app.nav_state() == before);
-    }
-
-    CASE("no boot window after a restart, and a dev image wears its tag");
+    CASE("a dev image wears its tag");
     {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
         Frame f = busy_frame();
         f.ota.known = true;
-        f.ota.boot_window = false;
         fx.app.update(f);
-        CHECK(!fx.app.boot_window_active());
         s.wipe();
         fx.app.render(s.canvas, true);
         const size_t stable_ink = s.ink();

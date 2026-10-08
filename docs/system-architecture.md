@@ -1036,21 +1036,19 @@ not updated over the air.
   The bootloader marks it pending, and a dev image never confirms itself,
   so the next reset of any kind (crash, watchdog, ignition) marks it
   aborted and boots stable. A dev build that hangs costs one key cycle.
-- **Promote** does the same boot with a marker in NVS (`ota`/0x0001) naming
-  the slot. That image confirms itself once it has run the dash for 20 s
-  (render loop drawing, `ctrl` publishing) and becomes stable. If it dies
-  first, the bootloader returns to the old stable, which finds the marker,
-  clears it, and DIAG → Update says the promotion failed.
+- **Promote** is always the rider's decision, never a timer. While dev is
+  running, DIAG → Update → Promote to stable confirms it on the spot
+  (`esp_ota_mark_app_valid_cancel_rollback`), with no restart; from then on
+  it is stable and the old stable's slot is where the next install goes.
+  Not promoted, it is gone at the next reset.
 - Dev cannot install anything: IDF refuses `esp_ota_begin` while the running
   image is pending. Installs run from stable and only ever write the dev
   slot, so **stable is never overwritten while it is the fallback.**
 
-**Choosing at power-on.** Stable boots normally, with no added boot time,
-and for the first 3 s shows "STABLE · any button: choose firmware". No press
-and the ride carries on. A press opens a two-row chooser (Stable / Dev, C/D
-to move, E to start), which falls back to stable after 10 s. Only after a
-power-on or brownout, never after a restart the dash asked for. A dev image
-wears a red DEV tag in the top-right corner of every screen.
+**Every power-on boots stable, with nothing to wait for.** There is no
+boot-time chooser: the dash comes up as fast as the hardware allows, and
+dev is reached only from DIAG → Update → Boot dev once. A dev image wears a
+red DEV tag in the top-right corner of every screen.
 
 **Getting an image into the dev slot**, from DIAG → Update:
 

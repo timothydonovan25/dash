@@ -28,7 +28,7 @@ enum class CommandId : uint8_t {
     BlePairingMode,   // let one new phone bond, for core::ble::kPairingWindowMs
     OtaInstallSd,     // write update/dash.bin from the card into the dev slot
     OtaBootDevOnce,   // restart into dev; the next reset returns to stable
-    OtaPromote,       // dev becomes stable, once it proves it runs (§11.7)
+    OtaPromote,       // from dev: keep the running dev image as stable (§11.7)
 };
 
 struct Command {

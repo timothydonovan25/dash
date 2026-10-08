@@ -12,6 +12,7 @@
 #include "core/gear/gear.hpp"
 #include "core/tach/tach.hpp"
 #include "core/power/power.hpp"
+#include "core/sweep/sweep.hpp"
 #include "bsp/pins.hpp"
 
 #include "freertos/FreeRTOS.h"
@@ -38,6 +39,11 @@ void ctrl_task(void* arg) {
     uint8_t last_mask = 0;
     uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
     uint32_t ticks = 0;
+    // The start-up sweep (core/sweep): the lamps follow the screen's tach up
+    // and back, from render's first frame. If no frame has gone out by
+    // kSweepWaitMs -- a dead panel -- there is no tach to follow, so skip it.
+    bool sweep_done = false;
+    constexpr uint32_t kSweepWaitMs = 3000;
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -73,7 +79,24 @@ void ctrl_task(void* arg) {
         sc.flash_rpm = sv.flash_rpm;
 
         const uint16_t rpm = static_cast<uint16_t>(tach.raw_rpm());
-        const uint8_t mask = core::shift::pattern(rpm, sc, last_mask);
+        uint16_t lamp_rpm = rpm;
+        if (!sweep_done) {
+            const uint32_t now = d.clock->now_ms();
+            const uint32_t first = d.system ? d.system->first_frame_ms : 0;
+            if (first != 0) {
+                core::sweep::Config wc;
+                wc.enabled = d.settings->gauge_sweep;
+                wc.duration_ms = d.settings->sweep_ms;
+                wc.peak_rpm = d.settings->shift_flash_rpm;
+                const float road = front.mph() > rear.mph() ? front.mph() : rear.mph();
+                const float sw = core::sweep::lamp_rpm(now - first, road, wc);
+                if (sw < 0.0f) sweep_done = true;
+                else if (sw > rpm) lamp_rpm = static_cast<uint16_t>(sw);
+            } else if (now > kSweepWaitMs || !d.settings->gauge_sweep) {
+                sweep_done = true;
+            }
+        }
+        const uint8_t mask = core::shift::pattern(lamp_rpm, sc, last_mask);
         const bool resend = ++ticks % kResendTicks == 0;
         hal::Status lamp_status = hal::Status::Ok;
         bool wrote = false;
@@ -92,8 +115,9 @@ void ctrl_task(void* arg) {
             core::power::classify(d.slots->elec.get().vbat);
         const bool full = src == core::power::Source::Bike ||
                           (src == core::power::Source::Unknown && tach.running());
-        const uint8_t master =
-            full ? 100u : static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255);
+        const uint8_t master = core::power::lamp_master_pct(
+            full, d.settings->shift_brightness_pct,
+            static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255));
         if (master != last_master && d.lamps) {
             const hal::Status ms = d.lamps->set_master(master);
             if (hal::ok(lamp_status)) lamp_status = ms;
@@ -105,7 +129,7 @@ void ctrl_task(void* arg) {
 
         core::state::Engine e;
         e.shift_mask = mask;
-        e.shift_flash = core::shift::over_limit(rpm, sc);
+        e.shift_flash = core::shift::over_limit(lamp_rpm, sc);
         e.rpm = tach.rpm();
         e.neutral = c.neutral;
         e.ecu_online = d.engine && d.engine->online();

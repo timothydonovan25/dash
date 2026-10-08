@@ -6,11 +6,10 @@
 //
 // At boot it works out what the running image is, from the bootloader's own
 // state rather than from anything stored (see core/ota/ota.hpp):
-//   - stable: carries on; on a power-on it lets the UI offer the chooser;
-//   - dev: carries on and never confirms, so the next reset is stable again;
-//   - confirming: a promoted image, which confirms itself once it has run
-//     the dash for core::ota::kConfirmAfterMs. A crash before that and the
-//     bootloader puts the old stable back.
+//   - stable: carries on. It is what every power-on boots: there is no
+//     chooser, so nothing waits on the rider before the dash is up;
+//   - dev: carries on and never confirms by itself, so the next reset is
+//     stable again -- unless the rider promotes it from DIAG -> Update.
 //
 // Then it waits for the Update screen's requests, handed over by `logic`.
 // Every request that writes flash is refused unless the bike is parked: an
@@ -39,12 +38,6 @@ using core::ota::SlotState;
 
 constexpr const char* kTag = "ota";
 
-// The promote marker: the slot index a promotion is waiting on, or -1. In
-// its own namespace, so nothing else's keys can collide with it. A float
-// because that is what IStorage stores; small integers are exact.
-constexpr const char* kNsOta = "ota";
-constexpr uint16_t    kKeyPromote = 0x0001;
-
 // Where the rider puts an update on the card.
 constexpr const char* kUpdatePath = "update/dash.bin";
 
@@ -67,22 +60,6 @@ SlotState state_of(const esp_partition_t* p) {
     }
 }
 
-int slot_index(const esp_partition_t* p) {
-    return p ? static_cast<int>(p->subtype) - ESP_PARTITION_SUBTYPE_APP_OTA_MIN : -1;
-}
-
-int read_marker(Deps& d) {
-    float v = -1.0f;
-    if (!d.storage || !hal::ok(d.storage->read_f32(kNsOta, kKeyPromote, v))) return -1;
-    return v < 0.0f ? -1 : static_cast<int>(v + 0.5f);
-}
-
-bool write_marker(Deps& d, int slot) {
-    if (!d.storage) return false;
-    return hal::ok(d.storage->write_f32(kNsOta, kKeyPromote, static_cast<float>(slot))) &&
-           hal::ok(d.storage->commit());
-}
-
 void copy_str(char* dst, size_t cap, const char* src) {
     std::strncpy(dst, src, cap - 1);
     dst[cap - 1] = '\0';
@@ -97,13 +74,6 @@ void read_other(core::state::Ota& o, const esp_partition_t* other) {
     else o.other_ver[0] = '\0';
 }
 
-// A restart the dash asked for itself is not a power-on, so a boot into dev
-// does not open the chooser again on its way back.
-bool powered_on() {
-    const esp_reset_reason_t r = esp_reset_reason();
-    return r == ESP_RST_POWERON || r == ESP_RST_BROWNOUT;
-}
-
 class Ota {
 public:
     explicit Ota(Deps& d) : d_(d) {}
@@ -111,22 +81,11 @@ public:
     void boot() {
         running_ = esp_ota_get_running_partition();
         other_ = esp_ota_get_next_update_partition(running_);
-        const int marker = read_marker(d_);
-        const core::ota::Boot b =
-            core::ota::role_of(state_of(running_), slot_index(running_), marker);
-
         o_.known = true;
-        o_.role = b.role;
-        o_.promotion_failed = b.promotion_failed;
+        o_.role = core::ota::role_of(state_of(running_));
         copy_str(o_.running_ver, sizeof o_.running_ver, esp_app_get_description()->version);
         copy_str(o_.running_slot, sizeof o_.running_slot, running_ ? running_->label : "?");
         read_other(o_, other_);
-        o_.boot_window = b.role == Role::Stable && powered_on();
-
-        if (b.clear_marker) write_marker(d_, -1);
-        if (b.promotion_failed) {
-            ESP_LOGW(kTag, "the promoted image never confirmed; still on the old stable");
-        }
         ESP_LOGI(kTag, "running %s from %s, %s; other slot %s",
                  o_.running_ver, o_.running_slot, core::ota::role_name(o_.role),
                  o_.other == core::ota::Other::Ready ? o_.other_ver : "empty");
@@ -135,27 +94,16 @@ public:
 
     void run() {
         uint32_t request_gen = d_.slots->ota_request.generation();
-        uint32_t motion_gen = d_.slots->motion.generation();
         for (;;) {
             vTaskDelay(pdMS_TO_TICKS(kIdleWaitMs));
-
-            if (o_.role == Role::Confirming) {
-                // `ctrl` publishes motion at 500 Hz; a generation that moved
-                // in the last 100 ms is a ctrl still running.
-                const uint32_t g = d_.slots->motion.generation();
-                const bool ctrl_alive = g != motion_gen;
-                motion_gen = g;
-                const uint16_t hz = d_.system ? d_.system->render_hz_x10 : 0;
-                if (core::ota::should_confirm(d_.clock->now_ms(), hz, ctrl_alive)) confirm();
-            }
 
             const uint32_t gen = d_.slots->ota_request.generation();
             if (gen == request_gen) continue;
             request_gen = gen;
             switch (d_.slots->ota_request.get().op) {
                 case core::state::OtaRequest::InstallSd:   install_sd(); break;
-                case core::state::OtaRequest::BootDevOnce: boot_dev(false); break;
-                case core::state::OtaRequest::Promote:     boot_dev(true); break;
+                case core::state::OtaRequest::BootDevOnce: boot_dev(); break;
+                case core::state::OtaRequest::Promote:     promote(); break;
                 default: break;
             }
         }
@@ -177,14 +125,20 @@ private:
         return core::ota::may_write(m.best_mph, e.rpm);
     }
 
-    void confirm() {
+    // The rider's decision, made while dev is running: keep it. Confirming
+    // the running image is the whole of it -- the bootloader then treats it
+    // as the stable one, and the old stable becomes the slot the next
+    // install writes. No restart.
+    void promote() {
+        if (o_.role != Role::Dev) return fail(InstallError::NotDev);
+        if (!parked()) return fail(InstallError::Moving);
         if (esp_ota_mark_app_valid_cancel_rollback() != ESP_OK) {
-            ESP_LOGE(kTag, "could not confirm; the next reset goes back to the old stable");
-            return;
+            return fail(InstallError::FlashFailed);
         }
-        write_marker(d_, -1);
         o_.role = Role::Stable;
-        ESP_LOGI(kTag, "promoted image confirmed: this is stable now");
+        o_.install = Install::Idle;
+        o_.error = InstallError::None;
+        ESP_LOGI(kTag, "%s promoted: this is stable now", o_.running_ver);
         read_other(o_, other_);
         publish();
     }
@@ -267,24 +221,19 @@ private:
         publish();
     }
 
-    // Boot the other slot. Once, or as a promotion on probation. Either way
-    // it is the bootloader that falls back if the new image does not make it.
-    void boot_dev(bool promote) {
+    // Boot the other slot, once. The bootloader falls back to stable at the
+    // next reset unless the rider promotes it in the meantime.
+    void boot_dev() {
         if (o_.role != Role::Stable) return fail(InstallError::NotStable);
         if (!other_) return fail(InstallError::NoDev);
         if (!parked()) return fail(InstallError::Moving);
         read_other(o_, other_);
         if (o_.other != core::ota::Other::Ready) return fail(InstallError::NoDev);
 
-        if (promote && !write_marker(d_, slot_index(other_))) {
-            return fail(InstallError::FlashFailed);
-        }
         if (esp_ota_set_boot_partition(other_) != ESP_OK) {
-            if (promote) write_marker(d_, -1);
             return fail(InstallError::FlashFailed);
         }
-        ESP_LOGW(kTag, "%s %s, restarting", promote ? "promoting" : "booting once into",
-                 o_.other_ver);
+        ESP_LOGW(kTag, "booting once into %s, restarting", o_.other_ver);
         // Not the card's sync: the logger owns its open file, and calling
         // into it from here would race it. Up to its next sync (a few
         // seconds) of blackbox is the price of a restart the rider asked for.

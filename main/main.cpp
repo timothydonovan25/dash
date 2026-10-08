@@ -60,7 +60,11 @@ extern "C" void app_main() {
     // nothing else. Core 1 takes everything that can afford to be late.
     // Anything added to core 0 above priority 18 breaks the 3 ms budget from
     // a tach edge to a shift lamp.
+    //
+    // ctrl goes first, as soon as the lamps' hardware is up: the shift
+    // lights should not wait on the panel's 120 ms sleep-out.
     services::start_ctrl(deps);
+    wiring::finish();
     services::start_imu(deps);
     services::start_gnss(deps);
     services::start_logic(deps, commands);

@@ -192,6 +192,9 @@ void render_task(void* arg) {
                 }
             }
             app.clear_full_repaint();
+            if (d.system && d.system->first_frame_ms == 0) {
+                d.system->first_frame_ms = now ? now : 1;
+            }
         } else {
             // Only what moved. Each widget clears its own bounds before
             // drawing, and the background chrome sits outside those bounds,

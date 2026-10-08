@@ -9,9 +9,15 @@
 
 namespace wiring {
 
-// Constructs everything, brings the hardware up in the order §6 requires,
-// and returns the dependency set the tasks take. Call once.
+// Constructs everything and brings up only what `ctrl` needs -- the LED
+// driver, the tach counters, VIN -- so the shift lamps can start before the
+// panel is awake. Returns the dependency set the tasks take. Call once.
 services::Deps& build();
+
+// The rest of the boot-critical hardware: the panel, the IMU and the pod.
+// Call once, after build(), before starting render, imu or input. The GPS
+// and the card are brought up later by their own tasks.
+void finish();
 
 services::CommandQueue& commands();
 

@@ -41,4 +41,10 @@ struct Thresholds {
 
 Source classify(float vin_v, const Thresholds& t = Thresholds{});
 
+// The shift lamps' master duty, in percent: the rider's brightness setting,
+// but never above `usb_cap_pct` unless the supply is the bike. The cap is a
+// current limit, not a preference, so the setting can lower it and never
+// raise it.
+uint8_t lamp_master_pct(bool on_bike, uint8_t setting_pct, uint8_t usb_cap_pct);
+
 }  // namespace core::power

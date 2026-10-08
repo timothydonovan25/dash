@@ -1,5 +1,6 @@
 #include "core/config/config.hpp"
 #include <cstddef>
+#include <cstring>
 
 namespace core::config {
 namespace {
@@ -56,6 +57,10 @@ const ConfigItem kItems[] = {
     num   (0x0103, "UTC offset",   "Display", Kind::Int, -12, 14, 1, "h",  FIELD(tz_offset_h)),
     boolean(0x0104,"Dim at night", "Display", FIELD(dim_at_night)),
 
+    // Start-up sweep. Its own submenu so it is easy to find and turn off.
+    boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),
+    num   (0x0B02, "Sweep time",   "Startup", Kind::Int, 500, 5000, 100, "ms", FIELD(sweep_ms)),
+
     // Wheels
     num(0x0201, "Front circ.",  "Wheels", Kind::Int, 1000, 3000, 5, "mm", FIELD(front_circumference_mm)),
     num(0x0202, "Rear circ.",   "Wheels", Kind::Int, 1000, 3000, 5, "mm", FIELD(rear_circumference_mm)),
@@ -67,6 +72,7 @@ const ConfigItem kItems[] = {
     num(0x0302, "Span",        "Shift", Kind::Int,  200,  6000, 100, "rpm", FIELD(shift_span_rpm)),
     num(0x0303, "Hysteresis",  "Shift", Kind::Int,    0,   500,  10, "rpm", FIELD(shift_hyst_rpm)),
     num(0x0304, "Flash above", "Shift", Kind::Int, 3000, 14000, 100, "rpm", FIELD(shift_flash_rpm)),
+    num(0x0305, "Brightness",  "Shift", Kind::Int,    5,   100,   5, "%",   FIELD(shift_brightness_pct)),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),
@@ -138,6 +144,52 @@ size_t emit_lit(char* buf, size_t n, const char* s) {
 
 const ConfigItem* items()     { return kItems; }
 size_t            item_count(){ return kCount; }
+
+namespace {
+bool same(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
+
+// True if item i is the first in the table with its group.
+bool opens_group(size_t i) {
+    for (size_t j = 0; j < i; ++j) {
+        if (same(kItems[j].group, kItems[i].group)) return false;
+    }
+    return true;
+}
+}  // namespace
+
+size_t group_count() {
+    size_t n = 0;
+    for (size_t i = 0; i < kCount; ++i) n += opens_group(i) ? 1 : 0;
+    return n;
+}
+
+const char* group_name(size_t g) {
+    for (size_t i = 0; i < kCount; ++i) {
+        if (!opens_group(i)) continue;
+        if (g == 0) return kItems[i].group;
+        --g;
+    }
+    return nullptr;
+}
+
+size_t group_size(size_t g) {
+    const char* name = group_name(g);
+    if (!name) return 0;
+    size_t n = 0;
+    for (size_t i = 0; i < kCount; ++i) n += same(kItems[i].group, name) ? 1 : 0;
+    return n;
+}
+
+const ConfigItem* group_item(size_t g, size_t idx) {
+    const char* name = group_name(g);
+    if (!name) return nullptr;
+    for (size_t i = 0; i < kCount; ++i) {
+        if (!same(kItems[i].group, name)) continue;
+        if (idx == 0) return &kItems[i];
+        --idx;
+    }
+    return nullptr;
+}
 
 const ConfigItem* find(uint16_t key) {
     for (size_t i = 0; i < kCount; ++i) {

@@ -28,7 +28,11 @@ constexpr uint32_t kRemountAfterMs = 2000;
 void storage_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
+    // The first mount is this task's too, not the boot's: a slow card would
+    // otherwise hold back the first frame. So the first attempt does not
+    // wait out kRemountAfterMs.
     uint32_t last_attempt_ms = 0;
+    bool attempted = false;
     bool was_present = false;
 
     for (;;) {
@@ -51,7 +55,8 @@ void storage_task(void* arg) {
                 d.health->set_absent(core::state::Dev::Sd);
             }
         } else if (!card->present()) {
-            if (now - last_attempt_ms >= kRemountAfterMs) {
+            if (!attempted || now - last_attempt_ms >= kRemountAfterMs) {
+                attempted = true;
                 last_attempt_ms = now;
                 d.health->begin_init(core::state::Dev::Sd, now);
                 const hal::Status s = card->init();

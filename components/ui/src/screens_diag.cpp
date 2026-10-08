@@ -387,10 +387,7 @@ void UpdateScreen::update(const Frame& f) {
     Color sc = color::kDim;
     const char* st = "";
     char err[48];
-    if (o.promotion_failed) {
-        st = "promotion failed: still on the old stable";
-        sc = color::kAlarm;
-    } else if (o.install == ota::Install::Failed) {
+    if (o.install == ota::Install::Failed) {
         join(err, sizeof err, "failed:", ota::install_error_name(o.error),
              o.error == ota::InstallError::BadImage ? ota::image_error_name(o.image_error)
                                                     : nullptr);
@@ -399,11 +396,8 @@ void UpdateScreen::update(const Frame& f) {
     } else if (o.install == ota::Install::Done) {
         st = "installed: boot dev once to try it";
         sc = color::kAccent;
-    } else if (o.role == ota::Role::Confirming) {
-        st = "new stable: proving itself before it confirms";
-        sc = color::kAccent;
     } else if (o.role == ota::Role::Dev) {
-        st = "dev: any reset goes back to stable";
+        st = "dev: Promote keeps it, any reset goes back";
         sc = color::kAlarm;
     }
     status_.configure(st, sc);
@@ -424,9 +418,11 @@ void UpdateScreen::update(const Frame& f) {
         install = "checking";
     }
     const char* boot = !stable ? "stable only" : has_dev ? "" : "no dev";
+    // Promoting is done from the image being kept, so it is a dev-only row.
+    const char* promote = o.known && o.role == ota::Role::Dev ? "" : "dev only";
     actions_.set_row(0, "Install from SD", install);
     actions_.set_row(1, "Boot dev once", boot);
-    actions_.set_row(2, "Promote dev", boot);
+    actions_.set_row(2, "Promote to stable", promote);
     actions_.set_row_count(kActions);
     actions_.set_focus(focus_);
 }
