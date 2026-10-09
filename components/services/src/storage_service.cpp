@@ -34,6 +34,11 @@ void storage_task(void* arg) {
     uint32_t last_attempt_ms = 0;
     bool attempted = false;
     bool was_present = false;
+    // CONFIG's Eject unmounted the card and it has not come out yet. The
+    // card is still in the socket, so without this the next pass would
+    // mount it straight back.
+    bool ejected = false;
+    uint32_t request_gen = d.slots->storage_request.generation();
 
     for (;;) {
         const uint32_t now = d.clock->now_ms();
@@ -45,7 +50,26 @@ void storage_task(void* arg) {
 
         const bool inserted = card->card_detect();
 
+        const uint32_t gen = d.slots->storage_request.generation();
+        if (gen != request_gen) {
+            request_gen = gen;
+            if (d.slots->storage_request.get().op ==
+                    core::state::StorageRequest::Eject && inserted) {
+                // Closing the log file flushes it. The logger sees the card
+                // gone on its next pass and stops writing.
+                card->unmount();
+                was_present = false;
+                ejected = true;
+                d.health->set_absent(core::state::Dev::Sd);
+                if (d.system) d.system->sd_ejected = true;
+            }
+        }
+
         if (!inserted) {
+            if (ejected) {
+                ejected = false;
+                if (d.system) d.system->sd_ejected = false;
+            }
             if (was_present) {
                 // Pulled. Unmount so the FAT structures are not left half
                 // written, and let the logger discover there is nowhere to
@@ -54,6 +78,8 @@ void storage_task(void* arg) {
                 was_present = false;
                 d.health->set_absent(core::state::Dev::Sd);
             }
+        } else if (ejected) {
+            // Pulled and put back is the only way out of this.
         } else if (!card->present()) {
             if (!attempted || now - last_attempt_ms >= kRemountAfterMs) {
                 attempted = true;

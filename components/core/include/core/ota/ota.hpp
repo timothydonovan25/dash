@@ -42,6 +42,8 @@ inline constexpr size_t kChipIdOffset   = 12;
 inline constexpr size_t kAppDescOffset  = 32;
 inline constexpr size_t kVersionOffset  = kAppDescOffset + 16;
 inline constexpr size_t kProjectOffset  = kAppDescOffset + 48;
+inline constexpr size_t kDateOffset     = kAppDescOffset + 96;   // "Oct  8 2026"
+inline constexpr size_t kDateLen        = 16;
 inline constexpr size_t kVersionLen     = 32;
 // How much of the file check_header() needs to see.
 inline constexpr size_t kHeaderBytes    = kAppDescOffset + 256;
@@ -54,12 +56,38 @@ enum class ImageError : uint8_t {
     NoAppDesc,      // an image, but not an application
     WrongProject,   // an application, but not this dash's
     TooBig,         // will not fit the slot
+    WrongBoard,     // built for the other board: demo on the bike, or back
 };
 const char* image_error_name(ImageError e);
 
 struct ImageInfo {
     char version[kVersionLen] = {};
+    char date[11] = {};             // "2026-10-08", or empty if it has none
 };
+
+// --- what a version says --------------------------------------------------
+//
+// firmware.txt makes every version "<number> <board> <feature>", e.g.
+// "1.0 demo Wi-Fi OTA" (see cmake/dash_version.cmake). Images from before
+// that say something else, and are taken as they are.
+
+// IDF's __DATE__ ("Oct  8 2026") as "2026-10-08". Empty if it is not one.
+void iso_date(const char* idf_date, char* out, size_t n);
+
+// The board word of a version, into `out`; false if the version is not in
+// the "<number> <board> <feature>" form.
+bool board_of(const char* version, char* out, size_t n);
+
+// Refuses an image for the other board. Either version without a board --
+// an older image, or a hand-built one -- is not refused: there is nothing to
+// compare, and the dev slot's fall-back is the safety net either way.
+ImageError check_board(const char* running_version, const char* image_version);
+
+// The file name for an image, as cmake/dash_name_bin.cmake names a build:
+// "1.0 demo Wi-Fi OTA" built "2026-10-08" is
+// "dash-1.0-2026-10-08-demo-wifi-ota.bin". A version not in that form is
+// lowercased and hyphenated in its place. Cut to fit `n`, always ".bin".
+void bin_name(const char* version, const char* iso_date, char* out, size_t n);
 
 // `head` is the first `len` bytes of a file `file_size` long, going into a
 // slot of `slot_size`.

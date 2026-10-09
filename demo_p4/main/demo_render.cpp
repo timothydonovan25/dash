@@ -54,11 +54,14 @@ void render_task_impl(void* arg) {
     app.set_track_source(&lap_src);
 
     // The whole screen, one buffer, one shot — see demo_render.hpp for why
-    // this doesn't need the real render task's banding.
+    // this doesn't need the real render task's banding. In PSRAM: it is
+    // 300 kB, and asked for as plain MALLOC_CAP_8BIT it came out of internal
+    // RAM and left the SDIO link, lwIP and NimBLE about 17 kB between them,
+    // which a Wi-Fi upload ran out of. Only the CPU touches it.
     auto* buf = static_cast<ui::Color*>(
         heap_caps_malloc(static_cast<size_t>(ui::kScreenW) * ui::kScreenH *
                          sizeof(ui::Color),
-                         MALLOC_CAP_8BIT));
+                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!buf) {
         d.health->report_error(core::state::Dev::Display, -1, d.clock->now_ms());
         vTaskDelete(nullptr);

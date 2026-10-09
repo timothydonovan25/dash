@@ -29,6 +29,10 @@ struct Slots {
     Published<BleRequest> ble_request; // logic, for the same reason
     Published<Ota>        ota;         // ota
     Published<OtaRequest> ota_request; // logic, like ble_request
+    Published<StorageRequest> storage_request; // logic, like ble_request
+    Published<Wifi>        wifi;          // wifi
+    Published<WifiRequest> wifi_request;  // logic, like ble_request
+    Published<OtaUpload>   ota_upload;    // wifi
 };
 
 // One coherent read of everything, taken once per frame. Screens get this
@@ -47,10 +51,11 @@ struct Frame {
     Health   health;
     BleDiag  ble_diag;
     Ota      ota;
+    Wifi     wifi;
     uint32_t t_ms = 0;
 };
 
-// Twelve seqlock reads. Each slot is internally consistent; the frame as a
+// Thirteen seqlock reads. Each slot is internally consistent; the frame as a
 // whole is not an instant, and does not need to be — the newest lean angle
 // and a 40 ms old lap time on the same screen is not a bug.
 Frame snapshot(const Slots& s, uint32_t t_ms);

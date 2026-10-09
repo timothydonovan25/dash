@@ -20,6 +20,8 @@ idf_component_register(
          "../../components/services/src/ble_service.cpp"
          "../../components/services/src/c6_firmware.cpp"
          "../../components/services/src/settings_store.cpp"
+         "../../components/services/src/wifi_service.cpp"
+         "../../components/services/src/wifi_page.cpp"
          "../../components/drivers/src/nvs_storage.cpp"
          "../../components/drivers/src/clock.cpp"
     INCLUDE_DIRS "."
@@ -30,7 +32,8 @@ idf_component_register(
              esp_lcd esp_driver_i2c esp_driver_gpio esp_driver_ledc
              esp_timer freertos esp_driver_usb_serial_jtag
              esp_hosted bt esp_partition bootloader_support
-             app_update esp_app_format nvs_flash)
+             app_update esp_app_format nvs_flash
+             esp_wifi esp_wifi_remote esp_netif esp_event esp_http_server)
 
 # Pushes demo_p4/c6_cp's built firmware into the slave_fw data partition
 # (see ../partitions.csv) with `idf.py c6-flash`, so the production

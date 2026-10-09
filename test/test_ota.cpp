@@ -127,5 +127,75 @@ int main() {
         CHECK(percent(3000000, 6000000) == 50);
     }
 
+    CASE("the image's build date is read and written as ISO");
+    {
+        std::vector<uint8_t> b = image();
+        std::memcpy(&b[kDateOffset], "Oct  8 2026", 11);
+        ImageInfo info;
+        CHECK(verify(b, kFile, &info) == ImageError::None);
+        CHECK(std::strcmp(info.date, "2026-10-08") == 0);
+
+        char d[11];
+        iso_date("Jan 31 2027", d, sizeof d);
+        CHECK(std::strcmp(d, "2027-01-31") == 0);
+        iso_date("Dec  1 2026", d, sizeof d);
+        CHECK(std::strcmp(d, "2026-12-01") == 0);
+        iso_date("", d, sizeof d);
+        CHECK(d[0] == '\0');
+        iso_date("Foo  1 2026", d, sizeof d);
+        CHECK(d[0] == '\0');
+        iso_date("Oct  8 20x6", d, sizeof d);
+        CHECK(d[0] == '\0');
+        CHECK(verify(image(), kFile, &info) == ImageError::None);
+        CHECK(info.date[0] == '\0');                  // no date in it at all
+    }
+
+    CASE("the board is the word after the version number");
+    {
+        char b[16];
+        CHECK(board_of("1.0 demo Wi-Fi OTA", b, sizeof b));
+        CHECK(std::strcmp(b, "demo") == 0);
+        CHECK(board_of("12.3.4 bike Lap timer", b, sizeof b));
+        CHECK(std::strcmp(b, "bike") == 0);
+        CHECK(!board_of("pre-phone-split-26-g3a32994-dir", b, sizeof b));
+        CHECK(!board_of("v1.2.3", b, sizeof b));
+        CHECK(!board_of("1.0 demo", b, sizeof b));      // no feature
+        CHECK(!board_of("1 demo x", b, sizeof b));      // no minor
+        CHECK(!board_of("1. demo x", b, sizeof b));
+        CHECK(!board_of("", b, sizeof b));
+        CHECK(!board_of(nullptr, b, sizeof b));
+    }
+
+    CASE("an image for the other board is refused; an older one is not");
+    {
+        CHECK(check_board("1.0 bike Wi-Fi OTA", "1.1 bike Lap timer") == ImageError::None);
+        CHECK(check_board("1.0 bike Wi-Fi OTA", "1.1 demo Lap timer") ==
+              ImageError::WrongBoard);
+        CHECK(check_board("1.0 demo Wi-Fi OTA", "1.1 bike Lap timer") ==
+              ImageError::WrongBoard);
+        CHECK(check_board("pre-phone-split-26", "1.1 bike Lap timer") == ImageError::None);
+        CHECK(check_board("1.0 demo Wi-Fi OTA", "v0.9") == ImageError::None);
+        CHECK(std::strcmp(image_error_name(ImageError::WrongBoard), "?") != 0);
+    }
+
+    CASE("an image's file name says version, date, board and feature");
+    {
+        char n[64];
+        bin_name("1.0 demo Wi-Fi OTA", "2026-10-08", n, sizeof n);
+        CHECK(std::strcmp(n, "dash-1.0-2026-10-08-demo-wifi-ota.bin") == 0);
+        bin_name("1.2.3 bike Lap  timer", "2027-01-31", n, sizeof n);
+        CHECK(std::strcmp(n, "dash-1.2.3-2027-01-31-bike-lap-timer.bin") == 0);
+        bin_name("1.0 bike Big fix", "", n, sizeof n);
+        CHECK(std::strcmp(n, "dash-1.0-bike-big-fix.bin") == 0);
+        bin_name("pre-phone-split-26-g3a32994-dir", "2026-10-07", n, sizeof n);
+        CHECK(std::strcmp(n, "dash-prephonesplit26g3a32994dir-2026-10-07.bin") == 0);
+        bin_name(nullptr, nullptr, n, sizeof n);
+        CHECK(std::strcmp(n, "dash-unknown.bin") == 0);
+        char tiny[16];
+        bin_name("1.0 demo Wi-Fi OTA", "2026-10-08", tiny, sizeof tiny);
+        CHECK(std::strlen(tiny) == sizeof tiny - 1);
+        CHECK(std::strcmp(tiny + std::strlen(tiny) - 4, ".bin") == 0);
+    }
+
     return check::report("ota");
 }

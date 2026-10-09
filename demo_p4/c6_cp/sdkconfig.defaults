@@ -1,7 +1,8 @@
 CONFIG_IDF_TARGET="esp32c6"
 
-# The dash only needs BT out of this chip — no Wi-Fi anywhere in this repo.
-CONFIG_ESP_HOSTED_CP_WIFI=n
+# BLE for the phone, and Wi-Fi for the on-demand update hotspot (§11.7):
+# the dash runs a soft AP through esp_wifi_remote when the rider asks for it.
+CONFIG_ESP_HOSTED_CP_WIFI=y
 
 # BT Configuration
 CONFIG_BT_ENABLED=y

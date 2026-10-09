@@ -1,0 +1,497 @@
+// `wifi` — core 1, priority 3. The on-demand update hotspot (§11.7).
+//
+// Off until the rider turns it on from DIAG -> Update or CONFIG. Then the
+// C6 runs a WPA2 soft AP, "CRF250F-Dash", with a new eight-digit password
+// each time (shown on the Update screen), and the dash serves one page at
+// http://192.168.4.1 that can
+//   - upload a dash.bin into the dev slot,
+//   - download the ride logs off the card,
+//   - download the stable and dev firmware images, as a backup.
+// It turns itself off after core::wifi::kIdleOffMs without a request, and
+// as soon as the bike moves. The policy is core::wifi; this is the radio
+// and the web server.
+//
+// The page never writes flash itself. An upload's bytes go through
+// Deps::ota_stream to `ota`, which checks the header, writes the dev slot,
+// and refuses unless parked, exactly as for an install from the card.
+// Booting the new image stays a button on the dash: nothing on the network
+// can make the bike run code it has not been told to run.
+//
+// The Wi-Fi itself is on the C6, reached over the same SDIO link as BLE
+// through esp_wifi_remote. A C6 still on the BLE-only build refuses to start
+// Wi-Fi, and carries the same ESP-Hosted version number as the BLE + Wi-Fi
+// build, so a refusal here is what triggers replacing its firmware.
+#include "services/services.hpp"
+#include "c6_firmware.hpp"
+
+#include "core/ota/ota.hpp"
+#include "core/wifi/wifi.hpp"
+
+#include "esp_app_desc.h"
+#include "esp_event.h"
+#include "esp_heap_caps.h"
+#include "esp_http_server.h"
+#include "esp_image_format.h"
+#include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_ota_ops.h"
+#include "esp_random.h"
+#include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/stream_buffer.h"
+#include "freertos/task.h"
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+
+namespace services {
+
+extern const char kPage[];   // wifi_page.cpp
+
+namespace {
+
+constexpr const char* kTag = "wifi";
+
+// Internal RAM is what the SDIO link, lwIP and NimBLE all draw on, and it
+// is what ran out the first time an upload went through. Logged at every
+// change of state so a leak shows as a falling number.
+void log_ram(const char* when) {
+    ESP_LOGI(kTag, "%s: internal free %u, largest %u, low %u", when,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)));
+}
+constexpr uint32_t kTickMs = 250;
+constexpr size_t kChunk = 4096;
+
+// Any other failure is believed on the second try: the first can be the
+// C6 still settling after BLE came up. ESP_ERR_NOT_SUPPORTED is the C6
+// saying it was built without Wi-Fi, and is believed at once.
+constexpr int kRefusalsBeforeC6Update = 2;
+
+// How long an upload waits for `ota` to finish checking and writing after
+// the last byte arrives. esp_ota_end hashes the whole image.
+constexpr uint32_t kInstallWaitMs = 60000;
+
+// Shared between the wifi task and the web server's task. The server only
+// reads Deps and stamps `last_use_ms`; the wifi task owns everything else.
+struct Web {
+    Deps* d = nullptr;
+    std::atomic<uint32_t> last_use_ms{0};
+    std::atomic<uint8_t> clients{0};
+    void touch() { last_use_ms.store(d->clock->now_ms()); }
+};
+Web g_web;
+// One buffer for the server's one task: uploads and downloads both pass
+// through it a chunk at a time.
+uint8_t g_buf[kChunk];
+
+// --- page handlers --------------------------------------------------------
+
+esp_err_t send_json(httpd_req_t* r, const char* body) {
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(r, body);
+}
+
+esp_err_t page_get(httpd_req_t* r) {
+    g_web.touch();
+    httpd_resp_set_type(r, "text/html; charset=utf-8");
+    return httpd_resp_sendstr(r, kPage);
+}
+
+// Stable is whichever slot the bootloader would fall back to: the running
+// one when stable is running, the other one when dev is.
+const esp_partition_t* slot_for(bool stable) {
+    const core::state::Ota o = g_web.d->slots->ota.get();
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* other = esp_ota_get_next_update_partition(running);
+    const bool running_is_stable = !o.known || o.role == core::ota::Role::Stable;
+    return stable == running_is_stable ? running : other;
+}
+
+esp_err_t status_get(httpd_req_t* r) {
+    g_web.touch();
+    const core::state::Ota o = g_web.d->slots->ota.get();
+    const hal::ICard* card = g_web.d->card;
+    char body[448];
+    std::snprintf(body, sizeof body,
+                  "{\"running\":\"%s\",\"running_date\":\"%s\",\"slot\":\"%s\","
+                  "\"role\":\"%s\",\"other\":\"%s\",\"other_date\":\"%s\","
+                  "\"install\":%u,\"pct\":%u,\"error\":\"%s\","
+                  "\"image_error\":\"%s\",\"card\":%s}",
+                  o.running_ver, o.running_date, o.running_slot, core::ota::role_name(o.role),
+                  o.other == core::ota::Other::Ready ? o.other_ver : "",
+                  o.other == core::ota::Other::Ready ? o.other_date : "",
+                  static_cast<unsigned>(o.install), static_cast<unsigned>(o.install_pct),
+                  core::ota::install_error_name(o.error),
+                  core::ota::image_error_name(o.image_error),
+                  card && card->present() ? "true" : "false");
+    return send_json(r, body);
+}
+
+// Firmware out: the image only, not the 6 MB slot it sits in.
+esp_err_t fw_get(httpd_req_t* r) {
+    g_web.touch();
+    const bool stable = std::strcmp(r->uri, "/fw/stable.bin") == 0;
+    const esp_partition_t* p = slot_for(stable);
+    esp_image_metadata_t md = {};
+    const esp_partition_pos_t pos = {p ? p->address : 0, p ? p->size : 0};
+    if (!p || esp_image_get_metadata(&pos, &md) != ESP_OK || md.image_len == 0) {
+        return httpd_resp_send_err(r, HTTPD_404_NOT_FOUND, "no image in that slot");
+    }
+    // Named like a build: dash-<version>-<date>-<board>-<feature>.bin.
+    esp_app_desc_t desc = {};
+    char date[11] = "";
+    if (esp_ota_get_partition_description(p, &desc) == ESP_OK) {
+        core::ota::iso_date(desc.date, date, sizeof date);
+    }
+    char file[64];
+    core::ota::bin_name(desc.version, date, file, sizeof file);
+    char disp[96];
+    std::snprintf(disp, sizeof disp, "attachment; filename=\"%s\"", file);
+    httpd_resp_set_type(r, "application/octet-stream");
+    httpd_resp_set_hdr(r, "Content-Disposition", disp);
+    for (size_t at = 0; at < md.image_len;) {
+        const size_t n = md.image_len - at < kChunk ? md.image_len - at : kChunk;
+        if (esp_partition_read(p, at, g_buf, n) != ESP_OK ||
+            httpd_resp_send_chunk(r, reinterpret_cast<const char*>(g_buf), n) != ESP_OK) {
+            httpd_resp_send_chunk(r, nullptr, 0);
+            return ESP_FAIL;
+        }
+        at += n;
+        g_web.touch();
+    }
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+// The log list as JSON, built straight into the response in pieces.
+struct ListCtx {
+    httpd_req_t* r;
+    bool first;
+};
+
+void list_one(const char* name, size_t size, void* vctx) {
+    auto* c = static_cast<ListCtx*>(vctx);
+    if (!core::wifi::valid_log_name(name)) return;
+    char item[96];
+    const int n = std::snprintf(item, sizeof item, "%s{\"name\":\"%s\",\"size\":%u}",
+                                c->first ? "" : ",", name, static_cast<unsigned>(size));
+    c->first = false;
+    httpd_resp_send_chunk(c->r, item, n);
+}
+
+esp_err_t logs_list_get(httpd_req_t* r) {
+    g_web.touch();
+    hal::ICard* card = g_web.d->card;
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    httpd_resp_send_chunk(r, "[", 1);
+    if (card && card->present()) {
+        ListCtx ctx{r, true};
+        card->list("logs", list_one, &ctx);
+    }
+    httpd_resp_send_chunk(r, "]", 1);
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+esp_err_t log_get(httpd_req_t* r) {
+    g_web.touch();
+    const char* name = r->uri + std::strlen("/logs/");
+    hal::ICard* card = g_web.d->card;
+    if (!core::wifi::valid_log_name(name)) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "not a log name");
+    }
+    char path[48];
+    std::snprintf(path, sizeof path, "logs/%s", name);
+    size_t size = 0;
+    if (!card || !hal::ok(card->size_of(path, size))) {
+        return httpd_resp_send_err(r, HTTPD_404_NOT_FOUND, "no such log");
+    }
+    char disp[64];
+    std::snprintf(disp, sizeof disp, "attachment; filename=\"%s\"", name);
+    httpd_resp_set_type(r, "text/csv");
+    httpd_resp_set_hdr(r, "Content-Disposition", disp);
+    for (size_t at = 0; at < size;) {
+        size_t got = 0;
+        const size_t want = size - at < kChunk ? size - at : kChunk;
+        if (!hal::ok(card->read_at(path, at, g_buf, want, got)) || got == 0 ||
+            httpd_resp_send_chunk(r, reinterpret_cast<const char*>(g_buf), got) != ESP_OK) {
+            httpd_resp_send_chunk(r, nullptr, 0);
+            return ESP_FAIL;
+        }
+        at += got;
+        g_web.touch();
+    }
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+// Firmware in. The body goes to `ota` through the stream; the answer is
+// whatever `ota` made of it.
+esp_err_t fw_post(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    auto* sb = static_cast<StreamBufferHandle_t>(d.ota_stream);
+    if (!sb) return httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "no stream");
+    const size_t size = r->content_len;
+    if (size < core::ota::kHeaderBytes || size > 0x600000) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "not a dash.bin");
+    }
+
+    // Anything left from an upload that was cut off goes first.
+    xStreamBufferReset(sb);
+    const uint32_t gen_before = d.slots->ota.generation();
+    d.slots->ota_upload.publish(core::state::OtaUpload{static_cast<uint32_t>(size)});
+
+    size_t sent = 0;
+    while (sent < size) {
+        const size_t want = size - sent < kChunk ? size - sent : kChunk;
+        const int n = httpd_req_recv(r, reinterpret_cast<char*>(g_buf), want);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (n <= 0) {
+            // The phone went away. `ota` notices the stream stall and
+            // abandons the half-written slot by itself.
+            ESP_LOGW(kTag, "upload cut off at %u of %u", static_cast<unsigned>(sent),
+                     static_cast<unsigned>(size));
+            return ESP_FAIL;
+        }
+        size_t queued = 0;
+        while (queued < static_cast<size_t>(n)) {
+            const size_t q = xStreamBufferSend(sb, g_buf + queued, n - queued,
+                                               pdMS_TO_TICKS(10000));
+            if (q == 0) {
+                return httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                           "the dash stopped taking the upload");
+            }
+            queued += q;
+        }
+        sent += n;
+        g_web.touch();
+    }
+
+    // Wait for `ota` to come to a verdict on this upload.
+    const uint32_t t0 = d.clock->now_ms();
+    for (;;) {
+        const core::state::Ota o = d.slots->ota.get();
+        const bool fresh = d.slots->ota.generation() != gen_before;
+        if (fresh && (o.install == core::ota::Install::Done ||
+                      o.install == core::ota::Install::Failed)) {
+            char body[160];
+            if (o.install == core::ota::Install::Done) {
+                std::snprintf(body, sizeof body, "{\"ok\":true,\"dev\":\"%s\"}", o.other_ver);
+            } else {
+                std::snprintf(body, sizeof body, "{\"ok\":false,\"error\":\"%s%s%s\"}",
+                              core::ota::install_error_name(o.error),
+                              o.error == core::ota::InstallError::BadImage ? ": " : "",
+                              o.error == core::ota::InstallError::BadImage
+                                  ? core::ota::image_error_name(o.image_error) : "");
+            }
+            g_web.touch();
+            return send_json(r, body);
+        }
+        if (d.clock->now_ms() - t0 > kInstallWaitMs) {
+            return send_json(r, "{\"ok\":false,\"error\":\"no answer from the installer\"}");
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
+
+httpd_handle_t start_server() {
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.core_id = 1;
+    cfg.task_priority = 3;
+    cfg.stack_size = 6144;
+    cfg.max_uri_handlers = 8;
+    cfg.uri_match_fn = httpd_uri_match_wildcard;
+    cfg.lru_purge_enable = true;
+    cfg.recv_wait_timeout = 10;
+    cfg.send_wait_timeout = 10;
+    httpd_handle_t h = nullptr;
+    if (httpd_start(&h, &cfg) != ESP_OK) return nullptr;
+
+    const httpd_uri_t uris[] = {
+        {"/",              HTTP_GET,  page_get,      nullptr},
+        {"/api/status",    HTTP_GET,  status_get,    nullptr},
+        {"/api/logs",      HTTP_GET,  logs_list_get, nullptr},
+        {"/logs/*",        HTTP_GET,  log_get,       nullptr},
+        {"/fw/stable.bin", HTTP_GET,  fw_get,        nullptr},
+        {"/fw/dev.bin",    HTTP_GET,  fw_get,        nullptr},
+        {"/fw",            HTTP_POST, fw_post,       nullptr},
+    };
+    for (const httpd_uri_t& u : uris) httpd_register_uri_handler(h, &u);
+    return h;
+}
+
+// --- the radio ------------------------------------------------------------
+
+void on_wifi_event(void*, esp_event_base_t, int32_t id, void*) {
+    if (id == WIFI_EVENT_AP_STACONNECTED) {
+        g_web.clients.fetch_add(1);
+        g_web.touch();
+    } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
+        if (g_web.clients.load() > 0) g_web.clients.fetch_sub(1);
+    }
+}
+
+class Hotspot {
+public:
+    explicit Hotspot(Deps& d) : d_(d) {}
+
+    void run() {
+        uint32_t request_gen = d_.slots->wifi_request.generation();
+        uint32_t last_pub_ms = 0;
+        for (;;) {
+            vTaskDelay(pdMS_TO_TICKS(kTickMs));
+            uint32_t now = d_.clock->now_ms();
+
+            const uint32_t gen = d_.slots->wifi_request.generation();
+            if (gen != request_gen) {
+                request_gen = gen;
+                const auto op = d_.slots->wifi_request.get().op;
+                if (w_.state == core::wifi::State::On) stop("turned off");
+                else if (op == core::state::WifiRequest::Toggle) start();
+            }
+
+            if (w_.state != core::wifi::State::On) continue;
+            // Read the clock again: start() above stamps last_use later than
+            // `now`, and an unsigned now - last would then read as days idle.
+            now = d_.clock->now_ms();
+            const float mph = d_.slots->motion.get().best_mph;
+            const uint32_t last = g_web.last_use_ms.load();
+            if (core::wifi::should_stop(now, last, mph)) {
+                stop(mph > core::wifi::kMovingMph ? "moving" : "idle");
+                continue;
+            }
+            if (now - last_pub_ms >= 1000) {
+                if (now / 5000 != last_pub_ms / 5000) log_ram("on");
+                last_pub_ms = now;
+                w_.clients = g_web.clients.load();
+                w_.off_in_s = static_cast<uint16_t>(core::wifi::off_in_s(now, last));
+                publish();
+            }
+        }
+    }
+
+private:
+    void publish() { d_.slots->wifi.publish(w_); }
+
+    void start() {
+        w_ = core::state::Wifi{};
+        w_.state = core::wifi::State::Starting;
+        publish();
+        log_ram("before start");
+        // The health slot, not the tracker: that is keeper's, and this is
+        // another task.
+        if (!d_.slots->health.get().ok(core::state::Dev::BleHost)) {
+            ESP_LOGW(kTag, "no link to the C6, so no Wi-Fi");
+            w_.state = core::wifi::State::Failed;
+            publish();
+            return;
+        }
+
+        core::wifi::make_password(esp_random(), esp_random(), w_.pass);
+        const esp_err_t up = bring_up();
+        if (up != ESP_OK) {
+            if (up == ESP_ERR_NOT_SUPPORTED || ++refusals_ >= kRefusalsBeforeC6Update) {
+                ESP_LOGW(kTag, "the C6 refuses Wi-Fi: replacing its firmware");
+                w_.state = core::wifi::State::UpdatingC6;
+                w_.pass[0] = '\0';
+                publish();
+                c6_firmware_push_now();           // restarts the dash on success
+            }
+            w_ = core::state::Wifi{};
+            w_.state = core::wifi::State::Failed;
+            publish();
+            return;
+        }
+        refusals_ = 0;
+        g_web.touch();
+        g_web.clients.store(0);
+        server_ = start_server();
+        if (!server_) {
+            ESP_LOGE(kTag, "web server did not start");
+            esp_wifi_stop();
+            w_.state = core::wifi::State::Failed;
+            publish();
+            return;
+        }
+        w_.state = core::wifi::State::On;
+        w_.off_in_s = static_cast<uint16_t>(core::wifi::kIdleOffMs / 1000u);
+        ESP_LOGI(kTag, "hotspot \"%s\" up at 192.168.4.1", core::wifi::kSsid);
+        log_ram("up");
+        publish();
+    }
+
+    esp_err_t bring_up() {
+        // The netif once per boot, whatever the C6 says: making the default
+        // AP netif a second time asserts inside esp_netif.
+        if (!netif_made_) {
+            esp_netif_init();
+            const esp_err_t ev = esp_event_loop_create_default();
+            if (ev != ESP_OK && ev != ESP_ERR_INVALID_STATE) return ev;
+            esp_netif_create_default_wifi_ap();
+            esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, nullptr);
+            netif_made_ = true;
+        }
+        if (!inited_) {
+            wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+            const esp_err_t e = esp_wifi_init(&cfg);
+            if (e != ESP_OK) {
+                ESP_LOGW(kTag, "esp_wifi_init: %s", esp_err_to_name(e));
+                return e;
+            }
+            inited_ = true;
+        }
+        wifi_config_t ap = {};
+        std::snprintf(reinterpret_cast<char*>(ap.ap.ssid), sizeof ap.ap.ssid, "%s",
+                      core::wifi::kSsid);
+        ap.ap.ssid_len = static_cast<uint8_t>(std::strlen(core::wifi::kSsid));
+        std::snprintf(reinterpret_cast<char*>(ap.ap.password), sizeof ap.ap.password, "%s",
+                      w_.pass);
+        ap.ap.channel = 6;
+        ap.ap.max_connection = 2;
+        ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        ap.ap.pmf_cfg.required = false;
+        esp_err_t e = esp_wifi_set_mode(WIFI_MODE_AP);
+        if (e == ESP_OK) e = esp_wifi_set_config(WIFI_IF_AP, &ap);
+        if (e == ESP_OK) e = esp_wifi_start();
+        if (e != ESP_OK) ESP_LOGW(kTag, "hotspot did not start: %s", esp_err_to_name(e));
+        return e;
+    }
+
+    void stop(const char* why) {
+        if (server_) {
+            httpd_stop(server_);
+            server_ = nullptr;
+        }
+        esp_wifi_stop();
+        ESP_LOGI(kTag, "hotspot off (%s)", why);
+        log_ram("off");
+        w_ = core::state::Wifi{};
+        publish();
+    }
+
+    Deps& d_;
+    core::state::Wifi w_;
+    httpd_handle_t server_ = nullptr;
+    bool netif_made_ = false;
+    bool inited_ = false;
+    int refusals_ = 0;
+};
+
+void wifi_task(void* arg) {
+    Deps& d = *static_cast<Deps*>(arg);
+    g_web.d = &d;
+    static Hotspot hotspot(d);
+    hotspot.run();
+}
+
+}  // namespace
+
+void start_wifi(Deps& d) {
+    d.slots->wifi.publish(core::state::Wifi{});
+    xTaskCreatePinnedToCore(wifi_task, "wifi", 4096, &d, 3, nullptr, 1);
+}
+
+}  // namespace services

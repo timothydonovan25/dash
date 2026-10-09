@@ -20,5 +20,6 @@ idf_component_register(
          "src/media.cpp"
          "src/pairing.cpp"
          "src/ota.cpp"
+         "src/wifi.cpp"
          "src/sweep.cpp"
     INCLUDE_DIRS "include")

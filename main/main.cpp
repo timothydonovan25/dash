@@ -78,6 +78,7 @@ extern "C" void app_main() {
     // Last, so a radio that is slow to come up, or never does, delays
     // nothing above it (§11.8).
     services::start_ble(deps);
+    services::start_wifi(deps);
 
     ESP_LOGI(kTag, "running");
     // app_main returns and its task is deleted; the eleven above carry on.

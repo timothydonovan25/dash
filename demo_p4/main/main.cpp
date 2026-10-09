@@ -151,4 +151,5 @@ extern "C" void app_main(void) {
     // exactly as on the real board. BLE last, as there.
     services::start_ota(g_deps);
     services::start_ble(g_deps);
+    services::start_wifi(g_deps);
 }

@@ -86,6 +86,11 @@ struct Deps {
     // either — there was no path between the two before, and the screen
     // showed "no laps yet" for the whole session.
     LapHistory* lap_history = nullptr;
+
+    // Bytes of a firmware upload, from the Wi-Fi page to `ota`. A FreeRTOS
+    // StreamBuffer, made by start_ota; void* so this header stays free of
+    // FreeRTOS types.
+    void* ota_stream = nullptr;
 };
 
 // The one command queue (§4.5). Screens post, `logic` drains, and every
@@ -117,6 +122,10 @@ void start_storage(Deps& d);
 // Stable/dev slots and updates (§11.7). Core 1, priority 2.
 void start_ota(Deps& d);
 void start_ble(Deps& d);
+// The on-demand update hotspot and its page (§11.7). Core 1, priority 3.
+// Off until the rider turns it on. Starts nothing on the radio until then,
+// but needs esp_hosted up, so it goes after start_ble.
+void start_wifi(Deps& d);
 
 // Where the input task puts decoded button events for the render task to
 // apply to the UI. Kept separate from the command queue: one is "the rider

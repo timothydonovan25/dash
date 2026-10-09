@@ -21,6 +21,7 @@ enum class CommandId : uint8_t {
     LogStart,
     LogStop,
     StorageToHost,    // hand the SD card to USB MSC
+    StorageEject,     // flush and unmount the card so it can be pulled
     ImuCalibrate,
     ImuSetMountOffset,
     MediaCtrl,        // i: 0 previous, 1 play/pause, 2 next — §11 "Ctrl"
@@ -29,6 +30,7 @@ enum class CommandId : uint8_t {
     OtaInstallSd,     // write update/dash.bin from the card into the dev slot
     OtaBootDevOnce,   // restart into dev; the next reset returns to stable
     OtaPromote,       // from dev: keep the running dev image as stable (§11.7)
+    WifiToggle,       // the update hotspot on, or off if it is on
 };
 
 struct Command {

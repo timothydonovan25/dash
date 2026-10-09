@@ -100,6 +100,34 @@ bool push_partition_to_slave(const esp_partition_t* part, size_t fw_size) {
     return true;
 }
 
+// slave_fw to the C6, then a restart so both ends start over in step.
+// Returns only if something failed, having said what.
+void push_and_restart() {
+    const esp_partition_t* part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, static_cast<esp_partition_subtype_t>(0x40), kPartitionLabel);
+    if (part == nullptr) {
+        ESP_LOGE(kTag, "no '%s' partition — can't upgrade the C6 over SDIO", kPartitionLabel);
+        return;
+    }
+
+    size_t fw_size = 0;
+    if (!image_size(part, &fw_size) || fw_size == 0 || fw_size > part->size) {
+        ESP_LOGE(kTag, "'%s' partition has no usable C6 firmware image", kPartitionLabel);
+        return;
+    }
+
+    ESP_LOGW(kTag, "pushing %u bytes over SDIO", static_cast<unsigned>(fw_size));
+    if (!push_partition_to_slave(part, fw_size)) return;
+
+    if (esp_hosted_slave_ota_activate() != ESP_OK) {
+        ESP_LOGE(kTag, "ota_activate failed — C6 still has the old firmware");
+        return;
+    }
+    ESP_LOGW(kTag, "C6 activated new firmware — restarting host to resync");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
+}
+
 }  // namespace
 
 void c6_firmware_update_if_needed() {
@@ -121,31 +149,14 @@ void c6_firmware_update_if_needed() {
         return;
     }
 
-    const esp_partition_t* part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, static_cast<esp_partition_subtype_t>(0x40), kPartitionLabel);
-    if (part == nullptr) {
-        ESP_LOGE(kTag, "no '%s' partition — can't upgrade the C6 over SDIO", kPartitionLabel);
-        return;
-    }
-
-    size_t fw_size = 0;
-    if (!image_size(part, &fw_size) || fw_size == 0 || fw_size > part->size) {
-        ESP_LOGE(kTag, "'%s' partition has no usable C6 firmware image", kPartitionLabel);
-        return;
-    }
-
     ESP_LOGW(kTag, "C6 firmware %" PRIu32 ".%" PRIu32 ".%" PRIu32 " is older than this host "
-             "expects — pushing %u bytes over SDIO",
-             fwver.major1, fwver.minor1, fwver.patch1, static_cast<unsigned>(fw_size));
-    if (!push_partition_to_slave(part, fw_size)) return;
+             "expects", fwver.major1, fwver.minor1, fwver.patch1);
+    push_and_restart();
+}
 
-    if (esp_hosted_slave_ota_activate() != ESP_OK) {
-        ESP_LOGE(kTag, "ota_activate failed — C6 still has the old firmware");
-        return;
-    }
-    ESP_LOGW(kTag, "C6 activated new firmware — restarting host to resync");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    esp_restart();
+void c6_firmware_push_now() {
+    ESP_LOGW(kTag, "replacing the C6 firmware from %s", kPartitionLabel);
+    push_and_restart();
 }
 
 }  // namespace services

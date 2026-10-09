@@ -51,6 +51,9 @@ struct SystemInfo {
     // sweep is timed from it, so `ctrl`'s lamps and the screen's tach sweep
     // together even though ctrl starts first.
     uint32_t first_frame_ms = 0;
+    // CONFIG's Eject has unmounted the card and it is still in the socket:
+    // safe to pull. Cleared when it comes out. Written by `storage`.
+    bool     sd_ejected     = false;
 };
 
 struct Context {

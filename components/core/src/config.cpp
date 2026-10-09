@@ -109,6 +109,15 @@ const ConfigItem kItems[] = {
     action(0x0A01, "Forget phone", "Phone", state::CommandId::BleForgetPhone),
     action(0x0A02, "Pairing mode", "Phone", state::CommandId::BlePairingMode),
 
+    // SD card. Eject flushes the log and unmounts, so the card can come out
+    // without a write in flight. Nothing remounts it until it has been
+    // pulled and put back.
+    action(0x0C01, "Eject card", "SD card", state::CommandId::StorageEject),
+
+    // Wi-Fi (§11.7): the update hotspot, on or off. DIAG -> Update shows
+    // the password and has the same switch.
+    action(0x0D01, "Wi-Fi on/off", "Wi-Fi", state::CommandId::WifiToggle),
+
     // Blackbox. 50 Hz is about 27 MB an hour and gives the ring ten seconds
     // of slack against an SD stall; 5 Hz is a hundred. Lap markers are
     // written whatever this says.

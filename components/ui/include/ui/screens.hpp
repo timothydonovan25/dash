@@ -48,7 +48,6 @@ private:
     TachBar     bar_stem_;
     TachBar     bar_flare_;
     LeanGauge   lean_;
-    GBall       ball_;
     Label       sats_;
     Label       hdop_;
     // The worst-off device, in two lines: the name big enough to read at a
@@ -62,7 +61,7 @@ private:
     MediaProgress progress_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[19] = {};
+    Widget*     list_[18] = {};
 };
 
 // The dedicated now-playing screen: title/artist/album at a size actually
@@ -327,13 +326,17 @@ public:
     void set_focus(uint8_t f) override { focus_ = f; }
 
 private:
-    static constexpr uint8_t kActions = 3;
+    static constexpr uint8_t kActions = 4;
     Label   running_;
     Label   other_;
     Label   c6_;
     Label   status_;
     Table   actions_;
-    Widget* list_[5] = {};
+    // The hotspot: network and password big enough to type from, then
+    // the address and how long until it turns itself off.
+    Label   wifi_join_;
+    Label   wifi_info_;
+    Widget* list_[7] = {};
     uint8_t focus_ = 0;
 };
 

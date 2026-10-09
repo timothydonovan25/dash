@@ -84,6 +84,14 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 d.slots->ble_request.publish(core::state::BleRequest{
                     core::state::BleRequest::PairingMode});
                 break;
+            case core::state::CommandId::WifiToggle:
+                d.slots->wifi_request.publish(core::state::WifiRequest{
+                    core::state::WifiRequest::Toggle});
+                break;
+            case core::state::CommandId::StorageEject:
+                d.slots->storage_request.publish(core::state::StorageRequest{
+                    core::state::StorageRequest::Eject});
+                break;
             case core::state::CommandId::OtaInstallSd:
                 d.slots->ota_request.publish(core::state::OtaRequest{
                     core::state::OtaRequest::InstallSd});

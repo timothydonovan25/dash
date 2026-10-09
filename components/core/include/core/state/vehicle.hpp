@@ -10,6 +10,7 @@
 #include <cstdint>
 #include "core/lap/lap.hpp"
 #include "core/ota/ota.hpp"
+#include "core/wifi/wifi.hpp"
 
 namespace core::state {
 
@@ -190,12 +191,41 @@ struct Ota {
     core::ota::Role  role = core::ota::Role::Stable;
     char             running_ver[core::ota::kVersionLen] = {};
     char             running_slot[8] = {};     // "ota_0" / "ota_1"
+    char             running_date[11] = {};    // "2026-10-08", from the image
     core::ota::Other other = core::ota::Other::Unknown;
     char             other_ver[core::ota::kVersionLen] = {};
+    char             other_date[11] = {};
     core::ota::Install      install = core::ota::Install::Idle;
     uint8_t                 install_pct = 0;
     core::ota::InstallError error = core::ota::InstallError::None;
     core::ota::ImageError   image_error = core::ota::ImageError::None;
+};
+
+// CONFIG's card eject, handed from `logic` to `storage` like BleRequest.
+struct StorageRequest {
+    enum Op : uint8_t { None = 0, Eject };
+    uint8_t op = None;
+};
+
+// The hotspot, for the Update screen. Written by `wifi`.
+struct Wifi {
+    core::wifi::State state = core::wifi::State::Off;
+    char     pass[core::wifi::kPassLen + 1] = {};   // this session's, while on
+    uint8_t  clients = 0;                            // phones/laptops joined
+    uint16_t off_in_s = 0;                           // idle timer, while on
+};
+
+// Turn the hotspot on or off, from `logic` to `wifi` like BleRequest.
+struct WifiRequest {
+    enum Op : uint8_t { None = 0, Toggle, Off };
+    uint8_t op = None;
+};
+
+// An upload from the page is on its way, from `wifi` to `ota`: this many
+// bytes are about to arrive through Deps::ota_stream. `ota` stays the one
+// writer of the dev slot; the web server only carries the bytes to it.
+struct OtaUpload {
+    uint32_t size = 0;
 };
 
 // The Update screen's actions, handed from `logic` to `ota` like BleRequest.

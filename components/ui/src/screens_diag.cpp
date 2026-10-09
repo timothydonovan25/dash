@@ -2,6 +2,8 @@
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
 
+#include <cstdio>
+
 namespace ui {
 
 using core::state::Dev;
@@ -129,7 +131,7 @@ constexpr Rect kSysTable {14, 40, 452, 264};
 
 void SystemScreen::enter(Canvas&) {
     table_.set_bounds(kSysTable);
-    table_.configure(11, 2);
+    table_.configure(12, 2);
     list_[0] = &table_;
 }
 
@@ -181,7 +183,21 @@ void SystemScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, static_cast<float>(s->imu_timeouts), 0, true);
     table_.set_row(10, "IMU int miss", v);
 
-    table_.set_row_count(11);
+    // "ejected" is the one state the health table cannot say: CONFIG's
+    // Eject has unmounted a card that is still in the socket, so it is safe
+    // to pull. Health calls that absent, which would read as no card.
+    const char* sd = "--";
+    switch (f.health[Dev::Sd].state) {
+        case core::state::DevState::Absent:   sd = "absent";   break;
+        case core::state::DevState::Init:     sd = "init";     break;
+        case core::state::DevState::Ok:       sd = "ok";       break;
+        case core::state::DevState::Degraded: sd = "degraded"; break;
+        case core::state::DevState::Fault:    sd = "FAULT";    break;
+    }
+    if (s->sd_ejected) sd = "ejected, safe to pull";
+    table_.set_row(11, "SD card", sd);
+
+    table_.set_row_count(12);
 }
 
 WidgetList SystemScreen::widgets() { return WidgetList{list_, 1}; }
@@ -332,7 +348,9 @@ constexpr Rect kUpdRunning {kUpdValueX,  40, 370, 10};
 constexpr Rect kUpdOther   {kUpdValueX,  58, 370, 10};
 constexpr Rect kUpdC6      {kUpdValueX,  76, 370, 10};
 constexpr Rect kUpdStatus  {14,          100, 452, 10};
-constexpr Rect kUpdActions {14,          124, 452, 66};
+constexpr Rect kUpdActions {14,          124, 452, 88};
+constexpr Rect kUpdWifiJoin{14,          220, 452, 16};
+constexpr Rect kUpdWifiInfo{14,          242, 452, 10};
 constexpr int16_t kUpdNoteY = 268;
 
 // "<a> <b> <c>", for the version lines.
@@ -364,23 +382,36 @@ void UpdateScreen::enter(Canvas&) {
     list_[2] = &c6_;
     list_[3] = &status_;
     list_[4] = &actions_;
+    wifi_join_.set_bounds(kUpdWifiJoin);
+    wifi_join_.configure("", color::kText, 2, Align::Left);
+    wifi_info_.set_bounds(kUpdWifiInfo);
+    wifi_info_.configure("", color::kDim, 1, Align::Left);
+    list_[5] = &wifi_join_;
+    list_[6] = &wifi_info_;
 }
 
 void UpdateScreen::update(const Frame& f) {
     namespace ota = core::ota;
     const core::state::Ota& o = f.ota;
 
-    char line[48];
+    // "stable ota_0 1.0 demo Wi-Fi OTA 2026-10-08": the version, board and
+    // feature are the image's own (firmware.txt), the date its build date.
+    char line[72], head[16];
     if (!o.known) {
         running_.set_text("--");
     } else {
-        join(line, sizeof line, ota::role_name(o.role), o.running_slot, o.running_ver);
+        join(head, sizeof head, ota::role_name(o.role), o.running_slot, nullptr);
+        join(line, sizeof line, head, o.running_ver, o.running_date);
         running_.set_text(line);
     }
-    other_.set_text(!o.known                         ? "--"
-                    : o.other == ota::Other::Ready   ? o.other_ver
-                    : o.other == ota::Other::Invalid ? "invalid image"
-                                                     : "empty");
+    if (o.known && o.other == ota::Other::Ready) {
+        join(line, sizeof line, o.other_ver, o.other_date, nullptr);
+        other_.set_text(line);
+    } else {
+        other_.set_text(!o.known                         ? "--"
+                        : o.other == ota::Other::Invalid ? "invalid image"
+                                                         : "empty");
+    }
     c6_.set_text(f.ble_diag.c6_fw[0] ? f.ble_diag.c6_fw : "--");
 
     // One line for whatever matters most right now.
@@ -423,8 +454,30 @@ void UpdateScreen::update(const Frame& f) {
     actions_.set_row(0, "Install from SD", install);
     actions_.set_row(1, "Boot dev once", boot);
     actions_.set_row(2, "Promote to stable", promote);
+
+    namespace wifi = core::wifi;
+    const core::state::Wifi& w = f.wifi;
+    actions_.set_row(3, "Wi-Fi", wifi::state_name(w.state));
     actions_.set_row_count(kActions);
     actions_.set_focus(focus_);
+
+    char join_line[48] = "";
+    char info_line[64] = "";
+    if (w.state == wifi::State::On) {
+        join(join_line, sizeof join_line, wifi::kSsid, " pass", w.pass);
+        char n[8], mins[8];
+        u::fmt_value(n, sizeof n, static_cast<float>(w.clients), 0, true);
+        u::fmt_value(mins, sizeof mins, static_cast<float>((w.off_in_s + 59) / 60), 0, true);
+        std::snprintf(info_line, sizeof info_line,
+                      "http://192.168.4.1   %s joined   off in %s min", n, mins);
+    } else if (w.state == wifi::State::Failed) {
+        std::snprintf(info_line, sizeof info_line, "the C6 would not start the hotspot");
+    } else if (w.state == wifi::State::UpdatingC6) {
+        std::snprintf(info_line, sizeof info_line,
+                      "giving the C6 Wi-Fi firmware; the dash restarts after");
+    }
+    wifi_join_.set_text(join_line);
+    wifi_info_.set_text(info_line);
 }
 
 bool UpdateScreen::handle(const core::nav::InputEvent& e) {
@@ -437,6 +490,7 @@ bool UpdateScreen::handle(const core::nav::InputEvent& e) {
         core::state::CommandId::OtaInstallSd,
         core::state::CommandId::OtaBootDevOnce,
         core::state::CommandId::OtaPromote,
+        core::state::CommandId::WifiToggle,
     };
     return post(core::state::Command(kIds[focus_ < kActions ? focus_ : 0]));
 }
@@ -450,10 +504,11 @@ void UpdateScreen::draw_background(Canvas& c) {
     c.draw_text(14, static_cast<int16_t>(kUpdNoteY + 14),
                 "USB: idf.py flash = new stable, tools/flash_dev.py = dev slot",
                 theme::secondary, 1, Align::Left);
-    c.draw_text(14, static_cast<int16_t>(kUpdNoteY + 28), "Wi-Fi: not built yet",
+    c.draw_text(14, static_cast<int16_t>(kUpdNoteY + 28),
+                "Wi-Fi: upload dash.bin, download logs and firmware from the page",
                 theme::secondary, 1, Align::Left);
 }
 
-WidgetList UpdateScreen::widgets() { return WidgetList{list_, 5}; }
+WidgetList UpdateScreen::widgets() { return WidgetList{list_, 7}; }
 
 }  // namespace ui

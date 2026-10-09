@@ -40,12 +40,12 @@ constexpr Rect kSpeedTile {310,  12, 162, 78};
 constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
 
-constexpr Rect kLean      { 30,  96, 112, 104};
-// Centred in the middle column, under the gear tile. It used to share a left
-// edge with the media rows; those have since gone left to where the fault
-// column ends, and dragging the ball out from under the gear to follow them
-// would be squaring up the wrong pair.
-constexpr Rect kBall      {176,  92, 142, 150};
+// The middle band is the lean gauge alone, as big as the band allows: this
+// is read on a moving dirt bike, where a g-ball's dot was detail nobody
+// could take in. Centred across the screen, between the top tiles (which
+// end at y=90) and the fault line and media ring (from y=222). The clock
+// sits at the right edge, level with the number.
+constexpr Rect kLean      {116,  94, 248, 126};
 constexpr Rect kFault     { 28, 222, 120,  16};
 constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
@@ -54,39 +54,24 @@ constexpr Rect kHdop      { 28, 286, 120,  10};
 // fmt_clock is always five characters, 58 px at scale 2. Widget bounds are
 // what gets cleared on a repaint, so a clock reserving the whole right half
 // of the row would erase the g-ball's edge every minute.
-constexpr Rect kClock     {372, 140, 100,  16};
-// Song, album and artist, running to the right edge. Wider than the reference
-// put it, because real track names are longer than the ones a layout gets
-// mocked up with: at 297 this fitted thirteen characters, which truncated most
-// of what actually plays.
-//
-// The left edge is as far left as it can go rather than lined up with the
-// g-ball above: 148 is where the GPS and fault column ends, and these rows are
-// the only thing on the screen with an appetite for width. Four pixels of gap
-// is deliberate — widget bounds are what a repaint clears, so a row that
-// reached 148 would erase the edge of the sats line every time a long title
-// scrolled, and nothing would redraw it. 324 px is 25 characters at scale 2;
-// anything longer still scrolls.
-constexpr Rect kSong      {152, 244, 324, MediaRow::kRowH};
-constexpr Rect kAlbum     {152, 264, 324, MediaRow::kRowH};
-constexpr Rect kArtist    {152, 284, 324, MediaRow::kRowH};
-
-// The one patch of this screen §11.1 media left empty: right of the g-ball
-// (which ends at x=318), below the clock (which ends at y=156), above the
-// song row (which starts at y=244). A 6 px margin on both those edges is
-// the same "widget bounds are what a repaint clears" reasoning as kSong's
-// left edge above — this tile's ring is round, so its own bounds already
-// leave a corner of slack past that on every side.
-constexpr Rect kMediaArc  {350, 158,  80,  80};
+constexpr Rect kClock     {410, 186,  62,  16};
+// The media block along the bottom: the progress ring, then song, album and
+// artist beside it. The ring shares the rows' bottom edge and rises to
+// the lean gauge's (y=220), 24 px above the rows. It starts where the
+// GPS and fault column ends, plus 4 px — widget bounds are what a repaint
+// clears, so anything reaching 148 would erase the edge of the sats line
+// and nothing would redraw it. The rows take the rest of the width to the
+// right edge: 232 px is 19 characters at scale 2, and longer still scrolls.
+constexpr Rect kMediaArc  {152, 220,  84,  84};
+constexpr Rect kSong      {244, 244, 232, MediaRow::kRowH};
+constexpr Rect kAlbum     {244, 264, 232, MediaRow::kRowH};
+constexpr Rect kArtist    {244, 284, 232, MediaRow::kRowH};
 
 // The odometer and trip meter are the least urgent things here, so they get
 // the strip along the bottom that nothing else wants.
 constexpr Rect kOdo       { 28, 306, 210,  10};
 constexpr Rect kTrip      {262, 306, 210,  10};
 
-// How long the tile shows a jump before going back to being a g-ball. Long
-// enough to read after you have stopped concentrating on landing.
-constexpr uint32_t kJumpHoldMs = 5000;
 
 // Appends a literal, returning the new length. The screens build strings out
 // of the core/units formatters and pieces like this rather than reaching for
@@ -144,7 +129,6 @@ void SpeedScreen::enter(Canvas&) {
     bar_flare_.configure(kTachFlare.y, kTachFlare.bottom());
 
     lean_.set_bounds(kLean);
-    ball_.set_bounds(kBall);
     sats_.set_bounds(kSats);  sats_.configure("", color::kText, 1, Align::Left);
     hdop_.set_bounds(kHdop);  hdop_.configure("", color::kDim, 1, Align::Left);
     fault_.set_bounds(kFault);
@@ -166,9 +150,8 @@ void SpeedScreen::enter(Canvas&) {
     list_[3]  = &rpm_;      list_[4]  = &shift_;      list_[5]  = &gear_;
     list_[6]  = &clock_;    list_[7]  = &lean_;       list_[8]  = &sats_;
     list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
-    list_[12] = &ball_;     list_[13] = &fault_;      list_[14] = &fault_what_;
-    list_[15] = &song_;     list_[16] = &album_;      list_[17] = &artist_;
-    list_[18] = &progress_;
+    list_[12] = &fault_;    list_[13] = &fault_what_; list_[14] = &song_;
+    list_[15] = &album_;    list_[16] = &artist_;     list_[17] = &progress_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -212,14 +195,6 @@ void SpeedScreen::update(const Frame& f) {
 
     const bool imu_ok = f.health.ok(Dev::Imu);
     lean_.set(f.att.lean_deg, imu_ok);
-
-    // The g-ball, except for a few seconds after a landing, when the same
-    // tile is the jump. `land_ms` is in the Frame precisely so this screen
-    // does not have to remember anything between updates.
-    ball_.set(f.att.g_lat, f.att.g_lon, imu_ok);
-    const bool fresh_jump = f.att.land_ms != 0 &&
-                            (f.t_ms - f.att.land_ms) < kJumpHoldMs;
-    ball_.set_jump(f.att.airtime_ms, f.att.last_land_g, fresh_jump && imu_ok);
 
     // The fault line. Blank when everything fitted is healthy, which means
     // the space costs nothing on a normal ride and the screen stops
@@ -321,17 +296,16 @@ void SpeedScreen::draw_background(Canvas& c) {
                 color::kDim, 1, Align::Right);
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 19}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
 
 const char* SpeedScreen::widget_name(size_t i) const {
     // Same order as list_ above.
-    static const char* kNames[19] = {
+    static const char* kNames[18] = {
         "tach stem", "tach flare", "speed", "rpm", "shift", "gear",
         "clock", "lean", "sats", "hdop", "odo", "trip",
-        "g-ball", "fault", "fault what", "song", "album", "artist",
-        "progress",
+        "fault", "fault what", "song", "album", "artist", "progress",
     };
-    return i < 19 ? kNames[i] : nullptr;
+    return i < 18 ? kNames[i] : nullptr;
 }
 
 // --- MediaScreen ----------------------------------------------------------
@@ -352,7 +326,8 @@ constexpr Rect kMediaAlbum  { 20, 222, 440,  28};
 constexpr Rect kMediaArtist { 20, 256, 440,  28};
 // The line streamed live from the phone's .lrc reader (§11.1 tag `Y`) — the
 // one row here that changes on its own clock, not on a track change.
-constexpr Rect kMediaLyric  { 20, 290, 440,  28};
+// Two lines at scale 2, so a 59-character line fits whole without scrolling.
+constexpr Rect kMediaLyric  { 20, 286, 440,  33};
 }  // namespace
 
 void MediaScreen::enter(Canvas&) {
@@ -370,7 +345,9 @@ void MediaScreen::enter(Canvas&) {
     artist_.set_bounds(kMediaArtist);
     artist_.configure(MediaRow::Kind::Artist, color::kDim, 3);
     lyric_.set_bounds(kMediaLyric);
-    lyric_.configure(MediaRow::Kind::Lyric, color::kAccent, 3);
+    // The elapsed time's size, 34 characters a line, wrapped onto a second
+    // line rather than scrolled.
+    lyric_.configure(MediaRow::Kind::Lyric, color::kAccent, 2, true);
 
     list_[0] = &speed_;  list_[1] = &art_;    list_[2] = &song_;
     list_[3] = &album_;  list_[4] = &artist_; list_[5] = &lyric_;

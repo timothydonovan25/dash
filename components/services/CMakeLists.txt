@@ -14,10 +14,13 @@ idf_component_register(
          "src/c6_firmware.cpp"
          "src/ota_service.cpp"
          "src/settings_store.cpp"
+         "src/wifi_service.cpp"
+         "src/wifi_page.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core dash_hal ui bsp drivers esp_timer esp_driver_gpio
     PRIV_REQUIRES bt esp_hosted esp_partition bootloader_support app_update
-                  esp_app_format)
+                  esp_app_format esp_wifi esp_wifi_remote esp_netif esp_event
+                  esp_http_server)
 
 # NimBLE's service and characteristic tables end in a bare {} sentinel,
 # which is normal C and not fully specified enough for this warning in C++.

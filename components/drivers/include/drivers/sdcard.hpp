@@ -12,10 +12,21 @@
 #pragma once
 #include "hal/i_storage.hpp"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 namespace drivers {
 
+// Three tasks touch the card -- `logger` writes, `ota` reads, `storage`
+// mounts and unmounts -- so every call that reaches the filesystem holds one
+// lock. Without it an unmount (a pulled card, or CONFIG's Eject) could land
+// in the middle of a log write and leave the FAT half-updated.
 class SdCard final : public hal::ICard {
 public:
+    SdCard() : lock_(xSemaphoreCreateMutexStatic(&lock_buf_)) {}
+    SdCard(const SdCard&) = delete;
+    SdCard& operator=(const SdCard&) = delete;
+
     hal::Status init() override;
     bool   present() const override { return mounted_; }
     hal::Status append(const char* path, const void* data, size_t len) override;
@@ -24,7 +35,13 @@ public:
     hal::Status read_at(const char* path, size_t offset, void* buf,
                         size_t len, size_t& got) override;
 
+    // Closes the log file, which flushes it, and unmounts. Safe to call
+    // with nothing mounted.
     void unmount();
+
+    // Holds the lock for the whole walk. The logger's own file shows the
+    // size it had at its last sync.
+    hal::Status list(const char* dir, ListFn fn, void* ctx) override;
 
     // Reads the socket's card-detect switch. Configures the pin on first
     // use, so it works before init() and after unmount().
@@ -32,6 +49,10 @@ public:
     bool detected() const { return detected_; }
 
 private:
+    hal::Status sync_locked();
+
+    StaticSemaphore_t lock_buf_;
+    SemaphoreHandle_t lock_;
     bool  mounted_ = false;
     bool  detected_ = false;
     bool  cd_ready_ = false;

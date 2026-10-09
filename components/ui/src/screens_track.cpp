@@ -33,7 +33,9 @@ void LapScreen::enter(Canvas&) {
     // Inset: a widget clears its own bounds, so bounds matching the
     // tile would wipe the frame drawn under it.
     current_.set_bounds(kLapCurrent.inset(6));
-    current_.configure("--:--.--", color::kText, 7, Align::Center);
+    // Scale 6: eight characters are 281 px, inside the tile's 288. At 7
+    // they were 329 and ran over both sides of it.
+    current_.configure("--:--.--", color::kText, 6, Align::Center);
 
     delta_.set_bounds(kLapDelta);
 

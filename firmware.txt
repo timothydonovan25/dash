@@ -1,0 +1,13 @@
+# The firmware release. Every dash-*.bin is named from this, and the Update
+# screen and the Wi-Fi page show it. Before a build you mean to keep, bump
+# the version and say in one to three words what is new.
+#
+#   dash-<version>-<date>-<board>-<feature>.bin
+#   e.g. dash-1.0-2026-10-08-demo-wifi-ota.bin
+#
+# The date is the build's own, read back out of the image. The board comes
+# from which project built it: "bike" (the root) or "demo" (demo_p4/).
+# Every build is also copied to releases/ at the repo root, which keeps them
+# all; a rebuild of the same version on the same day replaces its file.
+version 1.2
+feature Undo PSRAM XIP

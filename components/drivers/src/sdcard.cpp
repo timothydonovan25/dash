@@ -5,6 +5,7 @@
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
@@ -52,7 +53,31 @@ bool SdCard::card_detect() {
     return detected_;
 }
 
+namespace {
+// Held for a whole filesystem call. An SD stall can take hundreds of
+// milliseconds, and every holder is a core 1 task that can afford to wait
+// for one -- but not forever: a card wedged inside a write must not take
+// the other two tasks with it, so a caller that cannot get the lock in
+// time gets Busy and tries again on its own schedule.
+constexpr TickType_t kLockWait = pdMS_TO_TICKS(3000);
+
+class Hold {
+public:
+    explicit Hold(SemaphoreHandle_t l)
+        : l_(l), held_(xSemaphoreTake(l_, kLockWait) == pdTRUE) {}
+    ~Hold() { if (held_) xSemaphoreGive(l_); }
+    bool held() const { return held_; }
+    Hold(const Hold&) = delete;
+    Hold& operator=(const Hold&) = delete;
+private:
+    SemaphoreHandle_t l_;
+    bool held_;
+};
+}  // namespace
+
 hal::Status SdCard::init() {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
     if (mounted_) return hal::Status::Ok;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -86,6 +111,9 @@ hal::Status SdCard::init() {
 }
 
 void SdCard::unmount() {
+    // Unmounting without the lock is still better than not unmounting: by
+    // then the card is gone or the rider has been told it is safe to pull.
+    const Hold hold(lock_);
     if (open_file_) {
         std::fclose(static_cast<FILE*>(open_file_));
         open_file_ = nullptr;
@@ -99,6 +127,8 @@ void SdCard::unmount() {
 }
 
 hal::Status SdCard::append(const char* path, const void* data, size_t len) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !data || len == 0) return hal::Status::Unsupported;
 
@@ -121,12 +151,34 @@ hal::Status SdCard::append(const char* path, const void* data, size_t len) {
         std::fwrite(data, 1, len, static_cast<FILE*>(open_file_));
     if (written != len) return hal::Status::IoError;
 
-    if (++unsynced_ >= kSyncEveryWrites) return sync();
+    if (++unsynced_ >= kSyncEveryWrites) return sync_locked();
+    return hal::Status::Ok;
+}
+
+hal::Status SdCard::list(const char* dir, ListFn fn, void* ctx) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    if (!mounted_) return hal::Status::NotPresent;
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
+    DIR* d = opendir(full);
+    if (!d) return hal::Status::NotPresent;
+    while (const dirent* e = readdir(d)) {
+        if (e->d_type != DT_REG) continue;
+        char path[96 + sizeof e->d_name];
+        std::snprintf(path, sizeof path, "%s/%s", full, e->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0) continue;
+        fn(e->d_name, static_cast<size_t>(st.st_size), ctx);
+    }
+    closedir(d);
     return hal::Status::Ok;
 }
 
 hal::Status SdCard::size_of(const char* path, size_t& out) {
     out = 0;
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
@@ -139,6 +191,8 @@ hal::Status SdCard::size_of(const char* path, size_t& out) {
 hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
                             size_t len, size_t& got) {
     got = 0;
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !buf) return hal::Status::Unsupported;
     // Its own FILE*, never the logger's: the two run on different tasks,
@@ -159,6 +213,12 @@ hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
 }
 
 hal::Status SdCard::sync() {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    return sync_locked();
+}
+
+hal::Status SdCard::sync_locked() {
     if (!open_file_) return hal::Status::Ok;
     unsynced_ = 0;
     // fflush pushes our buffer at the filesystem; fsync makes FAT commit it.

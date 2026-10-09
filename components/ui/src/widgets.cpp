@@ -3,6 +3,7 @@
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include <cmath>
+#include <cstring>
 
 namespace ui {
 
@@ -582,10 +583,19 @@ void LeanGauge::set(float lean_deg, bool valid) {
 void LeanGauge::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
 
+    // Everything scales off the radius, which is as big as the bounds allow:
+    // the track a sixth of it, the marker standing a twentieth proud of the
+    // track on both edges, and the pivot low enough that the marker's outer
+    // edge stays inside the bounds -- a repaint clears only the bounds, so a
+    // marker poking out above them would leave its old position behind.
+    const int16_t by = static_cast<int16_t>((bounds.h - 4) * 20 / 21);
+    const int16_t bx = static_cast<int16_t>((bounds.w - 12) / 2);
+    const int16_t r  = bx < by ? bx : by;
+    const int16_t t  = static_cast<int16_t>(r / 6);
+    const int16_t ov = static_cast<int16_t>(r / 20);
+    const int16_t ri = static_cast<int16_t>(r - t);
     const int16_t cx = bounds.cx();
-    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h * 2 / 5);
-    const int16_t r  = static_cast<int16_t>(bounds.w / 2 - 6);
-    const int16_t ri = static_cast<int16_t>(r - 12);
+    const int16_t cy = static_cast<int16_t>(bounds.y + r + ov + 1);
 
     c.fill_arc(cx, cy, r, ri, 270.0f, 360.0f, color::kGrid);
     c.fill_arc(cx, cy, r, ri, 0.0f, 90.0f, color::kGrid);
@@ -597,14 +607,20 @@ void LeanGauge::render(Canvas& c) {
         // Leaning right puts the marker right, which is where the rider is
         // going. Zero is straight up.
         const float mark = a < 0.0f ? 360.0f + a : a;
-        c.fill_arc(cx, cy, r, ri, mark - 4.0f, mark + 4.0f, color::kTach);
+        c.fill_arc(cx, cy, static_cast<int16_t>(r + ov),
+                   static_cast<int16_t>(ri - ov), mark - 7.0f, mark + 7.0f,
+                   color::kTach);
     }
 
+    // The number inside the arc, sitting on the pivot line, as big as the
+    // arc's opening takes: a sixth of the radius per unit of scale.
     char buf[16];
     core::units::fmt_value(buf, sizeof buf,
                            lean_deg_ < 0 ? -lean_deg_ : lean_deg_, 0, valid_);
-    c.draw_text(cx, static_cast<int16_t>(cy + 6), buf,
-                valid_ ? color::kText : color::kDim, 3, Align::Center);
+    uint8_t scale = static_cast<uint8_t>(ri / 16);
+    if (scale < 2) scale = 2;
+    c.draw_text(cx, static_cast<int16_t>(cy - 7 * scale - 2), buf,
+                valid_ ? color::kText : color::kDim, scale, Align::Center);
 }
 
 // --- GBall --------------------------------------------------------------
@@ -720,12 +736,25 @@ const icon::Bitmap& icon_for(MediaRow::Kind k) {
 
 }  // namespace
 
-void MediaRow::configure(Kind k, Color text_color, uint8_t scale) {
+void MediaRow::configure(Kind k, Color text_color, uint8_t scale, bool wrap) {
     const bool a = assign_t(kind_, k);
     const bool b = assign_t(color_, text_color);
     const bool d = assign_t(scale_, scale);
-    if (a || b || d) touch();
+    const bool e = assign_t(wrap_, wrap);
+    if (a || b || d || e) touch();
 }
+
+namespace {
+// How many leading characters of `t` go on the first of two lines `n` wide:
+// up to the last space that fits, or a hard break when one word is longer.
+size_t wrap_at(const char* t, size_t len, size_t n) {
+    if (len <= n) return len;
+    for (size_t i = n; i > 0; --i) {
+        if (t[i] == ' ') return i;
+    }
+    return n;
+}
+}  // namespace
 
 void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
     bool changed = text_.set(text ? text : "");
@@ -735,7 +764,7 @@ void MediaRow::set(const char* text, bool valid, uint32_t now_ms) {
     const int16_t w = text_width_px(text_.s, scale_);
 
     int16_t off = 0;
-    if (valid_ && w > avail && avail > 0) {
+    if (!wrap_ && valid_ && w > avail && avail > 0) {
         const uint32_t cycle = static_cast<uint32_t>(w) + kGapPx;
         // Split so the multiply cannot overflow a 32-bit millisecond counter
         // that has been running for a month.
@@ -769,6 +798,25 @@ void MediaRow::render(Canvas& c) {
 
     // Everything below draws deliberately wider than the window it is in.
     const ClipGuard clip(c, Rect{tx, bounds.y, avail, bounds.h});
+
+    if (wrap_) {
+        const Font& f = font_5x7();
+        const size_t n = static_cast<size_t>(
+            (avail / scale_ + (f.advance - f.width)) / f.advance);
+        const size_t len = std::strlen(text_.s);
+        const size_t cut = wrap_at(text_.s, len, n);
+        char line[sizeof text_.s];
+        std::memcpy(line, text_.s, cut);
+        line[cut] = '\0';
+        c.draw_text(tx, ty, line, color_, scale_, Align::Left);
+        const char* rest = text_.s + cut;
+        while (*rest == ' ') ++rest;
+        if (*rest) {
+            c.draw_text(tx, static_cast<int16_t>(ty + kWrapLineH * scale_),
+                        rest, color_, scale_, Align::Left);
+        }
+        return;
+    }
 
     if (w <= avail) {
         c.draw_text(tx, ty, text_.s, color_, scale_, Align::Left);

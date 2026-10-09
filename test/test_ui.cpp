@@ -259,40 +259,6 @@ int main() {
         CHECK(s.ink() != with_fault);      // the screen genuinely differs
     }
 
-    CASE("the speed screen shows a jump, then goes back to the g-ball");
-    {
-        Fixture fx;
-        Screen320x480 s;
-        fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Cruise, 0);
-
-        Frame f = busy_frame();
-        f.t_ms = 100000;
-        f.att.land_ms = 0;                  // nothing has happened yet
-        fx.app.update(f);
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        const size_t ball = s.ink();
-
-        // Just landed: the same tile, a different face.
-        f.att.land_ms = f.t_ms - 500;
-        f.att.airtime_ms = 1340;
-        f.att.last_land_g = 4.2f;
-        fx.app.update(f);
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        CHECK(s.ink() != ball);
-
-        // Ten seconds later it is a g-ball again, pixel for pixel. A hold
-        // that never expires would leave the tile stuck on a jump for the
-        // rest of the ride.
-        f.t_ms += 10000;
-        fx.app.update(f);
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        CHECK(s.ink() == ball);
-    }
-
     CASE("the speed screen names a failed device rather than degrading quietly");
     {
         Fixture fx;
@@ -607,6 +573,51 @@ int main() {
         CHECK(s.ink() == silent);
     }
 
+    CASE("a wrapped row breaks a long line at a space onto two, and never scrolls");
+    {
+        Screen320x480 s;
+        MediaRow m;
+        // The media screen's lyric row: 419 px of text, 34 characters a
+        // line at scale 2.
+        const Rect box{20, 286, 440, 33};
+        m.set_bounds(box);
+        m.configure(MediaRow::Kind::Lyric, color::kAccent, 2, true);
+
+        auto draw = [&](const char* t, uint32_t now) {
+            m.set(t, true, now);
+            for (Color& c : s.px) c = 0;
+            m.render(s.canvas);
+            return s.px;
+        };
+        // Rightmost text pixel on the line starting at row y0.
+        auto right_on = [&](const std::vector<Color>& px, int16_t y0) {
+            int16_t right = -1;
+            for (int16_t y = y0; y < y0 + 14; ++y)
+                for (int16_t x = 0; x < kScreenW; ++x)
+                    if (px[static_cast<size_t>(y) * kScreenW + x] == color::kAccent &&
+                        x > right) right = x;
+            return right;
+        };
+        const int16_t tx = box.x + MediaRow::kTextX;
+        const int16_t y1 = box.y + 1, y2 = y1 + MediaRow::kWrapLineH * 2;
+
+        // 59 characters, the most the phone sends; the break falls on the
+        // last space inside 34.
+        const char* kLong = "Through the fire and the flames we carry on, far away";
+        const std::vector<Color> first = draw(kLong, 0);
+        CHECK(draw(kLong, 1000) == first);   // still
+        CHECK(draw(kLong, 7777) == first);
+        CHECK(right_on(first, y1) ==
+              tx + text_width_px("Through the fire and the flames we", 2) - 1);
+        CHECK(right_on(first, y2) ==
+              tx + text_width_px("carry on, far away", 2) - 1);
+
+        // A line that fits stays on one.
+        const std::vector<Color> one = draw("Short line", 0);
+        CHECK(right_on(one, y1) == tx + text_width_px("Short line", 2) - 1);
+        CHECK(right_on(one, y2) == -1);
+    }
+
     CASE("a name too long to fit scrolls, and stays inside its own row");
     {
         Screen320x480 s;
@@ -854,6 +865,26 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() != not_editing);
+    }
+
+    CASE("CONFIG's SD card submenu posts Eject");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+
+        size_t g = 0;
+        while (g < core::config::group_count() &&
+               std::strcmp(core::config::group_name(g), "SD card") != 0) ++g;
+        CHECK(g < core::config::group_count());
+        for (size_t i = 0; i < g; ++i)
+            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // eject
+        CHECK(!fx.sink.posted.empty());
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::StorageEject);
     }
 
     CASE("config submenus: E opens one, B goes back to it, C/D stay in it");

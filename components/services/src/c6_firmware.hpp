@@ -14,4 +14,10 @@ namespace services {
 
 void c6_firmware_update_if_needed();
 
+// Pushes slave_fw to the C6 whatever its version says, and restarts the
+// dash. For a C6 that refuses Wi-Fi: the BLE-only build and the BLE + Wi-Fi
+// build carry the same ESP-Hosted version, so the version check cannot tell
+// them apart -- only asking the C6 for Wi-Fi can. Returns only on failure.
+void c6_firmware_push_now();
+
 }  // namespace services

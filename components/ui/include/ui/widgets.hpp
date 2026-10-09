@@ -329,7 +329,15 @@ public:
     // dedicated media screen with room to spare passes a bigger one. The
     // icon stays its native size either way — it is a small fixed glyph,
     // not something meant to scale with the text next to it.
-    void configure(Kind k, Color text_color, uint8_t scale = kDefaultScale);
+    //
+    // `wrap` trades the scroll for a second line: text wider than the row
+    // breaks at the last space that fits and carries on below, and never
+    // moves. For the lyric, which changes every few seconds and has to be
+    // read whole at a glance; a belt would still be carrying the last line
+    // when the next arrived. Give the row two lines' height
+    // (kWrapLineH * scale * 2). Anything past two lines is cut.
+    void configure(Kind k, Color text_color, uint8_t scale = kDefaultScale,
+                   bool wrap = false);
 
     // `valid` is false when nothing has ever arrived, or when the phone has
     // gone away — a dash still showing what was playing forty minutes ago is
@@ -344,6 +352,7 @@ public:
     static constexpr int16_t kRowH  = 20;   // suggested height at kDefaultScale
     static constexpr uint8_t kDefaultScale = 2;
     static constexpr int16_t kTextX = 21;   // clear of the widest icon
+    static constexpr int16_t kWrapLineH = 8;   // per unit of scale: 7 + 1 gap
 
 private:
     // Where the text restarts behind itself, so the loop reads as a belt
@@ -358,6 +367,7 @@ private:
     Kind        kind_    = Kind::Song;
     Color       color_   = color::kText;
     uint8_t     scale_   = kDefaultScale;
+    bool        wrap_    = false;
     bool        valid_   = false;
     int16_t     offset_  = 0;      // 0 whenever the text fits
 };

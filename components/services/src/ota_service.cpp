@@ -24,6 +24,7 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 
 #include <cstring>
@@ -46,6 +47,51 @@ constexpr uint32_t kIdleWaitMs = 100;
 
 // The chunk buffer. Static rather than on the stack, which stays small.
 uint8_t g_chunk[kChunk];
+
+// An upload that stops sending for this long has been abandoned: the phone
+// left the hotspot, or the page was closed.
+constexpr TickType_t kStreamStall = pdMS_TO_TICKS(10000);
+
+// Where an install's bytes come from. Read in order, once each: an upload
+// cannot seek, so the card is read the same way.
+class Source {
+public:
+    virtual ~Source() = default;
+    // Fills `buf` with exactly `len` bytes, or says why not.
+    virtual bool read(void* buf, size_t len) = 0;
+};
+
+class CardSource final : public Source {
+public:
+    CardSource(hal::ICard& card, const char* path) : card_(card), path_(path) {}
+    bool read(void* buf, size_t len) override {
+        size_t got = 0;
+        if (!hal::ok(card_.read_at(path_, at_, buf, len, got)) || got != len) return false;
+        at_ += got;
+        return true;
+    }
+private:
+    hal::ICard& card_;
+    const char* path_;
+    size_t at_ = 0;
+};
+
+class StreamSource final : public Source {
+public:
+    explicit StreamSource(StreamBufferHandle_t sb) : sb_(sb) {}
+    bool read(void* buf, size_t len) override {
+        auto* p = static_cast<uint8_t*>(buf);
+        size_t got = 0;
+        while (got < len) {
+            const size_t n = xStreamBufferReceive(sb_, p + got, len - got, kStreamStall);
+            if (n == 0) return false;          // stalled
+            got += n;
+        }
+        return true;
+    }
+private:
+    StreamBufferHandle_t sb_;
+};
 
 SlotState state_of(const esp_partition_t* p) {
     esp_ota_img_states_t s;
@@ -70,8 +116,13 @@ void read_other(core::state::Ota& o, const esp_partition_t* other) {
     esp_app_desc_t desc;
     const bool has = other && esp_ota_get_partition_description(other, &desc) == ESP_OK;
     o.other = core::ota::other_from(has, state_of(other));
-    if (has) copy_str(o.other_ver, sizeof o.other_ver, desc.version);
-    else o.other_ver[0] = '\0';
+    if (has) {
+        copy_str(o.other_ver, sizeof o.other_ver, desc.version);
+        core::ota::iso_date(desc.date, o.other_date, sizeof o.other_date);
+    } else {
+        o.other_ver[0] = '\0';
+        o.other_date[0] = '\0';
+    }
 }
 
 class Ota {
@@ -84,6 +135,8 @@ public:
         o_.known = true;
         o_.role = core::ota::role_of(state_of(running_));
         copy_str(o_.running_ver, sizeof o_.running_ver, esp_app_get_description()->version);
+        core::ota::iso_date(esp_app_get_description()->date, o_.running_date,
+                            sizeof o_.running_date);
         copy_str(o_.running_slot, sizeof o_.running_slot, running_ ? running_->label : "?");
         read_other(o_, other_);
         ESP_LOGI(kTag, "running %s from %s, %s; other slot %s",
@@ -94,8 +147,15 @@ public:
 
     void run() {
         uint32_t request_gen = d_.slots->ota_request.generation();
+        uint32_t upload_gen = d_.slots->ota_upload.generation();
         for (;;) {
             vTaskDelay(pdMS_TO_TICKS(kIdleWaitMs));
+
+            const uint32_t ugen = d_.slots->ota_upload.generation();
+            if (ugen != upload_gen) {
+                upload_gen = ugen;
+                install_upload(d_.slots->ota_upload.get().size);
+            }
 
             const uint32_t gen = d_.slots->ota_request.generation();
             if (gen == request_gen) continue;
@@ -147,58 +207,88 @@ private:
     void install_sd() {
         o_.image_error = core::ota::ImageError::None;
         o_.install_pct = 0;
-        if (o_.role != Role::Stable) return fail(InstallError::NotStable);
-        if (!other_) return fail(InstallError::FlashFailed);   // no second slot
-        if (!parked()) return fail(InstallError::Moving);
+        if (!may_install()) return;
         if (!d_.card || !d_.card->present()) return fail(InstallError::NoCard);
 
         size_t size = 0;
         if (!hal::ok(d_.card->size_of(kUpdatePath, size))) return fail(InstallError::NoFile);
+        CardSource src(*d_.card, kUpdatePath);
+        install(src, size, kUpdatePath);
+    }
 
+    // From the web page, through Deps::ota_stream. The page's request is
+    // waiting on the other end of the stream, so a refusal still has to
+    // drain what it sends -- otherwise it would block until it timed out.
+    void install_upload(uint32_t size) {
+        auto* sb = static_cast<StreamBufferHandle_t>(d_.ota_stream);
+        o_.image_error = core::ota::ImageError::None;
+        o_.install_pct = 0;
+        if (!sb) return fail(InstallError::ReadFailed);
+        if (!may_install()) return drain(sb);
+        StreamSource src(sb);
+        if (!install(src, size, "upload")) drain(sb);
+    }
+
+    // Whether the dev slot may be written right now; says why not if not.
+    bool may_install() {
+        if (o_.role != Role::Stable) { fail(InstallError::NotStable); return false; }
+        if (!other_) { fail(InstallError::FlashFailed); return false; }   // no second slot
+        if (!parked()) { fail(InstallError::Moving); return false; }
+        return true;
+    }
+
+    // Discards whatever is still arriving, until the sender stops.
+    static void drain(StreamBufferHandle_t sb) {
+        while (xStreamBufferReceive(sb, g_chunk, kChunk, pdMS_TO_TICKS(1000)) > 0) {}
+    }
+
+    // `size` bytes from `src` into the other slot. True if they all arrived
+    // and passed; false with the status published if not.
+    bool install(Source& src, size_t size, const char* what) {
         o_.install = Install::Checking;
         o_.error = InstallError::None;
         publish();
 
-        size_t got = 0;
-        if (!hal::ok(d_.card->read_at(kUpdatePath, 0, g_chunk, core::ota::kHeaderBytes, got))) {
-            return fail(InstallError::ReadFailed);
-        }
+        // The header first, then the same bytes are the start of the image:
+        // the source is read once, so nothing is read twice.
+        const size_t head = size < core::ota::kHeaderBytes ? size : core::ota::kHeaderBytes;
+        if (!src.read(g_chunk, head)) { fail(InstallError::ReadFailed); return false; }
         core::ota::ImageInfo info;
-        o_.image_error = core::ota::check_header(g_chunk, got, size, other_->size, info);
-        if (o_.image_error != core::ota::ImageError::None) {
-            ESP_LOGW(kTag, "%s: %s", kUpdatePath, core::ota::image_error_name(o_.image_error));
-            return fail(InstallError::BadImage);
+        o_.image_error = core::ota::check_header(g_chunk, head, size, other_->size, info);
+        if (o_.image_error == core::ota::ImageError::None) {
+            o_.image_error = core::ota::check_board(o_.running_ver, info.version);
         }
-        ESP_LOGI(kTag, "installing %s (%u bytes) into %s", info.version,
-                 static_cast<unsigned>(size), other_->label);
+        if (o_.image_error != core::ota::ImageError::None) {
+            ESP_LOGW(kTag, "%s (%s): %s", what, info.version,
+                     core::ota::image_error_name(o_.image_error));
+            fail(InstallError::BadImage);
+            return false;
+        }
+        ESP_LOGI(kTag, "installing %s (%u bytes, %s) into %s", info.version,
+                 static_cast<unsigned>(size), what, other_->label);
 
         // Erased a sector at a time as the writes reach it, so the cache
         // stalls are spread over the install rather than one 6 MB erase.
         esp_ota_handle_t h = 0;
         if (esp_ota_begin(other_, OTA_WITH_SEQUENTIAL_WRITES, &h) != ESP_OK) {
-            return fail(InstallError::FlashFailed);
+            fail(InstallError::FlashFailed);
+            return false;
         }
         o_.install = Install::Writing;
         publish();
 
+        auto abort_with = [&](InstallError e) {
+            esp_ota_abort(h);
+            read_other(o_, other_);
+            fail(e);
+            return false;
+        };
+
+        size_t got = head;
         size_t done = 0;
-        while (done < size) {
-            if (!parked()) {
-                esp_ota_abort(h);
-                read_other(o_, other_);
-                return fail(InstallError::Moving);
-            }
-            const size_t want = size - done < kChunk ? size - done : kChunk;
-            if (!hal::ok(d_.card->read_at(kUpdatePath, done, g_chunk, want, got)) ||
-                got != want) {
-                esp_ota_abort(h);
-                read_other(o_, other_);
-                return fail(InstallError::ReadFailed);
-            }
+        for (;;) {
             if (esp_ota_write(h, g_chunk, got) != ESP_OK) {
-                esp_ota_abort(h);
-                read_other(o_, other_);
-                return fail(InstallError::FlashFailed);
+                return abort_with(InstallError::FlashFailed);
             }
             done += got;
             const uint8_t pct = core::ota::percent(done, size);
@@ -206,19 +296,25 @@ private:
                 o_.install_pct = pct;
                 publish();
             }
+            if (done >= size) break;
+            if (!parked()) return abort_with(InstallError::Moving);
+            got = size - done < kChunk ? size - done : kChunk;
+            if (!src.read(g_chunk, got)) return abort_with(InstallError::ReadFailed);
         }
 
         // The image's own checksum and hash, over everything just written.
         const esp_err_t end = esp_ota_end(h);
         read_other(o_, other_);
         if (end != ESP_OK) {
-            return fail(end == ESP_ERR_OTA_VALIDATE_FAILED ? InstallError::VerifyFailed
-                                                           : InstallError::FlashFailed);
+            fail(end == ESP_ERR_OTA_VALIDATE_FAILED ? InstallError::VerifyFailed
+                                                    : InstallError::FlashFailed);
+            return false;
         }
         o_.install = Install::Done;
         o_.error = InstallError::None;
         ESP_LOGI(kTag, "dev slot now holds %s", o_.other_ver);
         publish();
+        return true;
     }
 
     // Boot the other slot, once. The bootloader falls back to stable at the
@@ -257,6 +353,12 @@ void ota_task(void* arg) {
 }  // namespace
 
 void start_ota(Deps& d) {
+    // 16 kB: four upload chunks in flight while the flash writes catch up.
+    static StaticStreamBuffer_t sb_ctl;
+    static uint8_t sb_mem[16 * 1024 + 1];
+    if (!d.ota_stream) {
+        d.ota_stream = xStreamBufferCreateStatic(sizeof sb_mem - 1, 1, sb_mem, &sb_ctl);
+    }
     xTaskCreatePinnedToCore(ota_task, "ota", 4096, &d, 2, nullptr, 1);
 }
 

@@ -59,6 +59,11 @@ public:
     virtual Status size_of(const char* path, size_t& out) = 0;
     virtual Status read_at(const char* path, size_t offset, void* buf,
                            size_t len, size_t& got) = 0;
+
+    // Calls `fn` for each plain file in `dir`, with its name and size. For
+    // the Wi-Fi page's log list.
+    using ListFn = void (*)(const char* name, size_t size, void* ctx);
+    virtual Status list(const char* dir, ListFn fn, void* ctx) = 0;
 };
 
 }  // namespace hal
