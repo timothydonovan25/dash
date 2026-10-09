@@ -522,7 +522,7 @@ void NavScreen::update(const Frame& f) {
                      : g.heading_up ? "up = straight ahead"
                                     : "up = north (under 3 mph)");
 
-    actions_.set_row(0, w.set ? "Move here" : "Drop waypoint", fix ? "" : "no fix");
+    actions_.set_row(0, w.set ? "Move here" : "Drop here", fix ? "" : "no fix");
     actions_.set_row(1, "Clear", w.set ? "" : "none");
     actions_.set_row_count(kActions);
     actions_.set_focus(focus_);
