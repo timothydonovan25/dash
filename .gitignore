@@ -10,8 +10,6 @@ build-sim/
 dash_log.csv
 __pycache__/
 
-# Built firmware images: every version, kept locally (see releases/README.md).
-releases/*.bin
 # Scratch builds and sync debris.
 demo_p4/build-*/
 .stfolder/
