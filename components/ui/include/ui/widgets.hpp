@@ -430,6 +430,21 @@ private:
 
 // "DEV", in a corner, on every frame a dev image is running, so nobody rides
 // a test build thinking it is the real one.
+// The NAV screen's pointer: an arrow in a ring, pointing at the waypoint.
+// `rel_deg` is from the top of the ring, clockwise. Heading-up when riding,
+// so straight up is "ahead"; north-up when parked, with an N on the ring.
+// `--` with no fix or no waypoint.
+class NavArrow : public Widget {
+public:
+    void set(float rel_deg, bool heading_up, bool valid);
+    void render(Canvas& c) override;
+
+private:
+    int16_t rel_deg_ = 0;           // whole degrees: finer only redraws noise
+    bool    heading_up_ = false;
+    bool    valid_ = false;
+};
+
 class DevTag : public Widget {
 public:
     void render(Canvas& c) override;

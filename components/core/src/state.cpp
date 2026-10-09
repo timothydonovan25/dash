@@ -31,6 +31,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.ble_diag = s.ble_diag.get();
     f.ota    = s.ota.get();
     f.wifi   = s.wifi.get();
+    f.waypoint = s.waypoint.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -66,6 +67,8 @@ const char* command_name(CommandId id) {
         case CommandId::StorageToHost:     return "storage.to_host";
         case CommandId::StorageEject:      return "storage.eject";
         case CommandId::WifiToggle:        return "wifi.toggle";
+        case CommandId::NavDropWaypoint:   return "nav.drop";
+        case CommandId::NavClearWaypoint:  return "nav.clear";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
         case CommandId::MediaCtrl:         return "media.ctrl";

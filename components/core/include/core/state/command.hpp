@@ -31,6 +31,8 @@ enum class CommandId : uint8_t {
     OtaBootDevOnce,   // restart into dev; the next reset returns to stable
     OtaPromote,       // from dev: keep the running dev image as stable (§11.7)
     WifiToggle,       // the update hotspot on, or off if it is on
+    NavDropWaypoint,  // remember the current fix as the waypoint
+    NavClearWaypoint,
 };
 
 struct Command {

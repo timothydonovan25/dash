@@ -23,6 +23,7 @@ struct Slots {
     Published<Tpms>     tpms;       // ble, once the TPMS scan exists
     Published<Health>   health;     // keeper
     Published<BleDiag>  ble_diag;   // ble
+    Published<Waypoint> waypoint;   // logic
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
@@ -52,10 +53,11 @@ struct Frame {
     BleDiag  ble_diag;
     Ota      ota;
     Wifi     wifi;
+    Waypoint waypoint;
     uint32_t t_ms = 0;
 };
 
-// Thirteen seqlock reads. Each slot is internally consistent; the frame as a
+// Fourteen seqlock reads. Each slot is internally consistent; the frame as a
 // whole is not an instant, and does not need to be — the newest lean angle
 // and a 40 ms old lap time on the same screen is not a bug.
 Frame snapshot(const Slots& s, uint32_t t_ms);

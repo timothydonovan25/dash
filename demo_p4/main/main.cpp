@@ -127,6 +127,7 @@ extern "C" void app_main(void) {
     g_deps.delta       = &g_delta;
     g_deps.trip_trace  = &g_trip_trace;
     g_deps.lap_trace   = &g_lap_trace;
+    g_deps.commands    = &g_commands;
 
     g_slots.health.publish(g_health.publish());
     g_commands.begin();

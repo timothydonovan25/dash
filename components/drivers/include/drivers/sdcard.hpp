@@ -42,6 +42,7 @@ public:
     // Holds the lock for the whole walk. The logger's own file shows the
     // size it had at its last sync.
     hal::Status list(const char* dir, ListFn fn, void* ctx) override;
+    hal::Status remove(const char* path) override;
 
     // Reads the socket's card-detect switch. Configures the pin on first
     // use, so it works before init() and after unmount().

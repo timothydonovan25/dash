@@ -64,6 +64,10 @@ public:
     // the Wi-Fi page's log list.
     using ListFn = void (*)(const char* name, size_t size, void* ctx);
     virtual Status list(const char* dir, ListFn fn, void* ctx) = 0;
+
+    // Deletes one file, for the Wi-Fi page. Busy for the file `append` is
+    // writing: the logger still holds it open, and FAT would lose the rows.
+    virtual Status remove(const char* path) = 0;
 };
 
 }  // namespace hal

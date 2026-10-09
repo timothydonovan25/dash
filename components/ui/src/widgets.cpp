@@ -991,3 +991,46 @@ void DevTag::render(Canvas& c) {
 }
 
 }  // namespace ui
+
+namespace ui {
+
+void NavArrow::set(float rel_deg, bool heading_up, bool valid) {
+    // Two-degree steps: a parked GPS wanders, and an arrow that redraws on
+    // every fix for a change nobody could see costs a blit each time.
+    const int16_t q = valid ? static_cast<int16_t>(std::lround(rel_deg / 2.0f) * 2) : 0;
+    assign_t(rel_deg_, q);
+    assign_t(heading_up_, heading_up);
+    assign_t(valid_, valid);
+}
+
+void NavArrow::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    const int16_t cx = bounds.cx();
+    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h / 2);
+    const int16_t r = static_cast<int16_t>((bounds.w < bounds.h ? bounds.w : bounds.h) / 2 - 2);
+    c.draw_circle(cx, cy, r, theme::rule);
+    c.draw_circle(cx, cy, static_cast<int16_t>(r - 1), theme::rule);
+    // What "up" means, at the top of the ring.
+    c.draw_text(cx, static_cast<int16_t>(cy - r + 6), heading_up_ ? "^" : "N",
+                theme::secondary, 2, Align::Center);
+    if (!valid_) {
+        c.draw_text(cx, static_cast<int16_t>(cy - 14), "--", color::kDim, 4, Align::Center);
+        return;
+    }
+    const float a = static_cast<float>(rel_deg_) * kPi / 180.0f;
+    const auto pt = [&](float ang, float len, int16_t& x, int16_t& y) {
+        x = static_cast<int16_t>(cx + std::lround(std::sin(ang) * len));
+        y = static_cast<int16_t>(cy - std::lround(std::cos(ang) * len));
+    };
+    // A chevron with a notch: the tip, two barbs, and a point behind the
+    // centre the two halves share, so the shape reads at a glance.
+    int16_t tx, ty, lx, ly, rx, ry, nx, ny;
+    pt(a, r * 0.72f, tx, ty);
+    pt(a + 2.5f, r * 0.56f, lx, ly);
+    pt(a - 2.5f, r * 0.56f, rx, ry);
+    pt(a + kPi, r * 0.22f, nx, ny);
+    c.fill_triangle(tx, ty, lx, ly, nx, ny, color::kAccent);
+    c.fill_triangle(tx, ty, nx, ny, rx, ry, color::kAccent);
+}
+
+}  // namespace ui

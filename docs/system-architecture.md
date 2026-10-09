@@ -1106,7 +1106,14 @@ BLE-only one, so the version check cannot tell them apart: a C6 that answers
 
 - **upload** a `dash-*.bin` into the dev slot;
 - **download** the ride logs from `logs/` on the card;
-- **download** the stable and dev images as a backup.
+- **download** the stable and dev images as a backup;
+- **delete** ride logs (`DELETE /logs/<name>`), except the one the logger
+  has open, which answers 409;
+- **read and change every CONFIG setting** (`GET /api/settings`,
+  `POST /api/set?key=&value=`), grouped as CONFIG groups them. Actions are
+  not offered. A change is posted as the same `ConfigSet` command the
+  config screen posts, so `logic` applies it through the table's clamp and
+  `keeper` saves it; the answer is the clamped value.
 
 **The rules, which are the point of the design:**
 
@@ -1118,7 +1125,7 @@ BLE-only one, so the version check cannot tell them apart: a C6 that answers
   invalid.
 - **Nothing on the network can boot anything.** An upload only fills the
   dev slot. Boot dev once and Promote are buttons on the dash.
-- **Downloads cannot leave `logs/`.** `core::wifi::valid_log_name` takes
+- **Downloads and deletes cannot leave `logs/`.** `core::wifi::valid_log_name` takes
   only a plain `*.csv` name: no slash, no `..`, one dot.
 - **The policy is host-tested** (`core/wifi/`, `test_wifi`); the service is
   the radio and the server.

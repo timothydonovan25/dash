@@ -222,7 +222,7 @@ the media half of step 9 is written. 28 host test suites, all passing.
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 12 widgets, all 16 screens, the render loop, laid out
+**`ui/`** — canvas, 13 widgets, all 17 screens, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each
@@ -269,13 +269,20 @@ for the other board (`demo` vs `bike`) is refused.
 **Wi-Fi updates are built, and have run on the demo board, not the bike.**
 An on-demand WPA2 hotspot (`CRF250F-Dash`, a new eight-digit password each
 time, shown on DIAG → Update), never a station. `http://192.168.4.1` uploads
-a `dash-*.bin` to the dev slot and downloads ride logs and firmware backups.
+a `dash-*.bin` to the dev slot, downloads and deletes ride logs, downloads
+firmware backups, and edits every CONFIG setting (as `ConfigSet` commands,
+which `logic` applies).
 It turns off after 10 idle minutes or when the bike moves. The upload goes
 through `Deps::ota_stream` to `ota`, which stays the one writer of the dev
 slot with the same checks as the card; nothing on the network can boot an
 image. A C6 without Wi-Fi in its firmware has it replaced from `slave_fw`.
 Architecture §11.7.1. **Watch internal RAM:** the SDIO link, lwIP and NimBLE
 share it, and `wifi` logs what is free at every change of state.
+
+**CRUISE → NAV** drops one waypoint at the current fix and points back to it:
+`core::geo::guide` gives distance and bearing, heading-up above 3 mph and
+north-up below. The waypoint is a `logic` slot, RAM only, lost at power-off.
+**Startup** shows a 1.5 s splash before the gauge sweep (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
 shows "ejected, safe to pull" until the card comes out. One lock in

@@ -60,6 +60,7 @@ const ConfigItem kItems[] = {
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),
     num   (0x0B02, "Sweep time",   "Startup", Kind::Int, 500, 5000, 100, "ms", FIELD(sweep_ms)),
+    boolean(0x0B03,"Splash",       "Startup", FIELD(splash)),
 
     // Wheels
     num(0x0201, "Front circ.",  "Wheels", Kind::Int, 1000, 3000, 5, "mm", FIELD(front_circumference_mm)),

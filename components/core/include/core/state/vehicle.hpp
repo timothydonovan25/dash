@@ -207,6 +207,16 @@ struct StorageRequest {
     uint8_t op = None;
 };
 
+// The one dropped waypoint, for CRUISE -> NAV. Written by `logic`, from the
+// fix at the moment the rider dropped it. RAM only: it does not survive a
+// power cycle.
+struct Waypoint {
+    bool     set = false;
+    double   lat = 0.0;
+    double   lon = 0.0;
+    uint32_t utc_ms = 0;     // when it was dropped, for "dropped 14:05"
+};
+
 // The hotspot, for the Update screen. Written by `wifi`.
 struct Wifi {
     core::wifi::State state = core::wifi::State::Off;

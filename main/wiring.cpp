@@ -132,6 +132,7 @@ services::Deps& build() {
     g_deps.blackbox   = &g_blackbox;
     g_deps.delta      = &g_delta;
     g_deps.lap_history= &g_lap_history;
+    g_deps.commands   = &g_commands;
 
     g_slots.health.publish(g_health.publish());
     g_commands.begin();

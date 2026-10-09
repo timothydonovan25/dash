@@ -41,6 +41,8 @@ struct Settings {
     // needles take to go up and come back.
     bool     gauge_sweep    = true;
     uint16_t sweep_ms       = 2000;
+    // The name card before the sweep: CRF250F, the firmware, a bar.
+    bool     splash         = true;
 
     // Wheels — the front sensor counts spokes, the rear counts sprocket bolts
     uint16_t front_circumference_mm = 2130;

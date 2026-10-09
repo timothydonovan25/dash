@@ -109,6 +109,32 @@ private:
     Widget*   list_[2] = {};
 };
 
+// Drop a waypoint, then find your way back to it: an arrow, the distance,
+// and the bearing. Two rows: Drop waypoint (or move it here) and Clear.
+class NavScreen final : public Screen {
+public:
+    const char* name() const override { return "NAV"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+    uint8_t focus_count() const override { return kActions; }
+    void set_focus(uint8_t f) override { focus_ = f; }
+
+private:
+    static constexpr uint8_t kActions = 2;
+    NavArrow arrow_;
+    Label    dist_;
+    Label    dist_unit_;
+    Label    bearing_;
+    Label    dropped_;
+    Label    status_;
+    Table    actions_;
+    Widget*  list_[7] = {};
+    uint8_t  focus_ = 0;
+};
+
 class TripScreen final : public Screen {
 public:
     const char* name() const override { return "TRIP"; }

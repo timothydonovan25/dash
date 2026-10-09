@@ -120,6 +120,9 @@ struct Fixture {
         sys.uptime_s = 3725;
         sys.render_hz_x10 = 299;
         sys.gnss_bad_csum = 2;
+        // Off for every case but its own: a splash would stand in front of
+        // the screen each case is trying to look at.
+        settings.splash = false;
         app.bind_settings(&settings);
     }
 };
@@ -955,6 +958,63 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() == at_rest);
+    }
+
+    CASE("the splash covers key-on, asks for full repaints, then hands over");
+    {
+        Fixture fx;
+        fx.settings.splash = true;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        core::state::Frame f;
+        f.t_ms = 1000;
+        fx.app.update(f);
+        CHECK(fx.app.splashing());
+        fx.app.clear_full_repaint();
+        f.t_ms = 1000 + App::kSplashMs / 2;
+        fx.app.update(f);
+        CHECK(fx.app.splashing());
+        CHECK(fx.app.needs_full_repaint());       // every frame of it
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 0);
+        f.t_ms = 1000 + App::kSplashMs;
+        fx.app.update(f);
+        CHECK(!fx.app.splashing());
+        CHECK(fx.app.needs_full_repaint());       // the screen comes in whole
+    }
+
+    CASE("NAV: drop and clear post commands, arrow and distance from the frame");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 4);
+        CHECK(std::strcmp(fx.app.current().name(), "NAV") == 0);
+        CHECK(fx.app.current().focus_count() == 2);
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavDropWaypoint);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavClearWaypoint);
+
+        // No waypoint draws, and so does one 1000 ft ahead.
+        core::state::Frame f;
+        f.t_ms = 50;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t none = s.ink();
+        f.gnss.fix = true;
+        f.gnss.lat = 40.0;
+        f.gnss.lon = -75.0;
+        f.waypoint = core::state::Waypoint{true, 40.0 + 1000.0 / 364000.0, -75.0, 0};
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != none);
     }
 
     CASE("an alert draws over whatever screen is up, and E dismisses it");

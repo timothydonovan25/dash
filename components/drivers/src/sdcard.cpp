@@ -175,6 +175,19 @@ hal::Status SdCard::list(const char* dir, ListFn fn, void* ctx) {
     return hal::Status::Ok;
 }
 
+hal::Status SdCard::remove(const char* path) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    if (!mounted_) return hal::Status::NotPresent;
+    if (!path || !*path) return hal::Status::Unsupported;
+    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
+        return hal::Status::Busy;
+    }
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    return std::remove(full) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
+}
+
 hal::Status SdCard::size_of(const char* path, size_t& out) {
     out = 0;
     const Hold hold(lock_);

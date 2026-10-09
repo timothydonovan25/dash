@@ -91,6 +91,10 @@ struct Deps {
     // StreamBuffer, made by start_ota; void* so this header stays free of
     // FreeRTOS types.
     void* ota_stream = nullptr;
+
+    // The command queue, for a task that is not handed it at start: the
+    // Wi-Fi page posts ConfigSet through it like the config screen does.
+    ui::ICommandSink* commands = nullptr;
 };
 
 // The one command queue (§4.5). Screens post, `logic` drains, and every

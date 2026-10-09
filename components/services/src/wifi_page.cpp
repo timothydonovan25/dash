@@ -18,6 +18,12 @@ button{padding:10px;border:0;border-radius:6px;background:#2a6;color:#fff}
 button:disabled{background:#444}
 progress{width:100%;height:14px;margin-top:8px}
 .msg{margin-top:8px}.bad{color:#f66}.good{color:#6d6}.dim{color:#888}
+.row button{width:auto;margin:0;padding:2px 10px;background:#633;font-size:14px}
+.set{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #2a2a2a}
+.set:last-child{border:0}.set input,.set select{font:inherit;width:120px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:3px}
+.set input[type=checkbox]{width:22px;height:22px}.u{color:#888;font-size:13px;min-width:40px}
+.ok{color:#6d6}.err{color:#f66}
+details{margin-bottom:8px}summary{cursor:pointer;color:#9cf;padding:4px 0}
 </style></head><body>
 <h1>CRF250F Dash</h1>
 
@@ -38,6 +44,9 @@ engine off. Then on the dash: DIAG &rarr; Update &rarr; Boot dev once.</div>
 
 <h2>Ride logs</h2>
 <div class="card" id="logs"><span class="dim">&hellip;</span></div>
+
+<h2>Settings</h2>
+<div class="card" id="settings"><span class="dim">&hellip;</span></div>
 
 <h2>Firmware backup</h2>
 <div class="card">
@@ -63,7 +72,13 @@ async function logs(){
     if(!l.length){el.innerHTML='<span class="dim">No logs, or no card.</span>';return}
     l.sort((a,b)=>a.name<b.name?1:-1);
     el.innerHTML=l.map(f=>'<div class="row"><a href="/logs/'+f.name+'" download>'+f.name+
-      '</a><span class="dim">'+kb(f.size)+'</span></div>').join('');
+      '</a><span class="dim">'+kb(f.size)+' <button data-del="'+f.name+'">Delete</button></span></div>').join('');
+    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+      const n=b.dataset.del;if(!confirm('Delete '+n+' from the card?'))return;
+      b.disabled=true;
+      let r={};try{r=await (await fetch('/logs/'+n,{method:'DELETE'})).json()}catch(e){r={error:'connection lost'}}
+      if(r.ok)logs();else{alert('Not deleted: '+r.error);b.disabled=false}
+    });
   }catch(e){el.innerHTML='<span class="bad">Could not list logs.</span>'}
 }
 $('file').onchange=()=>{$('up').disabled=!$('file').files.length;$('upmsg').textContent=''};
@@ -82,7 +97,44 @@ $('up').onclick=()=>{
   x.onerror=()=>{m.className='msg bad';m.textContent='Connection lost.';$('up').disabled=false};
   x.open('POST','/fw');x.send(f);
 };
-status();logs();
+// Every CONFIG setting, grouped as the dash groups them. Each one is sent
+// the moment it changes, and shows the value the dash actually kept.
+async function settings(){
+  const el=$('settings');
+  let l;
+  try{l=await (await fetch('/api/settings')).json()}catch(e){el.innerHTML='<span class="bad">Could not read settings.</span>';return}
+  const groups={};
+  l.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
+  el.innerHTML='';
+  for(const g in groups){
+    const d=document.createElement('details');
+    d.innerHTML='<summary>'+g+'</summary>';
+    groups[g].forEach(s=>{
+      const row=document.createElement('div');row.className='set';
+      let inp;
+      if(s.kind==='bool'){inp=document.createElement('input');inp.type='checkbox';inp.checked=s.value!=0}
+      else if(s.kind==='enum'){inp=document.createElement('select');
+        s.options.forEach((o,i)=>{const op=document.createElement('option');op.value=i;op.textContent=o;inp.appendChild(op)});
+        inp.value=s.value}
+      else{inp=document.createElement('input');inp.type='number';inp.min=s.min;inp.max=s.max;inp.step=s.step;inp.value=s.value}
+      const lab=document.createElement('span');lab.textContent=s.label;lab.style.flex='1';
+      const u=document.createElement('span');u.className='u';u.textContent=s.unit;
+      inp.onchange=async()=>{
+        const v=s.kind==='bool'?(inp.checked?1:0):inp.value;
+        u.className='u';u.textContent='…';
+        try{
+          const r=await (await fetch('/api/set?key='+s.key+'&value='+encodeURIComponent(v),{method:'POST'})).json();
+          if(!r.ok)throw r.error;
+          if(s.kind!=='bool')inp.value=r.value;
+          u.className='u ok';u.textContent=(s.unit||'')+' ✓';
+        }catch(e){u.className='u err';u.textContent='failed'}
+      };
+      row.append(lab,inp,u);d.appendChild(row);
+    });
+    el.appendChild(d);
+  }
+}
+status();logs();settings();
 </script>
 </body></html>
 )HTML";

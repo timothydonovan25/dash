@@ -58,10 +58,17 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 else            s.trip.reset_trip_a();
                 break;
             case core::state::CommandId::ConfigSet:
-                // Settings are edited in place by the config screen. The
-                // command exists so every module holding a copy refreshes,
-                // and so the keeper knows something needs writing to NVS.
+                // The config screen has already edited Settings in place,
+                // so for it this is a no-op; the Wi-Fi page has not, and
+                // its value lands here. Then every module holding a copy
+                // refreshes, and the keeper sees something to write to NVS.
                 if (d.settings) {
+                    if (const core::config::ConfigItem* it =
+                            core::config::find(cmd.cfg.key)) {
+                        if (it->kind != core::config::Kind::Action) {
+                            core::config::set(*d.settings, *it, cmd.cfg.val);
+                        }
+                    }
                     s.fuel.idle_gph = d.settings->fuel_idle_gph;
                     s.fuel.wot_gph  = d.settings->fuel_wot_gph;
                     s.fuel.tank_gal = d.settings->fuel_tank_gal;
@@ -87,6 +94,17 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::WifiToggle:
                 d.slots->wifi_request.publish(core::state::WifiRequest{
                     core::state::WifiRequest::Toggle});
+                break;
+            case core::state::CommandId::NavDropWaypoint:
+                // Like the finish line: this task decides whether the fix
+                // is good enough to drop one on.
+                if (g.fix) {
+                    d.slots->waypoint.publish(
+                        core::state::Waypoint{true, g.lat, g.lon, g.utc_ms});
+                }
+                break;
+            case core::state::CommandId::NavClearWaypoint:
+                d.slots->waypoint.publish(core::state::Waypoint{});
                 break;
             case core::state::CommandId::StorageEject:
                 d.slots->storage_request.publish(core::state::StorageRequest{

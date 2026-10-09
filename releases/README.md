@@ -12,8 +12,3 @@ Known bad:
 - `dash-1.1-2026-10-09-demo-no-upload-flicker.bin` asserts at startup
   (CONFIG_SPIRAM_XIP_FROM_PSRAM) and falls back to stable. Kept as a record.
 
-Missing:
-- `dash-1.0-2026-10-09-demo-wifi-ota.bin`, the image stable runs on the demo
-  board today. The build tree's copy was overwritten before this folder
-  existed. Get it back from the dash: Wi-Fi page -> Firmware backup -> Stable
-  saves it under exactly this name.

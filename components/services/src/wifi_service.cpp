@@ -6,7 +6,9 @@
 // http://192.168.4.1 that can
 //   - upload a dash.bin into the dev slot,
 //   - download the ride logs off the card,
-//   - download the stable and dev firmware images, as a backup.
+//   - download the stable and dev firmware images, as a backup,
+//   - delete ride logs,
+//   - read and change every CONFIG setting.
 // It turns itself off after core::wifi::kIdleOffMs without a request, and
 // as soon as the bike moves. The policy is core::wifi; this is the radio
 // and the web server.
@@ -24,6 +26,7 @@
 #include "services/services.hpp"
 #include "c6_firmware.hpp"
 
+#include "core/config/config.hpp"
 #include "core/ota/ota.hpp"
 #include "core/wifi/wifi.hpp"
 
@@ -43,6 +46,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace services {
@@ -227,6 +231,124 @@ esp_err_t log_get(httpd_req_t* r) {
     return httpd_resp_send_chunk(r, nullptr, 0);
 }
 
+esp_err_t send_status(httpd_req_t* r, const char* status, const char* body) {
+    httpd_resp_set_status(r, status);
+    return send_json(r, body);
+}
+
+esp_err_t log_delete(httpd_req_t* r) {
+    g_web.touch();
+    const char* name = r->uri + std::strlen("/logs/");
+    hal::ICard* card = g_web.d->card;
+    if (!core::wifi::valid_log_name(name)) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"not a log name\"}");
+    }
+    if (!card || !card->present()) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    }
+    char path[48];
+    std::snprintf(path, sizeof path, "logs/%s", name);
+    const hal::Status st = card->remove(path);
+    if (st == hal::Status::Busy) {
+        return send_status(r, "409 Conflict",
+                           "{\"ok\":false,\"error\":\"the dash is writing that log\"}");
+    }
+    if (!hal::ok(st)) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no such log\"}");
+    }
+    ESP_LOGI(kTag, "deleted %s", path);
+    return send_json(r, "{\"ok\":true}");
+}
+
+// --- settings -------------------------------------------------------------
+//
+// The same table CONFIG draws (core::config), so the page cannot offer a
+// setting the dash does not have or a range the dash would not accept.
+// Actions are left out: each is a button on the dash for a reason, and one
+// of them turns this hotspot off.
+
+const char* kind_name(core::config::Kind k) {
+    switch (k) {
+        case core::config::Kind::Float: return "float";
+        case core::config::Kind::Int:   return "int";
+        case core::config::Kind::Bool:  return "bool";
+        case core::config::Kind::Enum:  return "enum";
+        default:                        return "action";
+    }
+}
+
+esp_err_t settings_get(httpd_req_t* r) {
+    namespace cfg = core::config;
+    g_web.touch();
+    const cfg::Settings* s = g_web.d->settings;
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    httpd_resp_send_chunk(r, "[", 1);
+    bool first = true;
+    for (size_t i = 0; s && i < cfg::item_count(); ++i) {
+        const cfg::ConfigItem& it = cfg::items()[i];
+        if (it.kind == cfg::Kind::Action) continue;
+        char item[320];
+        int n = std::snprintf(item, sizeof item,
+                              "%s{\"key\":%u,\"group\":\"%s\",\"label\":\"%s\","
+                              "\"kind\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g,"
+                              "\"unit\":\"%s\",\"value\":%g",
+                              first ? "" : ",", static_cast<unsigned>(it.key), it.group,
+                              it.label, kind_name(it.kind), static_cast<double>(it.min),
+                              static_cast<double>(it.max), static_cast<double>(it.step),
+                              it.unit, static_cast<double>(cfg::get(*s, it)));
+        if (it.kind == cfg::Kind::Enum) {
+            n += std::snprintf(item + n, sizeof item - n, ",\"options\":[");
+            for (uint8_t o = 0; o < it.option_count && n < static_cast<int>(sizeof item); ++o) {
+                n += std::snprintf(item + n, sizeof item - n, "%s\"%s\"", o ? "," : "",
+                                   it.options[o]);
+            }
+            n += std::snprintf(item + n, sizeof item - n, "]");
+        }
+        n += std::snprintf(item + n, sizeof item - n, "}");
+        if (n >= static_cast<int>(sizeof item)) continue;   // never, but never torn JSON
+        first = false;
+        httpd_resp_send_chunk(r, item, n);
+    }
+    httpd_resp_send_chunk(r, "]", 1);
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+// POST /api/set?key=257&value=80. The change goes to `logic` as the same
+// ConfigSet the config screen posts, so it is applied, clamped, saved to
+// NVS and picked up by every module in exactly the same way. The answer is
+// the value after the table's clamp, which is what the dash will hold.
+esp_err_t settings_set(httpd_req_t* r) {
+    namespace cfg = core::config;
+    g_web.touch();
+    char q[64], key_s[12], val_s[24];
+    if (httpd_req_get_url_query_str(r, q, sizeof q) != ESP_OK ||
+        httpd_query_key_value(q, "key", key_s, sizeof key_s) != ESP_OK ||
+        httpd_query_key_value(q, "value", val_s, sizeof val_s) != ESP_OK) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"key and value\"}");
+    }
+    char* end = nullptr;
+    const unsigned long key = std::strtoul(key_s, &end, 0);
+    const cfg::ConfigItem* it = (end && *end == '\0' && key <= 0xFFFF)
+                                    ? cfg::find(static_cast<uint16_t>(key)) : nullptr;
+    if (!it || it->kind == cfg::Kind::Action) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no such setting\"}");
+    }
+    const float v = std::strtof(val_s, &end);
+    if (!end || *end != '\0' || v != v) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"not a number\"}");
+    }
+    const float clamped = cfg::clamp(*it, v);
+    if (!g_web.d->commands ||
+        !g_web.d->commands->post(core::state::Command::config_set(it->key, clamped))) {
+        return send_status(r, "503 Service Unavailable",
+                           "{\"ok\":false,\"error\":\"the dash is busy, try again\"}");
+    }
+    char body[64];
+    std::snprintf(body, sizeof body, "{\"ok\":true,\"value\":%g}", static_cast<double>(clamped));
+    return send_json(r, body);
+}
+
 // Firmware in. The body goes to `ota` through the stream; the answer is
 // whatever `ota` made of it.
 esp_err_t fw_post(httpd_req_t* r) {
@@ -302,7 +424,7 @@ httpd_handle_t start_server() {
     cfg.core_id = 1;
     cfg.task_priority = 3;
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 12;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
@@ -315,6 +437,9 @@ httpd_handle_t start_server() {
         {"/api/status",    HTTP_GET,  status_get,    nullptr},
         {"/api/logs",      HTTP_GET,  logs_list_get, nullptr},
         {"/logs/*",        HTTP_GET,  log_get,       nullptr},
+        {"/logs/*",        HTTP_DELETE, log_delete,  nullptr},
+        {"/api/settings",  HTTP_GET,  settings_get,  nullptr},
+        {"/api/set",       HTTP_POST, settings_set,  nullptr},
         {"/fw/stable.bin", HTTP_GET,  fw_get,        nullptr},
         {"/fw/dev.bin",    HTTP_GET,  fw_get,        nullptr},
         {"/fw",            HTTP_POST, fw_post,       nullptr},

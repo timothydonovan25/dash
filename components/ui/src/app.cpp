@@ -1,6 +1,8 @@
 #include "ui/app.hpp"
 #include "core/sweep/sweep.hpp"
 #include "ui/chrome.hpp"
+#include "ui/theme.hpp"
+#include <cstdio>
 
 namespace ui {
 
@@ -17,7 +19,7 @@ constexpr Rect kDevTag{448, 0, 32, 11};
 }  // namespace
 
 App::App(const Context& ctx) : ctx_(ctx) {
-    Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &lap_,
+    Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &nav_screen_, &lap_,
                      &lap_history_, &track_map_, &all_data_, &engine_,
                      &attitude_, &sensors_, &gps_, &system_, &bus_, &radio_,
                      &update_, &config_};
@@ -34,6 +36,7 @@ Screen* App::screen_for(Mode m, uint8_t index) {
                 case 1: return &media_;
                 case 2: return &trip_;
                 case 3: return &trip_map_;
+                case 4: return &nav_screen_;
                 default: return &minimal_;
             }
         case Mode::Track:
@@ -118,6 +121,27 @@ void App::update(const core::state::Frame& f) {
         needs_full_ = true;
     }
 
+    // The splash first, timed from the first frame like the sweep. It
+    // draws itself and nothing else, so the screen underneath only starts
+    // being fed frames once it is over.
+    if (!splash_started_) {
+        splash_started_ = true;
+        splash_start_ms_ = f.t_ms;
+        splash_on_ = ctx_.settings && ctx_.settings->splash;
+    }
+    if (splash_on_) {
+        const uint32_t t = f.t_ms - splash_start_ms_;
+        if (t < kSplashMs) {
+            splash_permille_ = static_cast<uint16_t>(t * 1000u / kSplashMs);
+            std::snprintf(splash_ver_, sizeof splash_ver_, "%s",
+                          f.ota.known ? f.ota.running_ver : "");
+            needs_full_ = true;
+            return;
+        }
+        splash_on_ = false;
+        needs_full_ = true;
+    }
+
     // The start-up sweep (core/sweep) rewrites the frame the screen sees,
     // timed from the first frame drawn rather than from boot, so the whole
     // sweep is on the panel however long the hardware took to come up. Once
@@ -145,8 +169,32 @@ void App::update(const core::state::Frame& f) {
     current().update(f);
 }
 
+void App::render_splash(Canvas& c) {
+    c.fill(color::kBg);
+    const int16_t cx = static_cast<int16_t>(kScreenW / 2);
+    c.draw_text(cx, 96, "CRF250F", color::kAlarm, 8, Align::Center);
+    c.draw_text(cx, 168, "DASH", theme::secondary, 3, Align::Center);
+    if (splash_ver_[0]) {
+        c.draw_text(cx, 270, splash_ver_, theme::secondary, 1, Align::Center);
+    }
+    // A bar that fills over the splash, so it reads as "starting", not hung.
+    constexpr int16_t kW = 300, kH = 8, kY = 220;
+    const Rect track{static_cast<int16_t>(cx - kW / 2), kY, kW, kH};
+    c.draw_rect(track, theme::rule);
+    const int16_t w = static_cast<int16_t>((kW - 4) * splash_permille_ / 1000);
+    if (w > 0) {
+        c.fill_rect(Rect{static_cast<int16_t>(track.x + 2), static_cast<int16_t>(kY + 2), w,
+                         static_cast<int16_t>(kH - 4)},
+                    color::kAlarm);
+    }
+}
+
 void App::render(Canvas& c, bool full) {
     if (!entered_) return;
+    if (splash_on_) {
+        render_splash(c);
+        return;
+    }
 
     const bool repaint = full || needs_full_;
     if (repaint) {

@@ -30,7 +30,13 @@ public:
     // True while a whole-screen repaint is outstanding: the first frame, a
     // screen change, or an alert being dismissed. The render task asks, and
     // clears it once it has actually pushed a full frame.
+    // The splash asks for one every frame: it is a whole-screen animation
+    // with no widgets, and it is over in a second and a half.
     bool needs_full_repaint() const { return needs_full_; }
+
+    // The name card at key-on, before the sweep. Whole milliseconds.
+    static constexpr uint32_t kSplashMs = 1500;
+    bool splashing() const { return splash_on_; }
     void clear_full_repaint() { needs_full_ = false; }
 
     Screen& current();
@@ -62,6 +68,7 @@ private:
     MediaScreen      media_;
     MinimalScreen    minimal_;
     TripScreen       trip_;
+    NavScreen        nav_screen_;
     TripMapScreen    trip_map_;
     LapScreen        lap_;
     LapHistoryScreen lap_history_;
@@ -87,6 +94,13 @@ private:
 
     // The start-up gauge sweep: when the first frame arrived, and whether
     // the sweep has finished for good.
+    bool             splash_started_ = false;
+    bool             splash_on_ = false;
+    uint32_t         splash_start_ms_ = 0;
+    uint16_t         splash_permille_ = 0;
+    char             splash_ver_[32] = {};
+    void             render_splash(Canvas& c);
+
     bool             sweep_started_ = false;
     bool             sweep_done_ = false;
     uint32_t         sweep_start_ms_ = 0;

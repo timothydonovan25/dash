@@ -22,7 +22,7 @@ const uint16_t kShippedKeys[] = {
     0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806, 0x0807,
     0x0901,
     0x0A01, 0x0A02,
-    0x0B01, 0x0B02,
+    0x0B01, 0x0B02, 0x0B03,
     0x0C01,
     0x0D01,
 };
@@ -210,16 +210,18 @@ int main() {
         CHECK(total == item_count());
     }
 
-    CASE("the start-up sweep has its own submenu: on, 2 s");
+    CASE("Startup holds the sweep (on, 2 s) and the splash (on)");
     {
         Settings s;
         CHECK(s.gauge_sweep);
+        CHECK(s.splash);
         CHECK(s.sweep_ms == 2000);
         size_t g = 0;
         while (g < group_count() && !eq(group_name(g), "Startup")) ++g;
         CHECK(g < group_count());
-        CHECK(group_size(g) == 2);
+        CHECK(group_size(g) == 3);
         CHECK(group_item(g, 0)->key == 0x0B01);
+        CHECK(group_item(g, 2)->key == 0x0B03);
         char buf[32];
         format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "2000 ms"));
     }

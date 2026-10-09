@@ -1,8 +1,11 @@
 #include "ui/screens.hpp"
+#include "core/geo/geo.hpp"
 #include "core/health/health.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
+#include <cmath>
+#include <cstdio>
 #include <initializer_list>
 
 namespace ui {
@@ -442,6 +445,104 @@ constexpr Rect kTripHours{ 14, 222, 144, 72};
 constexpr Rect kTripTop  {168, 222, 144, 72};
 constexpr Rect kTripHint {322, 252, 144, 16};
 }  // namespace
+
+// --- NAV ------------------------------------------------------------------
+
+constexpr Rect kNavArrow  { 14,  40, 236, 236};
+constexpr Rect kNavDist   {266,  50, 200,  44};
+constexpr Rect kNavUnit   {266,  98, 200,  16};
+constexpr Rect kNavBear   {266, 126, 200,  16};
+constexpr Rect kNavDrop   {266, 150, 200,  12};
+constexpr Rect kNavStatus {266, 170, 200,  12};
+constexpr Rect kNavActions{266, 214, 200,  52};
+
+void NavScreen::enter(Canvas&) {
+    arrow_.set_bounds(kNavArrow);
+    dist_.set_bounds(kNavDist);       dist_.configure("--", color::kText, 6, Align::Left);
+    dist_unit_.set_bounds(kNavUnit);  dist_unit_.configure("", color::kDim, 2, Align::Left);
+    bearing_.set_bounds(kNavBear);    bearing_.configure("", color::kText, 2, Align::Left);
+    dropped_.set_bounds(kNavDrop);    dropped_.configure("", color::kDim, 1, Align::Left);
+    status_.set_bounds(kNavStatus);   status_.configure("", color::kDim, 1, Align::Left);
+    actions_.set_bounds(kNavActions); actions_.configure(kActions, 2);
+    list_[0] = &arrow_;  list_[1] = &dist_;    list_[2] = &dist_unit_;
+    list_[3] = &bearing_; list_[4] = &dropped_; list_[5] = &status_;
+    list_[6] = &actions_;
+}
+
+void NavScreen::update(const Frame& f) {
+    const core::state::Waypoint& w = f.waypoint;
+    const bool fix = f.gnss.fix;
+    const bool live = w.set && fix;
+
+    core::geo::Guide g;
+    if (live) {
+        g = core::geo::guide(core::geo::LatLon{f.gnss.lat, f.gnss.lon}, f.gnss.course_deg,
+                             f.gnss.speed_mph, core::geo::LatLon{w.lat, w.lon});
+    }
+    arrow_.set(static_cast<float>(g.rel_deg), g.heading_up, live);
+
+    // Feet (or metres) up close, where the last stretch is walked; miles
+    // (or km) further out.
+    char num[12] = "--";
+    const char* unit = "";
+    if (live) {
+        const bool metric = units() == u::System::Metric;
+        const float mi = static_cast<float>(g.dist_ft / 5280.0);
+        if (mi < 0.1f) {
+            const float near = metric ? static_cast<float>(g.dist_ft * 0.3048) : static_cast<float>(g.dist_ft);
+            u::fmt_value(num, sizeof num, near, 0, true);
+            unit = metric ? "m" : "ft";
+        } else {
+            const float far = u::distance_for_display(mi, units(), &unit);
+            u::fmt_value(num, sizeof num, far, far < 10.0f ? 2 : 1, true);
+        }
+    }
+    dist_.set_text(num);
+    dist_unit_.set_text(unit);
+
+    char bear[24] = "";
+    if (live) {
+        static const char* const kPoints[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+        const int b = static_cast<int>(std::lround(g.bearing_deg)) % 360;
+        std::snprintf(bear, sizeof bear, "%03d %s", b, kPoints[((b + 22) / 45) % 8]);
+    }
+    bearing_.set_text(bear);
+
+    char when[32] = "";
+    if (w.set) {
+        char clock[12];
+        u::fmt_clock(clock, sizeof clock, w.utc_ms,
+                     has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0, true);
+        std::snprintf(when, sizeof when, "dropped %s", clock);
+    }
+    dropped_.set_text(when);
+
+    status_.set_text(!fix          ? "waiting for a GPS fix"
+                     : !w.set      ? "no waypoint yet"
+                     : g.heading_up ? "up = straight ahead"
+                                    : "up = north (under 3 mph)");
+
+    actions_.set_row(0, w.set ? "Move here" : "Drop waypoint", fix ? "" : "no fix");
+    actions_.set_row(1, "Clear", w.set ? "" : "none");
+    actions_.set_row_count(kActions);
+    actions_.set_focus(focus_);
+}
+
+bool NavScreen::handle(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::nav::Press;
+    if (e.button != Button::E || e.press != Press::Short) return false;
+    // `logic` decides whether the fix is good enough, as for the lap line.
+    return post(core::state::Command(focus_ == 0 ? core::state::CommandId::NavDropWaypoint
+                                                 : core::state::CommandId::NavClearWaypoint));
+}
+
+void NavScreen::draw_background(Canvas& c) {
+    c.draw_text(kNavActions.x, static_cast<int16_t>(kNavActions.bottom() + 8),
+                "C/D pick, E to do it", theme::secondary, 1, Align::Left);
+}
+
+WidgetList NavScreen::widgets() { return WidgetList{list_, 7}; }
 
 void TripScreen::enter(Canvas&) {
     odo_.set_bounds(kTripOdo.inset(8));    odo_.configure("ODOMETER", "mi", 1, 5);
