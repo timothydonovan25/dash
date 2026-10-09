@@ -190,7 +190,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 28 host test suites, all passing.
+the media half of step 9 is written. 29 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -217,6 +217,9 @@ the media half of step 9 is written. 28 host test suites, all passing.
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below
+- `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
+  wheels and GPS Doppler, gated, with GPS refereeing the wheels.
+  `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride
 - `wifi/` the update hotspot's policy: idle and moving shut-off, the
   session password, which log names the page may serve
 

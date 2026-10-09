@@ -32,6 +32,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.ota    = s.ota.get();
     f.wifi   = s.wifi.get();
     f.waypoint = s.waypoint.get();
+    f.fused  = s.fused.get();
     f.t_ms   = t_ms;
     return f;
 }

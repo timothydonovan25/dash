@@ -127,6 +127,36 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         }
     }
 
+    // --- fused speed ----------------------------------------------------
+    // Fed from the slots like everything else here. A new fix is one whose
+    // UTC moved: Doppler must be believed once per fix, not once per tick.
+    const core::state::Attitude att = d.slots->attitude.get();
+    const core::state::Health health = d.slots->health.get();
+    core::fusion::SpeedInput fi;
+    fi.t_ms = now;
+    fi.accel_g = att.g_lon;
+    fi.accel_ok = health.ok(core::state::Dev::Imu);
+    // The wheels have no health of their own: a dead sensor reads 0, and a
+    // 0 that disagrees with GPS and the IMU is gated out like a spin.
+    fi.front_ok = fi.rear_ok = true;
+    fi.front_mph = m.front_mph;
+    fi.rear_mph = m.rear_mph;
+    fi.gps_ok = g.fix;
+    fi.gps_mph = g.speed_mph;
+    fi.hdop = g.hdop;
+    fi.gps_new = g.fix && g.utc_ms != s.last_gps_utc_ms;
+    s.last_gps_utc_ms = g.utc_ms;
+    const core::fusion::SpeedOutput fo = s.speed.step(fi);
+    core::state::Fused fused;
+    fused.speed_mph = fo.mph;
+    fused.speed_sigma_mph = fo.sigma_mph;
+    fused.speed_valid = fo.valid;
+    fused.used = fo.used;
+    fused.suspect = fo.suspect;
+    fused.resets = fo.resets;
+    fused.accel_bias_g = fo.bias_g;
+    d.slots->fused.publish(fused);
+
     // --- trip -----------------------------------------------------------
     core::trip::Input ti;
     ti.speed_mph = m.best_mph;
@@ -217,8 +247,15 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         ? d.settings->log_rate
         : static_cast<uint8_t>(core::log::kDefaultRate);
     if (d.blackbox && s.log_gate.due(log_rate, now, lap_event)) {
-        const core::state::Attitude a = d.slots->attitude.get();
+        const core::state::Attitude& a = att;
         core::log::Record rec;
+        rec.front_mph = m.front_mph;
+        rec.rear_mph = m.rear_mph;
+        rec.gps_mph = g.speed_mph;
+        rec.hdop = g.hdop;
+        rec.gps_utc_ms = g.utc_ms;
+        rec.fused_mph = fo.mph;
+        rec.fused_sigma = fo.sigma_mph;
         rec.t_ms = now;
         rec.speed_mph = m.best_mph;
         rec.rpm = e.rpm;

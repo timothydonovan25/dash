@@ -1,4 +1,5 @@
 #include "ui/screens.hpp"
+#include "core/fusion/speed.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
 
@@ -75,7 +76,7 @@ constexpr Rect kGpsTable {14, 40, 452, 264};
 
 void GpsScreen::enter(Canvas&) {
     table_.set_bounds(kGpsTable);
-    table_.configure(10, 2);
+    table_.configure(12, 2);
     list_[0] = &table_;
 }
 
@@ -119,7 +120,28 @@ void GpsScreen::update(const Frame& f) {
     }
     table_.set_row(9, "Bad checksums", v);
 
-    table_.set_row_count(10);
+    // Fused speed beside the raw figures, and which sources it is using:
+    // F front wheel, R rear, G GPS; lower case is suspect.
+    if (f.fused.speed_valid) {
+        char sig[12];
+        const size_t k = u::fmt_value(v, sizeof v, f.fused.speed_mph, 1, true);
+        u::fmt_value(sig, sizeof sig, f.fused.speed_sigma_mph, 1, true);
+        std::snprintf(v + k, sizeof v - k, " +-%s", sig);
+    } else {
+        std::snprintf(v, sizeof v, "--");
+    }
+    table_.set_row(10, "Fused mph", v);
+    namespace fu = core::fusion;
+    const auto src = [&](uint8_t bit, char up) {
+        return (f.fused.suspect & bit) ? static_cast<char>(up + 32)
+             : (f.fused.used & bit)    ? up : '.';
+    };
+    std::snprintf(v, sizeof v, "%c%c%c resets %u", src(fu::kSrcFront, 'F'),
+                  src(fu::kSrcRear, 'R'), src(fu::kSrcGps, 'G'),
+                  static_cast<unsigned>(f.fused.resets));
+    table_.set_row(11, "Fusion", v);
+
+    table_.set_row_count(12);
 }
 
 WidgetList GpsScreen::widgets() { return WidgetList{list_, 1}; }

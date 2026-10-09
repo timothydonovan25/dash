@@ -437,7 +437,7 @@ int main() {
         if (log_file) {
             core::log::Record rec;
             while (blackbox.pop(rec)) {
-                char line[192];
+                char line[256];
                 if (rec.lap_done_ms != 0) {
                     char tag[64];
                     const size_t t = core::log::format_lap_marker(

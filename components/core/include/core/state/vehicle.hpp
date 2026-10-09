@@ -207,6 +207,19 @@ struct StorageRequest {
     uint8_t op = None;
 };
 
+// The fused estimates (core/fusion), written by `logic`. Stage 1 is road
+// speed only. The raw readings stay in Motion and Gnss, so DIAG can put the
+// two side by side and the safety gates keep using what was measured.
+struct Fused {
+    float    speed_mph       = 0.0f;
+    float    speed_sigma_mph = 0.0f;
+    bool     speed_valid     = false;
+    uint8_t  used            = 0;     // core::fusion::Source bits
+    uint8_t  suspect         = 0;
+    uint16_t resets          = 0;
+    float    accel_bias_g    = 0.0f;
+};
+
 // The one dropped waypoint, for CRUISE -> NAV. Written by `logic`, from the
 // fix at the moment the rider dropped it. RAM only: it does not survive a
 // power cycle.

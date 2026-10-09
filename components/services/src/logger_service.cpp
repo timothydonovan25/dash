@@ -64,7 +64,7 @@ void logger_task(void* arg) {
         }
 
         if (!header_written) {
-            char head[160];
+            char head[256];
             const size_t n = core::log::csv_header(head, sizeof head);
             if (hal::ok(card->append(path, head, n))) header_written = true;
         }
@@ -73,7 +73,7 @@ void logger_task(void* arg) {
         const size_t n = d.blackbox->pop_batch(batch, kBatch);
 
         for (size_t i = 0; i < n; ++i) {
-            char line[192];
+            char line[256];
             size_t len = 0;
             // A lap tag goes in immediately before the row it happened on.
             // RaceRender takes them anywhere in the file but insists they be

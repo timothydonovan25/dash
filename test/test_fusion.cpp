@@ -1,0 +1,223 @@
+// core/fusion stage 1: fused road speed.
+//
+// The scenario cases ride the same synthetic rides `replay --scenario all`
+// prints, over several noise seeds, and hold the filter to the worst error
+// seen across them with some headroom. The bounds are about the design,
+// not about a real bike: the noise is a guess until there is a 50 Hz log.
+#include "check.hpp"
+#include "scenarios.hpp"
+#include "core/fusion/speed.hpp"
+
+using namespace core::fusion;
+using replay::Kind;
+
+namespace {
+
+struct Result {
+    replay::Error raw, fused;
+    uint8_t suspect_seen = 0;
+    uint8_t rejected_seen = 0;
+    uint16_t resets = 0;
+    bool always_valid_moving = true;
+};
+
+Result ride(Kind k, uint32_t seed) {
+    Result r;
+    SpeedFilter f;
+    replay::RawBest best;
+    replay::run(k, seed, [&](const replay::Sample& s) {
+        const SpeedOutput o = f.step(s.in);
+        r.raw.add(best(s.in) - s.truth_mph);
+        r.fused.add((o.valid ? o.mph : 0.0f) - s.truth_mph);
+        r.suspect_seen |= o.suspect;
+        r.rejected_seen |= o.rejected;
+        r.resets = o.resets;
+        if (s.truth_mph > 1.0f && !o.valid) r.always_valid_moving = false;
+    });
+    return r;
+}
+
+// Worst RMS and worst max over seeds 1..8.
+void worst(Kind k, double& rms, double& max) {
+    rms = max = 0.0;
+    for (uint32_t seed = 1; seed <= 8; ++seed) {
+        const Result r = ride(k, seed);
+        if (r.fused.rms() > rms) rms = r.fused.rms();
+        if (r.fused.max > max) max = r.fused.max;
+    }
+}
+
+SpeedInput at(uint32_t t_ms) {
+    SpeedInput in;
+    in.t_ms = t_ms;
+    return in;
+}
+
+}  // namespace
+
+int main() {
+    CASE("nothing to go on: not valid, and no number pretending to be one");
+    {
+        SpeedFilter f;
+        SpeedInput in = at(0);
+        in.accel_ok = true;                 // the IMU alone cannot start it
+        CHECK(!f.step(in).valid);
+        in.t_ms = 20;
+        CHECK(!f.step(in).valid);
+    }
+
+    CASE("starts on the first wheel reading and follows a steady speed");
+    {
+        SpeedFilter f;
+        SpeedOutput o;
+        for (uint32_t t = 0; t <= 2000; t += 20) {
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.front_ok = in.rear_ok = true;
+            in.front_mph = in.rear_mph = 30.0f;
+            o = f.step(in);
+        }
+        CHECK(o.valid);
+        CHECK_NEAR(o.mph, 30.0, 0.05);
+        CHECK((o.used & kSrcFront) && (o.used & kSrcRear) && (o.used & kSrcAccel));
+        CHECK(o.sigma_mph < 1.0f);
+    }
+
+    CASE("coasting on the IMU alone stops being valid after coast_ms");
+    {
+        SpeedFilter f;
+        SpeedConfig cfg;
+        SpeedInput in = at(0);
+        in.front_ok = true;
+        in.front_mph = 20.0f;
+        in.accel_ok = true;
+        f.step(in, cfg);
+        in.front_ok = false;
+        SpeedOutput o;
+        for (uint32_t t = 20; t <= cfg.coast_ms; t += 20) { in.t_ms = t; o = f.step(in, cfg); }
+        CHECK(o.valid);
+        CHECK_NEAR(o.mph, 20.0, 0.01);       // no acceleration, no change
+        in.t_ms = cfg.coast_ms + 40;
+        CHECK(!f.step(in, cfg).valid);
+    }
+
+    CASE("the accelerometer's bias is learned, not integrated into speed");
+    {
+        SpeedFilter f;
+        SpeedOutput o;
+        for (uint32_t t = 0; t <= 30000; t += 20) {
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.accel_g = 0.05f;              // tilted mount, steady speed
+            in.front_ok = in.rear_ok = true;
+            in.front_mph = in.rear_mph = 25.0f;
+            o = f.step(in);
+        }
+        CHECK_NEAR(o.bias_g, 0.05, 0.01);
+        CHECK_NEAR(o.mph, 25.0, 0.2);
+    }
+
+    CASE("a long gap restarts the filter instead of integrating it");
+    {
+        SpeedFilter f;
+        SpeedInput in = at(0);
+        in.front_ok = true;
+        in.front_mph = 10.0f;
+        in.accel_ok = true;
+        f.step(in);
+        in.t_ms = 5000;
+        in.accel_g = 1.0f;                   // would be +110 mph over 5 s
+        in.front_mph = 12.0f;
+        CHECK_NEAR(f.step(in).mph, 12.0, 0.5);
+    }
+
+    CASE("never negative: a CRF250F does not reverse");
+    {
+        SpeedFilter f;
+        SpeedOutput o;
+        for (uint32_t t = 0; t <= 400; t += 20) {
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.accel_g = -1.0f;
+            in.front_ok = true;
+            in.front_mph = 0.0f;
+            o = f.step(in);
+        }
+        CHECK(o.mph >= 0.0f);
+    }
+
+    CASE("a 25 mph GPS glitch is rejected, and does not take the wheels out");
+    {
+        SpeedFilter f;
+        SpeedOutput o;
+        for (uint32_t t = 0; t <= 3000; t += 20) {
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.front_ok = in.rear_ok = true;
+            in.front_mph = in.rear_mph = 30.0f;
+            in.gps_ok = true;
+            in.gps_new = t % 100 == 0;
+            in.gps_mph = t == 2000 ? 55.0f : 30.0f;
+            o = f.step(in);
+            if (t == 2000) {
+                CHECK(o.rejected & kSrcGps);
+                CHECK(o.used & kSrcFront);
+            }
+        }
+        CHECK_NEAR(o.mph, 30.0, 0.2);
+    }
+
+    // --- the synthetic rides -------------------------------------------
+    double rms = 0, max = 0;
+
+    CASE("ride: as good as the wheels on a clean ride");
+    worst(Kind::Ride, rms, max);
+    CHECK(rms < 0.2);
+    CHECK(max < 1.5);
+
+    CASE("wheelspin: the spinning rear is not believed");
+    worst(Kind::Wheelspin, rms, max);
+    CHECK(rms < 0.3);
+    CHECK(max < 2.0);
+    CHECK(ride(Kind::Wheelspin, 1).rejected_seen & kSrcRear);
+
+    CASE("front lock: braking to a locked front does not read 0 mph");
+    worst(Kind::FrontLock, rms, max);
+    CHECK(rms < 0.3);
+    CHECK(max < 2.0);
+    CHECK(ride(Kind::FrontLock, 1).raw.max > 30.0);   // what the dash does today
+
+    CASE("GPS dropout: the wheels carry it, valid throughout");
+    worst(Kind::GpsDropout, rms, max);
+    CHECK(rms < 0.2);
+    CHECK(ride(Kind::GpsDropout, 1).always_valid_moving);
+
+    CASE("dead front sensor: flagged suspect, the rear and GPS carry on");
+    worst(Kind::DeadFront, rms, max);
+    CHECK(rms < 0.5);
+    CHECK(max < 6.0);                    // the launch, before GPS referees
+    CHECK(ride(Kind::DeadFront, 1).suspect_seen & kSrcFront);
+    CHECK(ride(Kind::DeadFront, 1).raw.rms() > 20.0);
+
+    CASE("parked: GPS jitter does not make it creep");
+    worst(Kind::Parked, rms, max);
+    CHECK(max < 0.3);
+
+    CASE("no GPS at all: the wheels and IMU alone");
+    worst(Kind::NoGps, rms, max);
+    CHECK(rms < 0.2);
+
+    CASE("GPS glitches: rejected, no worse than a clean ride");
+    worst(Kind::GpsGlitch, rms, max);
+    CHECK(rms < 0.2);
+    CHECK(max < 1.5);
+
+    // The known weak spot: no front wheel to compare against, so a spin of
+    // less than a quarter of GPS speed gets through. Bounded, not fixed.
+    CASE("spin with no front wheel: bounded by the GPS referee");
+    worst(Kind::SpinNoFront, rms, max);
+    CHECK(rms < 2.5);
+    CHECK(max < 12.0);
+
+    return check::report("fusion");
+}

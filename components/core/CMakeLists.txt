@@ -22,4 +22,5 @@ idf_component_register(
          "src/ota.cpp"
          "src/wifi.cpp"
          "src/sweep.cpp"
+         "src/fusion_speed.cpp"
     INCLUDE_DIRS "include")

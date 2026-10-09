@@ -44,6 +44,11 @@ struct Settings {
     // The name card before the sweep: CRF250F, the firmware, a bar.
     bool     splash         = true;
 
+    // What the big speed number shows: 0 the wheels (front, then rear, then
+    // GPS), 1 the fused estimate (core/fusion). Wheels until the filter has
+    // been tuned on real rides.
+    uint8_t speedo_source  = 0;
+
     // Wheels — the front sensor counts spokes, the rear counts sprocket bolts
     uint16_t front_circumference_mm = 2130;
     uint16_t rear_circumference_mm  = 2050;

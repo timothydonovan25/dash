@@ -46,6 +46,17 @@ struct Record {
     // 0 is neutral *and* unknown, because RaceRender has no third state.
     // Nothing is lost: kFlagNeutral is the sensed one, and this is inferred.
     uint8_t  gear       = 0;
+
+    // The raw speed sources and the fused figure, so a ride can be replayed
+    // through core/fusion on a laptop (tools/replay) and the filter tuned
+    // against what the sensors really said. Log at 50 Hz for that.
+    float    front_mph  = 0.0f;
+    float    rear_mph   = 0.0f;
+    float    gps_mph    = 0.0f;
+    float    hdop       = 0.0f;
+    uint32_t gps_utc_ms = 0;      // changes when a new fix arrives
+    float    fused_mph  = 0.0f;
+    float    fused_sigma= 0.0f;
 };
 
 enum Flags : uint16_t {

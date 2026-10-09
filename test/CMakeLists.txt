@@ -35,7 +35,8 @@ add_library(core STATIC
     ${CORE}/src/pairing.cpp
     ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp
-    ${CORE}/src/sweep.cpp)
+    ${CORE}/src/sweep.cpp
+    ${CORE}/src/fusion_speed.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -87,3 +88,14 @@ endforeach()
 add_test(NAME no_platform_headers
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/check_no_esp_headers.sh
                  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+# Sensor fusion: the tests ride the synthetic scenarios that tools/replay
+# also runs, so a number seen in `replay --scenario all` is the one tested.
+set(REPLAY ${CMAKE_CURRENT_SOURCE_DIR}/../tools/replay)
+add_executable(test_fusion test_fusion.cpp)
+target_link_libraries(test_fusion PRIVATE core)
+target_include_directories(test_fusion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${REPLAY})
+add_test(NAME fusion COMMAND test_fusion)
+
+add_executable(replay ${REPLAY}/replay.cpp)
+target_link_libraries(replay PRIVATE core)

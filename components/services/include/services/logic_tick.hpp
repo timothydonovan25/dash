@@ -8,6 +8,7 @@
 // Nothing in this header may include a FreeRTOS or ESP header, for the same
 // reason `core/` may not.
 #pragma once
+#include "core/fusion/speed.hpp"
 #include "services/services.hpp"
 #include "core/delta/delta.hpp"
 #include "core/geo/geo.hpp"
@@ -44,6 +45,10 @@ struct LogicState {
     // Which ticks get a blackbox row. The rate is a setting, so this is not
     // simply every tick.
     core::log::Decimator log_gate;
+
+    // Stage 1 of fusion: road speed (core/fusion).
+    core::fusion::SpeedFilter speed;
+    uint32_t last_gps_utc_ms = 0;
 };
 
 // Call at 50 Hz. Drains commands, advances the trip computer and the lap

@@ -6,6 +6,7 @@ namespace core::config {
 namespace {
 
 const char* const kUnitOptions[] = {"Imperial", "Metric"};
+const char* const kSpeedoOptions[] = {"Wheels", "Fused"};
 
 constexpr uint16_t kNoOffset = 0xFFFF;
 
@@ -56,6 +57,7 @@ const ConfigItem kItems[] = {
     choice(0x0102, "Units",        "Display", FIELD(unit_system), kUnitOptions, 2),
     num   (0x0103, "UTC offset",   "Display", Kind::Int, -12, 14, 1, "h",  FIELD(tz_offset_h)),
     boolean(0x0104,"Dim at night", "Display", FIELD(dim_at_night)),
+    choice(0x0105, "Speedo",       "Display", FIELD(speedo_source), kSpeedoOptions, 2),
 
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),

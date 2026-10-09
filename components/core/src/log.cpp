@@ -110,7 +110,8 @@ size_t csv_header(char* buf, size_t n) {
     const char* h =
         "# RaceRender Data\n"
         "Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,"
-        "Lean,Pitch,GVert,LapTime,Sats,Flags\n";
+        "Lean,Pitch,GVert,LapTime,Sats,Flags,"
+        "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma\n";
     return terminate(buf, n, put_str(buf, n, 0, h));
 }
 
@@ -177,6 +178,22 @@ size_t format_csv(char* buf, size_t n, const Record& r) {
     k = put_num(buf, n, k, static_cast<float>(r.sats), 0);
     k = put(buf, n, k, ',');
     k = put_num(buf, n, k, static_cast<float>(r.flags), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.front_mph, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.rear_mph, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.gps_mph, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.hdop, 1);
+    k = put(buf, n, k, ',');
+    // Seconds of the UTC day. A float holds them to a few ms, which is all
+    // the replay needs: it only asks whether this differs from the last row.
+    k = put_num(buf, n, k, static_cast<float>(r.gps_utc_ms) / 1000.0f, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.fused_mph, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.fused_sigma, 2);
     k = put(buf, n, k, '\n');
     return terminate(buf, n, k);
 }

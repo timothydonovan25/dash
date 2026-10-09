@@ -176,6 +176,23 @@ int main() {
         CHECK(head[0] == '#');
         CHECK(contains(head, "# RaceRender Data\n"));
         CHECK(contains(head, "\nTime,Latitude,Longitude,MPH,RPM,X,Y,"));
+
+        // The replay columns, at the end where RaceRender ignores them, and
+        // one cell per name.
+        CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma\n"));
+        const auto commas = [](const char* p) {
+            size_t c = 0;
+            for (; *p && *p != '\n'; ++p) c += *p == ',';
+            return c;
+        };
+        CHECK(commas(line) == commas(std::strchr(head, '\n') + 1));
+        r.front_mph = 31.25f;
+        r.gps_utc_ms = 45296120;              // 12:34:56.12
+        r.fused_mph = 30.5f;
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",31.25,"));
+        CHECK(contains(line, ",45296.12,"));
+        CHECK(contains(line, ",30.50,"));
     }
 
     CASE("a lap tag is hh:mm:ss.nn, which RaceRender parses strictly");

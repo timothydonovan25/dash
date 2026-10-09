@@ -25,6 +25,7 @@ add_library(core STATIC
     ${CORE}/src/delta.cpp ${CORE}/src/gear.cpp ${CORE}/src/power.cpp
     ${CORE}/src/media.cpp ${CORE}/src/pairing.cpp ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp
+    ${CORE}/src/fusion_speed.cpp
     ${CORE}/src/sweep.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
