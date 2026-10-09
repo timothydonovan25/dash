@@ -14,8 +14,9 @@ read it as the argument for the shape of the thing rather than as a
 description of the tree. `CLAUDE.md` holds the current state, and where a
 file differs from the sketch in §3 it says why.
 
-Built but never run: **BLE media** (§11, step 9 — the TPMS scan is not
-written). Not built, deliberately: **CAN / `engine_service`**
+Built but never run on the bike board: **BLE media** (§11, step 9 — the
+TPMS scan is not written) and **Wi-Fi updates** (§11.7.1). Both have run on
+the Guition demo board. Not built, deliberately: **CAN / `engine_service`**
 (§10.1 — the board has no transceiver), **USB mass storage** (§9.3 — the
 ownership seam exists, the TinyUSB half does not). The P4 board was
 ordered on 2026-10-07 and has not arrived; nothing here has run on it.
@@ -34,7 +35,8 @@ Decisions already made:
 | ECU data | Interface now, null driver now, real driver later. See §10.1 — the dash has no CAN transceiver. |
 | IMU | Full fusion: lean, pitch, jump detection. |
 | Faults | Never stop. Mark the device dead and keep running. |
-| BLE | In. NimBLE. Phone song metadata and TPMS. No Wi-Fi. |
+| BLE | In. NimBLE. Phone song metadata and TPMS. |
+| Wi-Fi | Updates only, on demand. A hotspot the dash runs while parked, never a station; no stored passwords (§11.7.1). |
 
 ---
 
@@ -311,8 +313,9 @@ One queue. One drain point. Easy to log every command for a bug report.
 
 ## 5. Tasks
 
-Core 0 does acquisition and control. Core 1 does the display and the card.
-There is no Wi-Fi and no BT, so core 0 is yours.
+Core 0 does acquisition and control. Core 1 does the display, the card and
+both radios. The radios are on the C6 and their hosts are on core 1, so
+core 0 is yours.
 
 | Task | Core | Prio | Rate | Owns |
 |---|---|---|---|---|
@@ -326,6 +329,8 @@ There is no Wi-Fi and no BT, so core 0 is yours.
 | `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
 | `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
 | `ble` | 1 | 4 | event | media Feed and Ctrl characteristics (§11); TPMS scan not written |
+| `ota` | 1 | 2 | event | the stable/dev slots, the only writer of the dev slot (§11.7) |
+| `wifi` | 1 | 3 | 4 Hz | the update hotspot and its web server, off until asked (§11.7.1) |
 
 The GPS is polled at 20 ms rather than reading a UART event queue. That
 was measured and left alone: 10 ms on a path whose end-to-end latency is
@@ -335,7 +340,7 @@ The IMU is not polled. It blocks on INT1 with a timeout, and the timeout
 is a fallback rather than the design — see §8. PPS is not wired on the P4
 board; `bsp/pins.hpp` says why.
 
-Ten tasks of your own. Each one has a single job you can say in one line.
+Twelve tasks of your own. Each one has a single job you can say in one line.
 Stack sizes and high-water marks go on the DIAG system screen.
 
 The P4 has no radio. The controller runs on the module's ESP32-C6, and
@@ -345,7 +350,7 @@ them below every core-0 task instead. See §11.4.
 
 The core split therefore is: **core 0 is a real-time island** with no
 radio and no filesystem in it. **Core 1 takes everything that can afford
-to be late** — display, card, Bluetooth.
+to be late** — display, card, Bluetooth, Wi-Fi.
 
 ### 5.1 Bus ownership
 
@@ -1056,11 +1061,80 @@ red DEV tag in the top-right corner of every screen.
 |---|---|
 | SD card | `update/dash.bin` on the card → Install from SD. Header checked first (chip, project, size), then written a sector at a time, then the image's own hash checked by `esp_ota_end`. |
 | USB | `tools/flash_dev.py` reads otadata, works out stable as the bootloader would, and writes the other slot without touching otadata. (`idf.py flash` is the other USB path: it makes a new stable.) |
-| Wi-Fi | Not built. Needs `CONFIG_ESP_HOSTED_CP_WIFI` in the C6 firmware, credentials in NVS, and an HTTP fetch into the same install path. |
+| Wi-Fi | DIAG → Update → Wi-Fi, then upload `dash-*.bin` from the dash's page. Same header check, same writer, same parked rule as the card; see §11.7.1. |
 
 Every write is refused unless parked (not moving, engine off): an erase
 stops the flash cache on both cores, long enough to break the 3 ms
 tach-to-lamp budget.
+
+**Versions and file names.** `firmware.txt` at the repo root holds the
+version and, in one to three words, what is new. `cmake/dash_version.cmake`
+makes the image's version string `"<version> <board> <feature>"`, for
+example `1.0 demo Wi-Fi OTA` (31 characters at most, checked at configure
+time), with `bike` from the root project and `demo` from `demo_p4/`. Every
+build copies its image to `releases/dash-<version>-<date>-<board>-<feature>.bin`,
+named from what is inside it, and `releases/` is kept in git. The build date
+is the image's own `esp_app_desc_t` date, kept current by a daily stamp
+(IDF otherwise only refreshes it when the version string changes). The
+Update screen and the Wi-Fi page show version and date for both slots, and
+firmware downloaded from the page is saved under the same name.
+`core::ota::check_board` refuses an image whose board word differs from the
+running one's; an image from before this scheme has no board word and is not
+refused.
+
+### 11.7.1 Wi-Fi updates
+
+The dash is a **hotspot, never a station.** It works at a track with no
+router, it stores no network passwords, and nothing on the dash ever
+connects out. The C6 runs the soft AP through `esp_wifi_remote` over the
+same SDIO link as BLE; the P4 runs lwIP and `esp_http_server`. The C6 must
+carry the BLE + Wi-Fi build (`CONFIG_ESP_HOSTED_CP_WIFI=y`, about 1.3 MB of
+`slave_fw`'s 2 MB). That build has the same ESP-Hosted version as the
+BLE-only one, so the version check cannot tell them apart: a C6 that answers
+`esp_wifi_init` with `ESP_ERR_NOT_SUPPORTED` gets its firmware replaced from
+`slave_fw` and the dash restarts.
+
+| | |
+|---|---|
+| On | DIAG → Update → Wi-Fi, or CONFIG → Wi-Fi. A toggle. |
+| Network | `CRF250F-Dash`, WPA2, channel 6, two clients. |
+| Password | Eight digits from `esp_random`, new every time it starts, shown on the Update screen. Nothing is stored. |
+| Address | `http://192.168.4.1` |
+| Off | The toggle; 10 minutes with no page request (`core::wifi::kIdleOffMs`); or moving faster than 3 mph. |
+
+**The page** (`services/src/wifi_page.cpp`, no external files) can:
+
+- **upload** a `dash-*.bin` into the dev slot;
+- **download** the ride logs from `logs/` on the card;
+- **download** the stable and dev images as a backup.
+
+**The rules, which are the point of the design:**
+
+- **`ota` stays the one writer of the dev slot.** The upload's bytes go
+  through a 16 kB stream buffer (`Deps::ota_stream`) to `ota`, which reads
+  them exactly as it reads `update/dash.bin` from the card: header check,
+  board check, parked-only, a sector at a time, the image's own hash at
+  `esp_ota_end`. A stalled upload (10 s) is abandoned and the slot left
+  invalid.
+- **Nothing on the network can boot anything.** An upload only fills the
+  dev slot. Boot dev once and Promote are buttons on the dash.
+- **Downloads cannot leave `logs/`.** `core::wifi::valid_log_name` takes
+  only a plain `*.csv` name: no slash, no `..`, one dot.
+- **The policy is host-tested** (`core/wifi/`, `test_wifi`); the service is
+  the radio and the server.
+
+**Memory.** The SDIO link, lwIP and NimBLE all draw on internal RAM, and
+an upload is a burst of SDIO receive buffers. On the demo board a 300 kB
+canvas in internal RAM left them 17 kB, and the first upload asserted in
+`sdio_rx_get_buffer`. `wifi` logs internal free RAM at every change of
+state; the hotspot up costs about 20 kB. Check that line first on the bike
+board, whose render task uses only small DMA bands.
+
+**Demo-board caveat.** Its DSI panel scans its frame buffer out of PSRAM,
+and a flash write suspends that cache, so the panel flickers for the whole
+of an upload. `CONFIG_SPIRAM_XIP_FROM_PSRAM` (IDF's suggested fix) asserted
+at startup creating the main task and was reverted (release 1.1, kept as a
+record). The bike's i80 panel keeps its own GRAM and does not flicker.
 
 **What the two images share, and the rules for it:**
 
@@ -1315,7 +1389,7 @@ erases NVS, and NVS holds your odometer.
 - Which TPMS sensors? The decoder is trivial once you know the layout, but
   it is guesswork until you have a sensor to sniff. Buy the set before you
   write `core/tpms/`.
-- OTA over Wi-Fi through the C6 (§11.7)? The slots, the install path and
-  the Update screen are built; only the transport is missing.
+- ~~OTA over Wi-Fi through the C6?~~ **Built, §11.7.1:** an on-demand
+  hotspot and one page, not a station joining a network.
 - Should the media strip show on any screen other than Cruise big-speed?
   Track mode should probably stay clean.

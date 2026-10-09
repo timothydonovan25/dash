@@ -95,9 +95,11 @@ pads H8/H9 (U16-56/57) as a fallback.
 the demo board was v1.3. If yours is v3 or later, that setting has to
 change (§11 explains why editing the defaults alone is not enough).
 
-**What you should see.** `dash v2 — N config items`, then eleven tasks
+**What you should see.** `dash v2 — N config items`, then twelve tasks
 starting (`ctrl`, `imu`, `gnss`, `logic`, `input` on core 0; `render`,
-`logger`, `storage`, `keeper`, `ota`, `ble` on core 1), then `running`.
+`logger`, `storage`, `keeper`, `ota`, `ble`, `wifi` on core 1), then `running`.
+`wifi` is silent until the hotspot is turned on; when it is, check its
+`up: internal free` line before uploading anything (architecture §11.7.1).
 `ota: running <version> from ota_0, stable; other slot empty` says the
 rollback bookkeeping is reading the bootloader's state. If the config
 table is malformed it says so here rather than weeks later as a setting

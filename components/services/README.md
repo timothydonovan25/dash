@@ -18,7 +18,14 @@ The TPMS scan is not written: it waits on a sensor to capture.
 `ota` owns the two app slots (§11.7): it works out at boot whether this
 image is stable or dev, installs from the card into the dev slot, and
 promotes dev to stable only when the rider asks, from DIAG → Update. Every
-flash write is parked-only. The decisions are `core::ota`'s.
+flash write is parked-only. The decisions are `core::ota`'s. It reads an
+install from a `Source`: the card, or `Deps::ota_stream` for a Wi-Fi upload.
+
+`wifi` runs the update hotspot and its one page (§11.7.1), off until the
+rider turns it on. It carries an upload's bytes to `ota` and never writes
+flash itself; it serves logs through `hal::ICard::list`/`read_at` and
+firmware backups straight from the partitions. Its policy is `core::wifi`'s.
+It replaces the C6's firmware if the C6 turns out to have no Wi-Fi.
 
 `storage_service` owns the card and holds the seam where USB mass storage
 goes. MSC itself is not written, and it cannot be done by halves: the device

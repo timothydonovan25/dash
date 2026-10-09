@@ -147,7 +147,7 @@ Things that will bite you:
   firmware for a dead tach.
 - **VIN sense exists on this board** (GPIO20, R17/R18), so firmware can
   tell bike power from USB. `ctrl` caps lamp duty on USB.
-- **The P4 has no radio.** BLE lives on the module's ESP32-C6, reached over
+- **The P4 has no radio.** BLE and Wi-Fi live on the module's ESP32-C6, reached over
   internal SDIO with ESP-Hosted, as `demo_p4/` does. The C6 is a MINI-1U
   and needs an external antenna on its IPEX. Never call `start_ble` earlier
   in the boot order: it is last so a radio that will not come up delays nothing.
@@ -190,7 +190,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 26 host test suites, all passing.
+the media half of step 9 is written. 28 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -217,6 +217,8 @@ the media half of step 9 is written. 26 host test suites, all passing.
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
 - `delta/` lap delta against the session best — a **placeholder**, see below
+- `wifi/` the update hotspot's policy: idle and moving shut-off, the
+  session password, which log names the page may serve
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
@@ -241,8 +243,8 @@ is not working: the drivers are written against datasheets and a netlist,
 and the board has not arrived yet. See `components/drivers/README.md` for the
 specific BRINGUP holes.
 
-Eleven tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
-storage, keeper, ota, ble on core 1.
+Twelve tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
+storage, keeper, ota, ble, wifi on core 1.
 
 **Stable and dev firmware are built, and have never run on the board**
 (architecture §11.7). The two 6 MB app slots hold a stable and a dev image;
@@ -252,9 +254,33 @@ installs `update/dash.bin` from the card into the dev slot and boots dev
 once; promoting is manual only, from inside dev via DIAG → Update → Promote
 to stable. DIAG → Update drives all of it; power-on always boots stable,
 with no chooser, so nothing slows the boot. `tools/flash_dev.py` writes the dev slot over USB; `idf.py
-flash` makes a new stable. Wi-Fi is not built. **Rollback must be in the
+flash` makes a new stable; the Wi-Fi page (below) uploads into the dev slot.
+**Rollback must be in the
 first bootloader flashed** — `main.cpp` will not build without it — and the
 bootloader has about 1.1 kB left.
+
+**Versions.** `firmware.txt` is the version and a one-to-three-word feature.
+Every build of either board is copied to `releases/` as
+`dash-<version>-<date>-<board>-<feature>.bin`, read back out of the image, and
+`releases/` is in git. Bump `firmware.txt` before a build you mean to keep.
+The Update screen shows version and date for both slots, and an upload built
+for the other board (`demo` vs `bike`) is refused.
+
+**Wi-Fi updates are built, and have run on the demo board, not the bike.**
+An on-demand WPA2 hotspot (`CRF250F-Dash`, a new eight-digit password each
+time, shown on DIAG → Update), never a station. `http://192.168.4.1` uploads
+a `dash-*.bin` to the dev slot and downloads ride logs and firmware backups.
+It turns off after 10 idle minutes or when the bike moves. The upload goes
+through `Deps::ota_stream` to `ota`, which stays the one writer of the dev
+slot with the same checks as the card; nothing on the network can boot an
+image. A C6 without Wi-Fi in its firmware has it replaced from `slave_fw`.
+Architecture §11.7.1. **Watch internal RAM:** the SDIO link, lwIP and NimBLE
+share it, and `wifi` logs what is free at every change of state.
+
+**SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
+shows "ejected, safe to pull" until the card comes out. One lock in
+`drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
+`wifi`.
 
 **BLE media is built, and has never run on this board.** `services/src/ble_service.cpp`
 brings up ESP-Hosted to the C6, NimBLE on core 1, and the §11.1 Dash Media
