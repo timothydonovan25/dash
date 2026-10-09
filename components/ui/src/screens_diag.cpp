@@ -33,12 +33,12 @@ void fmt_bytes(char* buf, size_t n, uint32_t bytes) {
 // here as a device flicking between Ok and Fault rather than as a screen
 // that mysteriously stops updating.
 namespace {
-// Eleven devices will not fit down one side of a 320 px screen at a
-// readable pitch, so they go in two columns. Six then five, reading down
+// Thirteen devices will not fit down one side of a 320 px screen at a
+// readable pitch, so they go in two columns. Seven then six, reading down
 // the left first, because that is where the eye starts.
 constexpr int16_t kSensorTop   = 42;
-constexpr int16_t kSensorStep  = 40;
-constexpr int16_t kSensorRows  = 6;
+constexpr int16_t kSensorStep  = 38;
+constexpr int16_t kSensorRows  = 7;
 constexpr int16_t kSensorColW  = 206;
 }  // namespace
 

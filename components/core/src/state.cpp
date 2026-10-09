@@ -50,6 +50,8 @@ const char* dev_name(Dev d) {
         case Dev::Phone:    return "Phone";
         case Dev::TpmsF:    return "TPMS front";
         case Dev::TpmsR:    return "TPMS rear";
+        case Dev::FrontWheel: return "Front wheel";
+        case Dev::RearWheel:  return "Rear wheel";
         case Dev::Count:    break;
     }
     return "?";

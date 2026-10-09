@@ -44,16 +44,21 @@ bool SpeedFilter::correct(float z, float r_sigma, float gate_sigma) {
 
 void SpeedFilter::track(uint8_t bit, bool accepted, bool offered, uint32_t now,
                         const SpeedConfig& cfg) {
-    uint32_t& since = reject_since_[index_of(bit)];
+    const int i = index_of(bit);
+    uint32_t& since = reject_since_[i];
+    bool& rejecting = rejecting_[i];
     if (!offered) return;
     if (accepted) {
-        since = 0;
+        rejecting = false;
         out_.used |= bit;
         out_.suspect &= static_cast<uint8_t>(~bit);
         return;
     }
     out_.rejected |= bit;
-    if (since == 0) since = now ? now : 1;
+    if (!rejecting) {
+        rejecting = true;
+        since = now;
+    }
     if (now - since >= cfg.suspect_ms) out_.suspect |= bit;
 }
 
@@ -142,7 +147,7 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
     if (offered && (out_.suspect & offered) == offered) {
         const float v0 = in.gps_ok ? in.gps_mph : in.front_ok ? in.front_mph : in.rear_mph;
         start(v0, 4.0f);
-        for (uint32_t& s : reject_since_) s = 0;
+        for (bool& r : rejecting_) r = false;
         out_.suspect = 0;
         last_fix_t_ = now;
         ++out_.resets;
@@ -154,6 +159,31 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
     out_.bias_g = b_;
     out_.valid = now - last_fix_t_ <= cfg.coast_ms;
     return out_;
+}
+
+void WheelCheck::judge(One& w, bool offered, float wheel_mph, uint8_t bit,
+                       const SpeedOutput& out, uint32_t now, const WheelCheckConfig& cfg) {
+    const bool moving = offered && out.valid && out.mph >= cfg.moving_mph;
+    if (!moving) {
+        w.zeroing = false;         // a stop ends the run; parked proves nothing
+        return;
+    }
+    if ((out.rejected & bit) && wheel_mph < cfg.zero_mph) {
+        if (!w.zeroing) {
+            w.zeroing = true;
+            w.zero_since = now;
+        }
+        if (now - w.zero_since >= cfg.dead_ms) w.verdict = Wheel::Dead;
+        return;
+    }
+    w.zeroing = false;
+    if ((out.used & bit) && wheel_mph >= cfg.zero_mph) w.verdict = Wheel::Ok;
+}
+
+void WheelCheck::update(const SpeedInput& in, const SpeedOutput& out,
+                        const WheelCheckConfig& cfg) {
+    judge(f_, in.front_ok, in.front_mph, kSrcFront, out, in.t_ms, cfg);
+    judge(r_, in.rear_ok, in.rear_mph, kSrcRear, out, in.t_ms, cfg);
 }
 
 }  // namespace core::fusion

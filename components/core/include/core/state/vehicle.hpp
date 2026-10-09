@@ -287,7 +287,7 @@ struct DevHealth {
 // walking named members would mean writing that list out twice.
 enum class Dev : uint8_t {
     Imu = 0, Gnss, LedDriver, McpPod, Sd, Ecu, Display, BleHost, Phone,
-    TpmsF, TpmsR, Count
+    TpmsF, TpmsR, FrontWheel, RearWheel, Count
 };
 inline constexpr uint8_t kDevCount = static_cast<uint8_t>(Dev::Count);
 

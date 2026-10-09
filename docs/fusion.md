@@ -51,6 +51,38 @@ in use (`F R G`, lower case = suspect). CONFIG → Display → Speedo picks
 what the big number shows: Wheels (the default) or Fused. **Leave it on
 Wheels until the filter has been tuned on real rides.**
 
+### Dead wheel sensors
+
+`core::fusion::WheelCheck` judges each wheel from the filter:
+
+| Verdict | When | Health table |
+|---|---|---|
+| Unknown | nothing cross-checked yet (parked since key-on, no GPS) | Absent |
+| Ok | read a plausible speed while moving | Ok |
+| Dead | read zero, and rejected, for **5 s straight** at 5+ mph | Fault |
+
+Five seconds is longer than any skid or locked wheel, so a long rear slide
+or a stoppie does not fault a good sensor; a spin reads high, not zero,
+and never counts. A Dead wheel is Ok again the first time it reads a
+plausible speed, so a connector that comes back clears itself.
+
+`logic` reports the verdicts as `FrontWheel` and `RearWheel` in the health
+table, so they show on DIAG → Sensors and on the cruise fault line. `ctrl`
+skips a faulted wheel when it picks the speedo's source (front, then rear,
+then GPS), so a dead front no longer means 0 mph for the rest of the ride.
+
+**It only ever knows while moving.** On the board as drawn (netlist
+2026-10-07), each Hall input is CNx pin 2 with a 10 kΩ pull-up to 3.3 V
+(R59/R60), 10 nF to ground (C17/C18), an SMBJ10A clamp (D9/D8) and 10 kΩ in
+series to the GPIO (R61/R62). The sensor is open-collector, a TLE4935L
+latch. So an unplugged sensor reads HIGH, which is also what a plugged-in
+one reads with its output off, and a latch parked on that pole stays off.
+A LOW does prove a sensor is there (or the line is shorted to ground), but
+HIGH proves nothing, so a parked dash cannot tell "unplugged" from "not
+turning". Detecting it while parked needs hardware: a sense resistor on the
+sensor's VIN feed (pin 1) into an ADC, so a missing sensor shows as no
+supply current. That is a board change for the next revision.
+
 ### The known weak spot
 
 With no front wheel to compare against, a rear spin smaller than the GPS

@@ -113,7 +113,50 @@ private:
     uint32_t ref_t_ = 0;
     bool     have_ref_ = false;
     uint32_t reject_since_[4] = {0, 0, 0, 0};
+    bool     rejecting_[4] = {false, false, false, false};
     SpeedOutput out_;
+};
+
+// Is each wheel speed sensor alive? Decided from the speed filter, so it
+// only ever knows anything while the bike is moving and something else
+// (GPS, the other wheel) says how fast.
+//
+//   Unknown  nothing proven yet: parked since key-on, or never cross-checked
+//   Ok       read a plausible speed while moving, so it is connected
+//   Dead     read zero, and was rejected, for `dead_ms` straight while the
+//            filter says moving: unplugged, cut, or a sensor gap gone too
+//            wide
+//
+// A spinning or locked wheel is rejected too, but a spin reads high, and a
+// lock or a skid reads zero for a second or three, not five. So a burnout,
+// a wheelie or a long rear slide into a corner does not mark a good sensor
+// faulty. A Dead wheel goes back to Ok
+// the first time it reads a plausible speed again: a loose connector that
+// comes back is not stuck as a fault.
+enum class Wheel : uint8_t { Unknown = 0, Ok, Dead };
+
+struct WheelCheckConfig {
+    float moving_mph = 5.0f;   // the filter's speed, to call the bike moving
+    float zero_mph   = 1.0f;   // a wheel below this is reading nothing
+    uint32_t dead_ms = 5000;   // longer than any skid
+};
+
+class WheelCheck {
+public:
+    void update(const SpeedInput& in, const SpeedOutput& out,
+                const WheelCheckConfig& cfg = {});
+    Wheel front() const { return f_.verdict; }
+    Wheel rear() const { return r_.verdict; }
+
+private:
+    struct One {
+        Wheel    verdict = Wheel::Unknown;
+        bool     zeroing = false;     // reading zero at speed right now
+        uint32_t zero_since = 0;
+    };
+    static void judge(One& w, bool offered, float wheel_mph, uint8_t bit,
+                      const SpeedOutput& out, uint32_t now, const WheelCheckConfig& cfg);
+    One f_, r_;
 };
 
 }  // namespace core::fusion

@@ -157,6 +157,28 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     fused.accel_bias_g = fo.bias_g;
     d.slots->fused.publish(fused);
 
+    // Dead wheel sensors (core::fusion::WheelCheck) into the health table,
+    // where DIAG -> Sensors, the cruise fault line and `ctrl`'s choice of
+    // speedo source all see them. Unknown stays Absent: a wheel nobody has
+    // cross-checked yet is not a fault, and is not known good either.
+    s.wheels.update(fi, fo);
+    if (d.health) {
+        const auto report = [&](core::state::Dev dev, core::fusion::Wheel w) {
+            const core::state::DevState st = (*d.health)[dev].state;
+            if (w == core::fusion::Wheel::Ok) {
+                d.health->report_ok(dev, now);
+            } else if (w == core::fusion::Wheel::Dead && st != core::state::DevState::Fault) {
+                // Errors until the tracker calls it Fault, then quiet: a
+                // Fault is not aged, and fault_count should count events,
+                // not ticks.
+                if (st == core::state::DevState::Absent) d.health->begin_init(dev, now);
+                d.health->report_error(dev, 0, now);
+            }
+        };
+        report(core::state::Dev::FrontWheel, s.wheels.front());
+        report(core::state::Dev::RearWheel, s.wheels.rear());
+    }
+
     // --- trip -----------------------------------------------------------
     core::trip::Input ti;
     ti.speed_mph = m.best_mph;

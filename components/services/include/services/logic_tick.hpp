@@ -48,6 +48,7 @@ struct LogicState {
 
     // Stage 1 of fusion: road speed (core/fusion).
     core::fusion::SpeedFilter speed;
+    core::fusion::WheelCheck  wheels;
     uint32_t last_gps_utc_ms = 0;
 };
 

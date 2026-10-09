@@ -142,10 +142,17 @@ void ctrl_task(void* arg) {
         }
         d.slots->engine.publish(e);
 
+        // A wheel sensor `logic` has found dead (read 0 at speed) is skipped,
+        // so the speedo falls through to the other wheel, then GPS, instead
+        // of showing 0 mph for the rest of the ride.
+        const core::state::Health hl = d.slots->health.get();
+        const bool front_live = hl[core::state::Dev::FrontWheel].state != core::state::DevState::Fault;
+        const bool rear_live = hl[core::state::Dev::RearWheel].state != core::state::DevState::Fault;
+
         // Needs both rpm and road speed, and this is the one task that has
         // them first-hand.
         const float road_mph = core::tach::best_speed_mph(
-            front.mph(), true, rear.mph(), true,
+            front.mph(), front_live, rear.mph(), rear_live,
             d.slots->gnss.get().speed_mph, d.slots->gnss.get().fix);
         e.gear = core::gear::estimate(tach.rpm(), road_mph, c.neutral,
                                       core::config::gear_view(*d.settings));
@@ -155,8 +162,8 @@ void ctrl_task(void* arg) {
         m.rear_mph = rear.mph();
         m.gps_mph = d.slots->gnss.get().speed_mph;
         m.best_mph = core::tach::best_speed_mph(
-            m.front_mph, hal::ok(s),
-            m.rear_mph, hal::ok(s),
+            m.front_mph, hal::ok(s) && front_live,
+            m.rear_mph, hal::ok(s) && rear_live,
             m.gps_mph, d.slots->gnss.get().fix);
         d.slots->motion.publish(m);
 

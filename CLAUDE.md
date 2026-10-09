@@ -219,7 +219,9 @@ the media half of step 9 is written. 29 host test suites, all passing.
 - `delta/` lap delta against the session best — a **placeholder**, see below
 - `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.
-  `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride
+  `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride.
+  `WheelCheck` faults a wheel sensor that reads 0 for 5 s at speed, into
+  the health table as FrontWheel / RearWheel, and `ctrl` skips it
 - `wifi/` the update hotspot's policy: idle and moving shut-off, the
   session password, which log names the page may serve
 

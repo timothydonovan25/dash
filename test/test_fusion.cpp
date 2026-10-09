@@ -167,6 +167,21 @@ int main() {
         CHECK_NEAR(o.mph, 30.0, 0.2);
     }
 
+    CASE("a source rejected from the very first tick is not suspect at once");
+    {
+        SpeedFilter f;
+        SpeedInput in = at(0);              // t = 0: the clock's first value
+        in.accel_ok = true;
+        in.front_ok = in.rear_ok = true;
+        in.front_mph = 0.0f;
+        in.rear_mph = 30.0f;
+        in.gps_ok = in.gps_new = true;
+        in.gps_mph = 30.0f;
+        const SpeedOutput o = f.step(in);
+        CHECK(o.rejected & kSrcFront);
+        CHECK(!(o.suspect & kSrcFront));
+    }
+
     // --- the synthetic rides -------------------------------------------
     double rms = 0, max = 0;
 
@@ -218,6 +233,64 @@ int main() {
     worst(Kind::SpinNoFront, rms, max);
     CHECK(rms < 2.5);
     CHECK(max < 12.0);
+
+    // --- dead wheel sensors -------------------------------------------
+    const auto verdicts = [](Kind k, Wheel& front, Wheel& rear, bool& front_ever_dead,
+                             bool& rear_ever_dead) {
+        SpeedFilter f;
+        WheelCheck w;
+        front_ever_dead = rear_ever_dead = false;
+        replay::run(k, 1, [&](const replay::Sample& s) {
+            w.update(s.in, f.step(s.in));
+            front_ever_dead |= w.front() == Wheel::Dead;
+            rear_ever_dead |= w.rear() == Wheel::Dead;
+        });
+        front = w.front();
+        rear = w.rear();
+    };
+    Wheel fw, rw;
+    bool fdead, rdead;
+
+    CASE("a dead front sensor is found, and the rear is proven good");
+    verdicts(Kind::DeadFront, fw, rw, fdead, rdead);
+    CHECK(fw == Wheel::Dead);
+    CHECK(rw == Wheel::Ok);
+
+    CASE("a dead front is found with only GPS to go on (rear spinning)");
+    verdicts(Kind::SpinNoFront, fw, rw, fdead, rdead);
+    CHECK(fw == Wheel::Dead);
+    CHECK(!rdead);                        // a spin is not a dead sensor
+
+    CASE("wheelspin and a locked front are never called dead");
+    verdicts(Kind::Wheelspin, fw, rw, fdead, rdead);
+    CHECK(!fdead && !rdead);
+    CHECK(fw == Wheel::Ok && rw == Wheel::Ok);
+    verdicts(Kind::FrontLock, fw, rw, fdead, rdead);
+    CHECK(!fdead && !rdead);
+
+    CASE("parked since key-on: nothing proven either way");
+    verdicts(Kind::Parked, fw, rw, fdead, rdead);
+    CHECK(fw == Wheel::Unknown && rw == Wheel::Unknown);
+
+    CASE("a dead wheel that comes back is Ok again at once");
+    {
+        SpeedFilter f;
+        WheelCheck w;
+        for (uint32_t t = 0; t <= 9000; t += 20) {
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.front_ok = in.rear_ok = true;
+            in.rear_mph = 30.0f;
+            in.front_mph = t < 7000 ? 0.0f : 30.0f;      // connector reseated at 7 s
+            in.gps_ok = true;
+            in.gps_new = t % 100 == 0;
+            in.gps_mph = 30.0f;
+            w.update(in, f.step(in));
+            if (t == 4900) CHECK(w.front() != Wheel::Dead);   // not before dead_ms
+            if (t == 6980) CHECK(w.front() == Wheel::Dead);
+        }
+        CHECK(w.front() == Wheel::Ok);
+    }
 
     return check::report("fusion");
 }
