@@ -5,5 +5,5 @@
 ## else (§7.6). It only speaks esp_lcd_panel_io, so it drives the 8080 bus
 ## unchanged; drivers/src/ili9488.cpp owns the blit path itself.
 dependencies:
-  atanisoft/esp_lcd_ili9488: "^1.0.0"
+  atanisoft/esp_lcd_ili9488: "==1.1.1"
   idf: ">=5.0"

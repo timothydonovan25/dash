@@ -4,8 +4,8 @@
 ## the file comment there for why. Confirmed against a bring-up sketch
 ## written for this exact board (docs/bringup-p4-demo.md).
 dependencies:
-  espressif/esp_lcd_touch_gt911: "*"
-  espressif/esp_lcd_touch: "*"
+  espressif/esp_lcd_touch_gt911: "==1.2.1"
+  espressif/esp_lcd_touch: "==1.2.1"
   # BLE, over the ESP32-C6 co-processor (no radio on the P4 itself) — see
   # ble_media.cpp and demo_p4/c6_cp/. esp_wifi_remote is a real dependency
   # despite the misleading name and this project having no Wi-Fi: it's
@@ -13,6 +13,12 @@ dependencies:
   # actually lives, without which the ESP32-C6 choice is invisible and
   # the whole "ESP-Hosted config" submenu silently falls back to values
   # meant for a different coprocessor entirely.
-  espressif/esp_hosted: "*"
-  espressif/esp_wifi_remote: ">=1.3.1"
-  idf: ">=5.5"
+  #
+  # Every version here is exact, and must match its twin on the other side:
+  # the P4's esp_hosted talks a protocol to the C6 firmware built from
+  # demo_p4/c6_cp (vendored esp_hosted 2.12.8, main/esp_hosted_coprocessor_fw_ver.h).
+  # A newer esp_hosted on one side only is how a C6 update becomes necessary
+  # by accident. Upgrade both together, on purpose, and rebuild the C6.
+  espressif/esp_hosted: "==2.12.8"
+  espressif/esp_wifi_remote: "==1.6.0"
+  idf: "==6.0.2"

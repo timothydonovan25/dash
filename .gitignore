@@ -3,7 +3,8 @@ build-host/
 sdkconfig
 sdkconfig.old
 managed_components/
-dependencies.lock
+# dependencies.lock is committed: it is the record of exactly which
+# component versions a release was built from.
 compile_commands.json
 .cache/
 build-sim/

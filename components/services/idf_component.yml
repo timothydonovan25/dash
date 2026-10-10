@@ -6,7 +6,12 @@
 ## where esp_hosted's co-processor target selection lives, and without it the
 ## ESP32-C6 choice is invisible and the ESP-Hosted menu falls back to another
 ## chip's defaults. Same pair, same versions, as demo_p4/main.
+## Every version here is exact, and must match its twin on the other side:
+## the P4's esp_hosted talks a protocol to the C6 firmware built from
+## demo_p4/c6_cp (vendored esp_hosted 2.12.8, main/esp_hosted_coprocessor_fw_ver.h).
+## A newer esp_hosted on one side only is how a C6 update becomes necessary
+## by accident. Upgrade both together, on purpose, and rebuild the C6.
 dependencies:
-  espressif/esp_hosted: "2.12.8"
-  espressif/esp_wifi_remote: ">=1.3.1"
-  idf: ">=5.5"
+  espressif/esp_hosted: "==2.12.8"
+  espressif/esp_wifi_remote: "==1.6.0"
+  idf: "==6.0.2"

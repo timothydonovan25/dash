@@ -8,6 +8,27 @@ CONFIG_ESP_HOSTED_CP_WIFI=y
 CONFIG_BT_ENABLED=y
 CONFIG_BT_CONTROLLER_ONLY=y
 
+# The full controller, written down so a regenerated sdkconfig cannot
+# quietly lose any of it. The BLE host (NimBLE) runs on the P4 over HCI, so
+# every BLE feature the dash will ever use -- the TPMS scan, extended or
+# coded-PHY advertising, a connection to a sensor -- is a P4 firmware change
+# as long as the controller here already has it. That is the point of this
+# block: the C6 should not need rebuilding for a new BLE feature.
+CONFIG_BT_LE_50_FEATURE_SUPPORT=y
+CONFIG_BT_LE_EXT_ADV=y
+CONFIG_BT_LE_PERIODIC_ADV_SYNC_TRANSFER=y
+CONFIG_BT_LE_SCAN_DUPL=y
+# The phone, plus headroom for sensors that want a connection rather than
+# broadcasting. Each costs a little controller RAM; three was tight.
+CONFIG_BT_LE_MAX_CONNECTIONS=6
+CONFIG_BT_LE_CONN_RESERVED_MEMORY_COUNT=2
+
+# Wi-Fi: soft AP (the update hotspot) and station both, WPA3 for either,
+# so joining a network later is also P4-only work.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=y
+
 # OTA
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_TWO_OTA=y
