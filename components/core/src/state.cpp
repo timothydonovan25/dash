@@ -33,6 +33,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.wifi   = s.wifi.get();
     f.waypoint = s.waypoint.get();
     f.fused  = s.fused.get();
+    f.gear_cal = s.gear_cal.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -72,6 +73,11 @@ const char* command_name(CommandId id) {
         case CommandId::WifiToggle:        return "wifi.toggle";
         case CommandId::NavDropWaypoint:   return "nav.drop";
         case CommandId::NavClearWaypoint:  return "nav.clear";
+        case CommandId::GearCalStart:      return "gearcal.start";
+        case CommandId::GearCalNext:       return "gearcal.next";
+        case CommandId::GearCalSkip:       return "gearcal.skip";
+        case CommandId::GearCalCancel:     return "gearcal.cancel";
+        case CommandId::GearCalReset:      return "gearcal.reset";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
         case CommandId::MediaCtrl:         return "media.ctrl";

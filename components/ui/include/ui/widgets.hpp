@@ -76,9 +76,12 @@ class Bar : public Widget {
 public:
     void configure(Color fill, Color warn_fill, float warn_above = 2.0f);
     void set(float fraction, bool valid = true);
+    // Blank, for a screen that shows the bar in only some of its states.
+    void set_hidden(bool hidden);
     void render(Canvas& c) override;
 
 private:
+    bool  hidden_ = false;
     float fraction_ = 0.0f;
     bool  valid_ = false;
     Color fill_ = color::kAccent;

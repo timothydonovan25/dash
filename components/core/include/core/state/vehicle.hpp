@@ -8,6 +8,7 @@
 // `_c`, `_psi`. This is the rule that stops a degrees/radians bug.
 #pragma once
 #include <cstdint>
+#include "core/gearcal/gearcal.hpp"
 #include "core/lap/lap.hpp"
 #include "core/ota/ota.hpp"
 #include "core/wifi/wifi.hpp"
@@ -218,6 +219,33 @@ struct Fused {
     uint8_t  suspect         = 0;
     uint16_t resets          = 0;
     float    accel_bias_g    = 0.0f;
+};
+
+// The gear calibration's guided run and the learner's running errors, for
+// the CONFIG calibration screen. Written by `logic`, which owns both.
+// Errors are percent, signed: positive means the bike's measured ratio is
+// above the table's, so the table is low.
+struct GearCal {
+    uint8_t  phase = 0;            // core::gearcal::Phase
+    uint8_t  gear = 0;             // being measured, 1-based
+    uint8_t  count = 0;
+    uint8_t  reason = 0;           // core::gearcal::Reason
+    uint8_t  nearest = 0;          // with WrongGear: the gear it looks like
+    bool     ready = false;        // this gear has its steady seconds
+    bool     autotune = false;
+    uint16_t steady_ds = 0;        // steady for this long, tenths of a second
+    uint16_t need_ds = 0;
+    float    live_ratio = 0.0f;
+    float    live_err_pct = 0.0f;
+    uint8_t  done_mask = 0;        // gears measured in this run
+    float    result_ratio[core::gearcal::kMaxGears] = {};
+    float    result_err_pct[core::gearcal::kMaxGears] = {};
+    bool     circ_valid = false;
+    float    circ_err_pct = 0.0f;  // GPS over the wheel
+    // The learner's evidence, per gear.
+    uint8_t  learn_n[core::gearcal::kMaxGears] = {};
+    float    learn_err_pct[core::gearcal::kMaxGears] = {};
+    uint8_t  adjusted_mask = 0;    // gears it has moved this power cycle
 };
 
 // The one dropped waypoint, for CRUISE -> NAV. Written by `logic`, from the

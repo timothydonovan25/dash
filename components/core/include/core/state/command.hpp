@@ -33,6 +33,11 @@ enum class CommandId : uint8_t {
     WifiToggle,       // the update hotspot on, or off if it is on
     NavDropWaypoint,  // remember the current fix as the waypoint
     NavClearWaypoint,
+    GearCalStart,     // open the calibration page (CONFIG -> Gearing)
+    GearCalNext,      // E: start, move on once a gear is ready, accept
+    GearCalSkip,      // long E: leave this gear out
+    GearCalCancel,    // B: close it, discarding the run
+    GearCalReset,     // the table back to its calibrated base
 };
 
 struct Command {

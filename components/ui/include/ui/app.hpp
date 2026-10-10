@@ -83,6 +83,7 @@ private:
     RadioScreen      radio_;
     UpdateScreen     update_;
     ConfigScreen     config_;
+    GearCalScreen    gearcal_;
 
     AlertOverlay     alert_;
 
@@ -91,6 +92,9 @@ private:
     bool             dev_running_ = false;
     Screen*          entered_ = nullptr;
     bool             needs_full_ = true;
+    // CONFIG shows the gear calibration page instead while a run is open.
+    bool             cal_active_ = false;
+    bool             cal_swap_ = false;
 
     // The start-up gauge sweep: when the first frame arrived, and whether
     // the sweep has finished for good.

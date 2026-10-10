@@ -25,7 +25,7 @@ add_library(core STATIC
     ${CORE}/src/delta.cpp ${CORE}/src/gear.cpp ${CORE}/src/power.cpp
     ${CORE}/src/media.cpp ${CORE}/src/pairing.cpp ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp
-    ${CORE}/src/fusion_speed.cpp
+    ${CORE}/src/fusion_speed.cpp ${CORE}/src/gearcal.cpp
     ${CORE}/src/sweep.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
@@ -36,7 +36,7 @@ add_library(ui STATIC
     ${UI}/src/widgets.cpp    ${UI}/src/app.cpp
     ${UI}/src/screens_cruise.cpp ${UI}/src/screens_track.cpp
     ${UI}/src/screens_stat.cpp   ${UI}/src/screens_diag.cpp
-    ${UI}/src/screen_config.cpp)
+    ${UI}/src/screen_config.cpp ${UI}/src/screen_gearcal.cpp)
 target_include_directories(ui PUBLIC ${UI}/include)
 target_link_libraries(ui PUBLIC core)
 

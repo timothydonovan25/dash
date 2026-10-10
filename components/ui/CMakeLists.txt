@@ -10,6 +10,7 @@ idf_component_register(
          "src/screens_stat.cpp"
          "src/screens_diag.cpp"
          "src/screen_config.cpp"
+         "src/screen_gearcal.cpp"
          "src/app.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core)

@@ -48,6 +48,9 @@ constexpr ConfigItem action(uint16_t key, const char* label, const char* group,
 #define GEAR(i) static_cast<uint16_t>(offsetof(Settings, gear_rpm_per_mph) + \
                                       (i) * sizeof(float)), 4
 
+#define GBASE(i) static_cast<uint16_t>(offsetof(Settings, gear_base_rpm_per_mph) + \
+                                       (i) * sizeof(float)), 4
+
 // Keys are grouped by hundred for readability only. They are stable
 // identifiers, not indices — the order of this array may change freely, the
 // numbers may not.
@@ -93,6 +96,19 @@ const ConfigItem kItems[] = {
     num(0x0805, "4th",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(3)),
     num(0x0806, "5th",     "Gearing", Kind::Float, 40, 900, 5, "r/mph", GEAR(4)),
     num(0x0807, "6th",     "Gearing", Kind::Float,  0, 900, 5, "r/mph", GEAR(5)),
+    // The calibration page: ride each gear steady for ten seconds, read the
+    // ratio and its % error, accept. Auto-adjust is the learner.
+    action(0x0808, "Calibrate gears", "Gearing", state::CommandId::GearCalStart),
+    boolean(0x0809,"Auto-adjust",     "Gearing", FIELD(gear_autotune)),
+    action(0x080A, "Reset to base",   "Gearing", state::CommandId::GearCalReset),
+    // What the learner is held to. Written by the calibration and by typing
+    // a ratio above; not meant to be edited.
+    num(0x0811, "Base 1st", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(0)),
+    num(0x0812, "Base 2nd", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(1)),
+    num(0x0813, "Base 3rd", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(2)),
+    num(0x0814, "Base 4th", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(3)),
+    num(0x0815, "Base 5th", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(4)),
+    num(0x0816, "Base 6th", "Gear base", Kind::Float,  0, 900, 5, "r/mph", GBASE(5)),
 
     // Fuel
     num(0x0501, "Idle burn", "Fuel", Kind::Float, 0.02f, 2.0f, 0.01f, "gph", FIELD(fuel_idle_gph)),
@@ -130,6 +146,7 @@ const ConfigItem kItems[] = {
 
 #undef FIELD
 #undef GEAR
+#undef GBASE
 
 constexpr size_t kCount = sizeof(kItems) / sizeof(kItems[0]);
 

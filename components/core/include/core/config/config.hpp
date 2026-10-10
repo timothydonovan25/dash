@@ -61,6 +61,14 @@ struct Settings {
     uint8_t gear_count = 5;
     float   gear_rpm_per_mph[core::gear::kMaxGears] =
         {420.0f, 290.0f, 215.0f, 165.0f, 130.0f, 0.0f};
+    // The table as the guided run last measured it, or as it was last typed
+    // in. The learner (core/gearcal) may never move an entry more than 5 %
+    // from this, so it cannot walk away from a good calibration.
+    float   gear_base_rpm_per_mph[core::gear::kMaxGears] =
+        {420.0f, 290.0f, 215.0f, 165.0f, 130.0f, 0.0f};
+    // Let the learner nudge the table, 1 % at a time, after a lot of agreeing
+    // evidence. The guided run does not depend on it.
+    bool    gear_autotune = true;
 
     // Shift lights — mirrors core::shift::Config
     uint16_t shift_base_rpm  = 6000;

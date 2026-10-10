@@ -9,6 +9,7 @@
 // reason `core/` may not.
 #pragma once
 #include "core/fusion/speed.hpp"
+#include "core/gearcal/gearcal.hpp"
 #include "services/services.hpp"
 #include "core/delta/delta.hpp"
 #include "core/geo/geo.hpp"
@@ -50,6 +51,12 @@ struct LogicState {
     core::fusion::SpeedFilter speed;
     core::fusion::WheelCheck  wheels;
     uint32_t last_gps_utc_ms = 0;
+
+    // Gear calibration: the guided run, and the learner that runs the rest
+    // of the time (core/gearcal). `logic` is the one writer of both and of
+    // the table entries they change.
+    core::gearcal::Guide   guide;
+    core::gearcal::Learner learner;
 };
 
 // Call at 50 Hz. Drains commands, advances the trip computer and the lap

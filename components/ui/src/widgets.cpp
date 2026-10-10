@@ -157,7 +157,15 @@ void Bar::set(float fraction, bool valid) {
     if (changed) touch();
 }
 
+void Bar::set_hidden(bool hidden) {
+    if (assign_t(hidden_, hidden)) touch();
+}
+
 void Bar::render(Canvas& c) {
+    if (hidden_) {
+        c.fill_rect(bounds, color::kBg);
+        return;
+    }
     c.fill_rect(bounds, color::kPanel);
     c.draw_rect(bounds, color::kGrid);
     if (!valid_) {

@@ -30,6 +30,10 @@ void ConfigScreen::enter(Canvas&) {
     hint_.configure("C/D move   E open", color::kDim, 1, Align::Left);
     list_[0] = &table_;
     list_[1] = &hint_;
+    if (resume_) {
+        resume_ = false;
+        return;
+    }
     in_group_ = false;
     editing_ = false;
     focus_ = 0;

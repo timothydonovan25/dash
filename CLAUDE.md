@@ -190,7 +190,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 29 host test suites, all passing.
+the media half of step 9 is written. 31 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -216,6 +216,17 @@ the media half of step 9 is written. 29 host test suites, all passing.
   back, applied to the Frame by `ui::App`, never to a slot
 - `gear/` nearest gear by the rpm/speed ratio, with the ratios in CONFIG
   because they depend on the sprockets and the rolling radius
+- `gearcal/` calibrating the gear table: `Window` finds steady stretches
+  (rpm, speed and their ratio all still, GPS agreeing, in gear); `Guide` is
+  CONFIG -> Gearing -> Calibrate gears, ten steady seconds per gear, told
+  when to shift, results as % error before they are accepted; `Learner` runs
+  the rest of the time and moves one entry by at most 1 % per power cycle,
+  after eight agreeing episodes 30 s apart, never more than 5 % from the
+  calibrated base (`gear_base_rpm_per_mph`). `logic` owns both and
+  publishes `GearCal`; `ui/screen_gearcal.cpp` takes over CONFIG while a
+  run is open. Road speed is `Motion::best_mph`, the same number
+  `gear::estimate` divides by, so the table stays tied to the wheel it is
+  measured on: set the wheel circumference first.
 - `delta/` lap delta against the session best — a **placeholder**, see below
 - `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.

@@ -14,6 +14,46 @@ void to_local_ft(const core::geo::LatLon& origin, const core::geo::LatLon& p,
     y_ft = static_cast<float>((p.lat - origin.lat) * lat_ft_per_deg);
 }
 
+uint8_t gear_count(const core::config::Settings& st) {
+    return st.gear_count > core::gearcal::kMaxGears ? core::gearcal::kMaxGears
+                                                     : st.gear_count;
+}
+
+// The table entries live at keys 0x0802..0x0807 (core/config.cpp).
+constexpr uint16_t kGearKeyFirst = 0x0802;
+constexpr uint16_t kGearKeyLast  = 0x0807;
+// The same range the config table allows.
+constexpr float kGearMin = 40.0f;
+constexpr float kGearMax = 900.0f;
+
+void publish_gear_cal(Deps& d, const LogicState& s) {
+    using core::gearcal::kMaxGears;
+    core::state::GearCal c;
+    c.phase = static_cast<uint8_t>(s.guide.phase());
+    c.gear = s.guide.gear();
+    c.count = s.guide.phase() == core::gearcal::Phase::Idle ? gear_count(*d.settings)
+                                                            : s.guide.count();
+    c.reason = static_cast<uint8_t>(s.guide.reason());
+    c.nearest = s.guide.nearest();
+    c.ready = s.guide.ready();
+    c.autotune = d.settings->gear_autotune;
+    c.steady_ds = static_cast<uint16_t>(s.guide.steady_ms() / 100);
+    c.need_ds = static_cast<uint16_t>(s.guide.need_ms() / 100);
+    c.live_ratio = s.guide.live_ratio();
+    c.live_err_pct = s.guide.live_err() * 100.0f;
+    c.done_mask = s.guide.done_mask();
+    c.circ_valid = s.guide.circ_valid();
+    c.circ_err_pct = s.guide.circ_err() * 100.0f;
+    for (uint8_t g = 1; g <= kMaxGears; ++g) {
+        c.result_ratio[g - 1] = s.guide.result_ratio(g);
+        c.result_err_pct[g - 1] = s.guide.result_err(g) * 100.0f;
+        c.learn_n[g - 1] = s.learner.episodes(g);
+        c.learn_err_pct[g - 1] = s.learner.error(g) * 100.0f;
+    }
+    c.adjusted_mask = s.learner.adjusted_mask();
+    d.slots->gear_cal.publish(c);
+}
+
 }  // namespace
 
 void logic_restore(Deps& d, LogicState& s) {
@@ -68,6 +108,15 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                         if (it->kind != core::config::Kind::Action) {
                             core::config::set(*d.settings, *it, cmd.cfg.val);
                         }
+                        // A ratio typed in by hand is the new calibrated
+                        // value: it becomes the learner's base, and what
+                        // the learner had seen of it is stale.
+                        if (cmd.cfg.key >= kGearKeyFirst && cmd.cfg.key <= kGearKeyLast) {
+                            const size_t gi = cmd.cfg.key - kGearKeyFirst;
+                            d.settings->gear_base_rpm_per_mph[gi] =
+                                d.settings->gear_rpm_per_mph[gi];
+                            s.learner.reset_gear(static_cast<uint8_t>(gi + 1));
+                        }
                     }
                     s.fuel.idle_gph = d.settings->fuel_idle_gph;
                     s.fuel.wot_gph  = d.settings->fuel_wot_gph;
@@ -121,6 +170,40 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::OtaPromote:
                 d.slots->ota_request.publish(core::state::OtaRequest{
                     core::state::OtaRequest::Promote});
+                break;
+            case core::state::CommandId::GearCalStart:
+                if (d.settings && s.guide.phase() == core::gearcal::Phase::Idle) {
+                    s.guide.open(gear_count(*d.settings), d.settings->gear_rpm_per_mph);
+                }
+                break;
+            case core::state::CommandId::GearCalNext:
+                // Accepting a run writes it into the table, and into the
+                // base, which is what "calibrated" means to the learner.
+                if (d.settings && s.guide.next()) {
+                    for (uint8_t gi = 1; gi <= core::gearcal::kMaxGears; ++gi) {
+                        if (!s.guide.has_result(gi)) continue;
+                        float v = static_cast<float>(static_cast<int32_t>(
+                                      s.guide.result_ratio(gi) * 10.0f + 0.5f)) / 10.0f;
+                        v = v < kGearMin ? kGearMin : (v > kGearMax ? kGearMax : v);
+                        d.settings->gear_rpm_per_mph[gi - 1] = v;
+                        d.settings->gear_base_rpm_per_mph[gi - 1] = v;
+                    }
+                    s.learner.reset();
+                }
+                break;
+            case core::state::CommandId::GearCalSkip:
+                s.guide.skip();
+                break;
+            case core::state::CommandId::GearCalCancel:
+                s.guide.cancel();
+                break;
+            case core::state::CommandId::GearCalReset:
+                if (d.settings) {
+                    for (size_t gi = 0; gi < core::gearcal::kMaxGears; ++gi) {
+                        d.settings->gear_rpm_per_mph[gi] = d.settings->gear_base_rpm_per_mph[gi];
+                    }
+                    s.learner.reset();
+                }
                 break;
             default:
                 break;
@@ -177,6 +260,33 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         };
         report(core::state::Dev::FrontWheel, s.wheels.front());
         report(core::state::Dev::RearWheel, s.wheels.rear());
+    }
+
+    // --- gear calibration -----------------------------------------------
+    // The guided run while it is open; otherwise the learner, if it is on.
+    // The learner's window resumes from nothing after a run (the gap in its
+    // samples throws the old one away), so the two never share evidence.
+    if (d.settings) {
+        core::gearcal::Sample gs;
+        gs.t_ms = now;
+        gs.rpm = e.rpm;
+        gs.road_mph = m.best_mph;
+        gs.gps_mph = g.speed_mph;
+        gs.gps_ok = g.fix;
+        gs.hdop = g.hdop;
+        gs.neutral = e.neutral;
+        if (s.guide.phase() != core::gearcal::Phase::Idle) {
+            s.guide.step(gs);
+        } else if (d.settings->gear_autotune) {
+            uint8_t gear = 0;
+            float value = 0.0f;
+            if (s.learner.step(gs, d.settings->gear_rpm_per_mph,
+                               d.settings->gear_base_rpm_per_mph,
+                               gear_count(*d.settings), gear, value)) {
+                d.settings->gear_rpm_per_mph[gear - 1] = value;
+            }
+        }
+        publish_gear_cal(d, s);
     }
 
     // --- trip -----------------------------------------------------------

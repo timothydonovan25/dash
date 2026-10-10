@@ -23,4 +23,5 @@ idf_component_register(
          "src/wifi.cpp"
          "src/sweep.cpp"
          "src/fusion_speed.cpp"
+         "src/gearcal.cpp"
     INCLUDE_DIRS "include")

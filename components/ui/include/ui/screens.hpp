@@ -385,7 +385,12 @@ public:
     // module that keeps a copy can refresh.
     void bind_settings(core::config::Settings* s) { settings_ = s; }
 
+    // Coming back from the gear calibration page: the next enter() keeps the
+    // submenu and the cursor where they were instead of starting over.
+    void resume() { resume_ = true; }
+
 private:
+    bool                    resume_ = false;
     Table                   table_;
     Label                   hint_;
     Widget*                 list_[2] = {};
@@ -396,6 +401,31 @@ private:
     uint8_t                 group_ = 0;
     uint8_t                 focus_ = 0;
     bool                    editing_ = false;
+};
+
+// The gear calibration page, which takes over CONFIG while a run is open
+// (core/gearcal). One screen, three pages by phase: the intro with what the
+// learner has seen so far, one gear at a time, and the results. Its whole
+// state comes from Frame::gear_cal; the buttons post commands and `logic`
+// decides what they did.
+class GearCalScreen final : public Screen {
+public:
+    const char* name() const override { return "GEAR CAL"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+
+private:
+    Label   head_;
+    Label   status_;
+    Label   detail_;
+    Bar     bar_;
+    Label   line_;
+    Table   table_;
+    Label   hint_;
+    Widget* list_[7] = {};
+    uint8_t phase_ = 0;
 };
 
 }  // namespace ui

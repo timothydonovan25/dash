@@ -22,7 +22,7 @@ App::App(const Context& ctx) : ctx_(ctx) {
     Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &nav_screen_, &lap_,
                      &lap_history_, &track_map_, &all_data_, &engine_,
                      &attitude_, &sensors_, &gps_, &system_, &bus_, &radio_,
-                     &update_, &config_};
+                     &update_, &config_, &gearcal_};
     for (Screen* s : all) s->bind(ctx_);
     alert_.set_bounds(kAlertBox);
     dev_tag_.set_bounds(kDevTag);
@@ -63,7 +63,7 @@ Screen* App::screen_for(Mode m, uint8_t index) {
         case Mode::Config:
         case Mode::Count:
         default:
-            return &config_;
+            return cal_active_ ? static_cast<Screen*>(&gearcal_) : &config_;
     }
 }
 
@@ -119,6 +119,18 @@ void App::update(const core::state::Frame& f) {
     if (dev != dev_running_) {
         dev_running_ = dev;
         needs_full_ = true;
+    }
+
+    // CONFIG hands itself over to the gear calibration page while `logic`
+    // has a run open, and takes itself back at the end. Entering needs a
+    // canvas, so the swap itself waits for render(); until then the old
+    // screen is still the one being shown.
+    const bool cal = f.gear_cal.phase != 0 && nav_.mode == Mode::Config;
+    if (cal != cal_active_) {
+        cal_swap_ = true;
+        if (!cal) config_.resume();
+        cal_active_ = cal;
+        return;
     }
 
     // The splash first, timed from the first frame like the sweep. It
@@ -191,6 +203,10 @@ void App::render_splash(Canvas& c) {
 
 void App::render(Canvas& c, bool full) {
     if (!entered_) return;
+    if (cal_swap_) {
+        cal_swap_ = false;
+        enter_current(c);
+    }
     if (splash_on_) {
         render_splash(c);
         return;

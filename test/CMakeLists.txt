@@ -36,7 +36,8 @@ add_library(core STATIC
     ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp
     ${CORE}/src/sweep.cpp
-    ${CORE}/src/fusion_speed.cpp)
+    ${CORE}/src/fusion_speed.cpp
+    ${CORE}/src/gearcal.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -55,6 +56,7 @@ add_library(ui STATIC
     ${UI}/src/screens_stat.cpp
     ${UI}/src/screens_diag.cpp
     ${UI}/src/screen_config.cpp
+    ${UI}/src/screen_gearcal.cpp
     ${UI}/src/app.cpp)
 target_include_directories(ui PUBLIC ${UI}/include)
 target_link_libraries(ui PUBLIC core)
@@ -64,7 +66,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear power media pairing ota sweep wifi wire ui)
+          attitude jump nmea input tach log delta gear gearcal power media pairing ota sweep wifi wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -77,6 +79,12 @@ add_executable(test_settings_store test_settings_store.cpp ${SVC}/src/settings_s
 target_include_directories(test_settings_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_settings_store PRIVATE core hal)
 add_test(NAME settings_store COMMAND test_settings_store)
+
+# `logic`'s half of the gear calibration, through the real logic_tick.
+add_executable(test_logic_gearcal test_logic_gearcal.cpp ${SVC}/src/logic_tick.cpp)
+target_include_directories(test_logic_gearcal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_gearcal PRIVATE core ui hal)
+add_test(NAME logic_gearcal COMMAND test_logic_gearcal)
 
 foreach(t ui wire)
     target_link_libraries(test_${t} PRIVATE ui hal)

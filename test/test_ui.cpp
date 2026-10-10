@@ -1,4 +1,5 @@
 #include "check.hpp"
+#include "core/gearcal/gearcal.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "core/state/track_buffer.hpp"
@@ -920,6 +921,116 @@ int main() {
         CHECK(fx.app.current().focus_count() == groups);
         CHECK(fx.app.nav_state().focus == 1);
         CHECK(fx.app.nav_state().mode == Mode::Config);
+    }
+
+    CASE("the gear calibration page takes over CONFIG while a run is open, and hands it back");
+    {
+        using core::gearcal::Phase;
+        using core::gearcal::Reason;
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+
+        // CONFIG -> Gearing -> Calibrate gears posts the command...
+        size_t g = 0;
+        while (g < core::config::group_count() &&
+               std::strcmp(core::config::group_name(g), "Gearing") != 0) ++g;
+        CHECK(g < core::config::group_count());
+        for (size_t i = 0; i < g; ++i)
+            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open Gearing
+        size_t row = 0;
+        while (row < core::config::group_size(g) &&
+               core::config::group_item(g, row)->action != core::state::CommandId::GearCalStart) ++row;
+        CHECK(row < core::config::group_size(g));
+        for (size_t i = 0; i < row; ++i)
+            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalStart);
+
+        // ...and when `logic` says a run is open, the page replaces CONFIG.
+        Frame f = busy_frame();
+        f.gear_cal.phase = static_cast<uint8_t>(Phase::Intro);
+        f.gear_cal.count = 5;
+        f.gear_cal.autotune = true;
+        f.gear_cal.learn_n[2] = 5;
+        f.gear_cal.learn_err_pct[2] = -3.2f;
+        fx.app.update(f);
+        fx.app.render(s.canvas);
+        CHECK(std::strcmp(fx.app.current().name(), "GEAR CAL") == 0);
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 500);
+
+        // Every button belongs to it: A must not leave with a run open.
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::A, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.empty());
+        CHECK(fx.app.nav_state().mode == Mode::Config);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalNext);
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalNext);  // no skip on the intro
+
+        // Measuring, ready; then the results.
+        f.gear_cal.phase = static_cast<uint8_t>(Phase::Measuring);
+        f.gear_cal.gear = 2;
+        f.gear_cal.ready = true;
+        f.gear_cal.steady_ds = 123;
+        f.gear_cal.need_ds = 100;
+        f.gear_cal.live_ratio = 281.4f;
+        f.gear_cal.live_err_pct = -3.0f;
+        f.gear_cal.done_mask = 0x01;
+        f.gear_cal.result_ratio[0] = 410.2f;
+        f.gear_cal.result_err_pct[0] = -2.3f;
+        fx.app.update(f);
+        fx.app.render(s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalSkip);
+        fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalCancel);
+
+        // A partial update of the measuring page lands the same pixels as a
+        // full repaint of it.
+        {
+            Screen320x480 whole;
+            fx.app.update(f);
+            fx.app.render(s.canvas, true);
+            whole.px = s.px;
+            Frame f2 = f;
+            f2.gear_cal.steady_ds = 140;
+            f2.gear_cal.live_err_pct = -2.8f;
+            f2.gear_cal.ready = false;
+            f2.gear_cal.reason = static_cast<uint8_t>(Reason::Unsteady);
+            fx.app.update(f2);
+            for (Widget* w : fx.app.current().widgets()) {
+                if (!w || !w->dirty) continue;
+                w->render(s.canvas);
+                w->clear_dirty();
+            }
+            FrameBufferCanvas wc(whole.px.data(), kScreenW, kScreenH);
+            fx.app.render(wc, true);
+            size_t differing = 0;
+            for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != whole.px[i]) ++differing;
+            CHECK(differing == 0);
+        }
+
+        f.gear_cal.phase = static_cast<uint8_t>(Phase::Summary);
+        f.gear_cal.circ_valid = true;
+        f.gear_cal.circ_err_pct = 3.1f;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 500);
+
+        // Closed again: CONFIG is back, in the Gearing submenu it left.
+        f.gear_cal = core::state::GearCal{};
+        fx.app.update(f);
+        fx.app.render(s.canvas);
+        CHECK(std::strcmp(fx.app.current().name(), "CONFIG") == 0);
+        CHECK(fx.app.current().focus_count() == core::config::group_size(g));
     }
 
     CASE("at key-on the speed screen sweeps, then shows the bike");
