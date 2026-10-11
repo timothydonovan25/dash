@@ -20,4 +20,9 @@ C6 co-processor images (`c6-<esp_hosted version>-<date>-<feature>.bin`):
   `slave_fw` partition (`idf.py -p /dev/ttyACM0 c6-flash` from `demo_p4/`),
   and the dash pushes it from there to the C6. It reports the same 2.12.8 as
   the build already on the C6, so the dash's "older than 2.12" check will
-  not push it by itself.
+  not push it by itself. Superseded by the next one.
+- `c6-2.12.8-2026-10-11-build-id.bin`: the same, and it reports its build
+  id (the first four bytes of its ELF SHA-256) in the version RPC. From
+  dash 1.9 on, the dash pushes slave_fw to the C6 whenever the build ids
+  differ, once per image (core/c6). DIAG -> Update shows "2.12.8 #<id>";
+  "#-" is a C6 build from before build ids.

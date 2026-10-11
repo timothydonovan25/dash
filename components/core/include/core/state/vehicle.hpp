@@ -180,9 +180,10 @@ struct BleDiag {
     bool    encrypted      = false;   // the current link, if any, is bonded and encrypted
     uint8_t bonds          = 0;       // phones the dash will let back in
     uint8_t pairing_s      = 0;       // seconds left in the pairing window; 0 closed
-    // The C6's ESP-Hosted firmware, "2.12.8", or "" before the link is up.
+    // The C6's ESP-Hosted firmware and build id (core/c6), "2.12.8 #1a2b3c4d",
+    // or "" before the link is up. "#-" is a build from before build ids.
     // DIAG's Update screen shows it beside the dash's own version.
-    char    c6_fw[12]      = {};
+    char    c6_fw[24]      = {};
 };
 
 // The two firmware slots and any update in progress (§11.7). Written by

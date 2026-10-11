@@ -1,4 +1,7 @@
 #include "c6_firmware.hpp"
+#include "core/c6/c6.hpp"
+#include "esp_app_desc.h"
+#include "nvs.h"
 
 #include "esp_hosted.h"
 #include "esp_hosted_ota.h"
@@ -21,15 +24,50 @@ constexpr const char* kTag = "c6_fw";
 constexpr const char* kPartitionLabel = "slave_fw";
 constexpr size_t      kChunkSize = 1500;   // matches the SDIO link's own frame size
 
-// The C6 build this ships next to (demo_p4/c6_cp, flashed into slave_fw by
-// main/CMakeLists.txt) is Espressif's "2.12.8" ESP-Hosted slave; anything
-// older than that is what this host was not built to talk to (see the
-// "Version mismatch" warning the transport layer logs on its own).
-constexpr uint32_t kNeedMajor = 2;
-constexpr uint32_t kNeedMinor = 12;
+// Which C6 build was last pushed, so an image the C6 will not take is tried
+// once rather than on every boot (core::c6::decide).
+constexpr const char* kNvsNs = "c6fw";
+constexpr const char* kNvsTried = "tried";
 
-bool version_needs_upgrade(const esp_hosted_coprocessor_fwver_t& v) {
-    return v.major1 < kNeedMajor || (v.major1 == kNeedMajor && v.minor1 < kNeedMinor);
+int32_t tried_build() {
+    nvs_handle_t h;
+    int32_t v = 0;
+    if (nvs_open(kNvsNs, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_i32(h, kNvsTried, &v);
+        nvs_close(h);
+    }
+    return v;
+}
+
+void remember_tried(int32_t build) {
+    nvs_handle_t h;
+    if (nvs_open(kNvsNs, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_i32(h, kNvsTried, build);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// The image in slave_fw, identified the way the C6 identifies itself: its
+// version string and the first four bytes of its ELF SHA-256, both from the
+// app description that follows the first segment header.
+core::c6::FwId image_id(const esp_partition_t* part) {
+    core::c6::FwId id;
+    esp_app_desc_t desc;
+    constexpr size_t kDescOffset = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+    if (!part || esp_partition_read(part, kDescOffset, &desc, sizeof desc) != ESP_OK ||
+        desc.magic_word != ESP_APP_DESC_MAGIC_WORD) {
+        return id;
+    }
+    desc.version[sizeof desc.version - 1] = '\0';
+    if (!core::c6::parse_version(desc.version, id)) return id;
+    id.build = core::c6::build_id(desc.app_elf_sha256);
+    id.valid = true;
+    return id;
+}
+
+const esp_partition_t* slave_partition() {
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                    static_cast<esp_partition_subtype_t>(0x40), kPartitionLabel);
 }
 
 // The C6 is shared by both firmware slots (§11.7). A dev image runs once and
@@ -103,8 +141,7 @@ bool push_partition_to_slave(const esp_partition_t* part, size_t fw_size) {
 // slave_fw to the C6, then a restart so both ends start over in step.
 // Returns only if something failed, having said what.
 void push_and_restart() {
-    const esp_partition_t* part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, static_cast<esp_partition_subtype_t>(0x40), kPartitionLabel);
+    const esp_partition_t* part = slave_partition();
     if (part == nullptr) {
         ESP_LOGE(kTag, "no '%s' partition — can't upgrade the C6 over SDIO", kPartitionLabel);
         return;
@@ -130,27 +167,35 @@ void push_and_restart() {
 
 }  // namespace
 
+// The C6 runs exactly the image in slave_fw (core::c6). Called once the
+// SDIO link is up; restarts the dash if it pushed.
 void c6_firmware_update_if_needed() {
-    esp_hosted_coprocessor_fwver_t fwver;
-    if (esp_hosted_get_coprocessor_fwversion(&fwver) != ESP_OK) {
-        ESP_LOGW(kTag, "could not read C6 firmware version, skipping OTA check");
-        return;
+    esp_hosted_coprocessor_fwver_t v;
+    core::c6::FwId running;
+    if (esp_hosted_get_coprocessor_fwversion(&v) == ESP_OK) {
+        running.major = v.major1;
+        running.minor = v.minor1;
+        running.patch = v.patch1;
+        running.build = v.build > 0 ? v.build : 0;
+        running.valid = true;
+    } else {
+        ESP_LOGW(kTag, "could not read the C6's firmware version, leaving it");
     }
-    if (!version_needs_upgrade(fwver)) {
-        ESP_LOGI(kTag, "C6 firmware %" PRIu32 ".%" PRIu32 ".%" PRIu32 " already current",
-                 fwver.major1, fwver.minor1, fwver.patch1);
-        return;
+    const core::c6::FwId image = image_id(slave_partition());
+    if (!image.valid) {
+        ESP_LOGW(kTag, "no C6 image in %s to compare against", kPartitionLabel);
     }
-
-    if (fwver.major1 != kNeedMajor && running_dev()) {
-        ESP_LOGW(kTag, "dev firmware will not move the C6 from %" PRIu32 ".x to %" PRIu32
-                 ".x: stable shares it. Promote first, or flash over USB.",
-                 fwver.major1, kNeedMajor);
-        return;
-    }
-
-    ESP_LOGW(kTag, "C6 firmware %" PRIu32 ".%" PRIu32 ".%" PRIu32 " is older than this host "
-             "expects", fwver.major1, fwver.minor1, fwver.patch1);
+    const int32_t tried = tried_build();
+    const core::c6::Action a = core::c6::decide(running, image, tried, running_dev());
+    ESP_LOGI(kTag, "C6 runs %" PRIu32 ".%" PRIu32 ".%" PRIu32 " #%08" PRIx32
+             ", %s has %" PRIu32 ".%" PRIu32 ".%" PRIu32 " #%08" PRIx32 ": %s",
+             running.major, running.minor, running.patch, static_cast<uint32_t>(running.build),
+             kPartitionLabel, image.major, image.minor, image.patch,
+             static_cast<uint32_t>(image.build), core::c6::action_name(a));
+    if (a != core::c6::Action::Push) return;
+    // Recorded before the push, so a push that wedges the C6 or the link
+    // is not retried at every boot.
+    remember_tried(image.build);
     push_and_restart();
 }
 

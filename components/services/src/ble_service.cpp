@@ -355,8 +355,13 @@ bool bring_up(Deps& d, char* c6_fw, size_t c6_fw_len) {
     if (esp_hosted_get_coprocessor_fwversion(&v) == ESP_OK) {
         ESP_LOGI(kTag, "C6 firmware %" PRIu32 ".%" PRIu32 ".%" PRIu32,
                  v.major1, v.minor1, v.patch1);
-        snprintf(c6_fw, c6_fw_len, "%" PRIu32 ".%" PRIu32 ".%" PRIu32,
-                 v.major1, v.minor1, v.patch1);
+        if (v.build > 0) {
+            snprintf(c6_fw, c6_fw_len, "%" PRIu32 ".%" PRIu32 ".%" PRIu32 " #%08" PRIx32,
+                     v.major1, v.minor1, v.patch1, static_cast<uint32_t>(v.build));
+        } else {
+            snprintf(c6_fw, c6_fw_len, "%" PRIu32 ".%" PRIu32 ".%" PRIu32 " #-",
+                     v.major1, v.minor1, v.patch1);
+        }
     }
     c6_firmware_update_if_needed();   // restarts the dash if it upgraded
 

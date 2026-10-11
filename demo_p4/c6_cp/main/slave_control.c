@@ -455,7 +455,17 @@ static esp_err_t req_get_coprocessor_fw_version(Rpc *req, Rpc *resp, void *priv_
 	resp_payload->patch1     = PROJECT_VERSION_PATCH_1;
 	resp_payload->revision   = -1;
 	resp_payload->prerelease = -1;
-	resp_payload->build      = -1;
+	// The dash's build id (core::c6::build_id, components/core/src/c6.cpp):
+	// the first four bytes of this image's ELF SHA-256, positive, never 0
+	// (the host reads 0 as "absent"). Two builds with one version number
+	// still differ here, which is what lets the dash tell them apart.
+	{
+		const uint8_t *sha = esp_app_get_description()->app_elf_sha256;
+		uint32_t v = ((uint32_t)sha[0] << 24) | ((uint32_t)sha[1] << 16) |
+		             ((uint32_t)sha[2] << 8) | (uint32_t)sha[3];
+		int32_t id = (int32_t)(v & 0x7FFFFFFFu);
+		resp_payload->build = id ? id : 1;
+	}
 	resp_payload->chip_id    = CONFIG_IDF_FIRMWARE_CHIP_ID;
 	RPC_RESP_COPY_STR(resp_payload->idf_target, CONFIG_IDF_TARGET, strlen(CONFIG_IDF_TARGET));
 	resp_payload->resp = ESP_OK;
