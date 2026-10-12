@@ -40,6 +40,20 @@ struct Pod {
 }  // namespace
 
 int main() {
+    CASE("pod pins map to buttons as the pod is wired");
+    {
+        // Measured: A=GPA3, B=GPA5, C=GPA7, D=GPA4, E=GPA6.
+        CHECK(pod_pins_to_buttons(1u << 3) == (1u << 0));
+        CHECK(pod_pins_to_buttons(1u << 5) == (1u << 1));
+        CHECK(pod_pins_to_buttons(1u << 7) == (1u << 2));
+        CHECK(pod_pins_to_buttons(1u << 4) == (1u << 3));
+        CHECK(pod_pins_to_buttons(1u << 6) == (1u << 4));
+        CHECK(pod_pins_to_buttons(0x00) == 0);
+        CHECK(pod_pins_to_buttons(0xF8) == 0x1F);
+        // The unconnected pins can never press anything.
+        CHECK(pod_pins_to_buttons(0x07) == 0);
+    }
+
     CASE("a clean tap is one short press, on release");
     {
         Pod p;

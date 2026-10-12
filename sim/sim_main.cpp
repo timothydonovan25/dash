@@ -48,8 +48,8 @@
 
 namespace {
 
-constexpr uint32_t kTickMs  = 20;    // 50 Hz, the logic rate
-constexpr uint32_t kFrameMs = 50;    // 20 Hz to the window
+constexpr uint32_t kTickMs  = 10;    // 100 Hz, the pod poll rate
+constexpr uint32_t kFrameMs = 20;    // 50 Hz to the window; 100 Hz saturates the Tk front end
 
 // The panel budget, modelled rather than drawn. The window here is a laptop
 // and will happily repaint everything at any rate asked of it, which is

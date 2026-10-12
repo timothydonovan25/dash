@@ -1,5 +1,6 @@
 #include "drivers/pod.hpp"
 #include "bsp/pins.hpp"
+#include "core/input/input.hpp"
 #include "bsp/buses.hpp"
 
 #include "driver/gpio.h"
@@ -54,7 +55,8 @@ hal::Status ButtonPod::init() {
 }
 
 hal::Status ButtonPod::refresh_config() {
-    // Five buttons on GPA0..GPA4, wired to ground, with pull-ups. IPOL
+    // Five buttons on GPA3..GPA7 (core::input::kPodPin), wired to ground,
+    // with pull-ups. GPA0..2 are not connected. IPOL
     // inverts them in the chip, so a pressed button reads as a 1 here and
     // the polarity question is answered once, in hardware config, rather
     // than in every caller.
@@ -69,7 +71,7 @@ hal::Status ButtonPod::read_buttons(uint8_t& pressed_mask) {
     uint8_t v = 0;
     const hal::Status s = read_reg(kGpioA, v);
     if (!hal::ok(s)) return s;
-    pressed_mask = static_cast<uint8_t>(v & 0x1F);   // five buttons
+    pressed_mask = core::input::pod_pins_to_buttons(v);   // bit 0 = A
     return hal::Status::Ok;
 }
 

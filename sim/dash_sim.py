@@ -13,14 +13,24 @@ firmware -- it is the firmware.
 
     cmake -S sim -B build-sim && cmake --build build-sim
     python3 sim/dash_sim.py
+
+    python3 sim/dash_sim.py --pod /dev/ttyACM0
+
+--pod reads a real handlebar pod through an Arduino that prints a
+"GPIOA=0x.." line whenever the MCP23017's port A changes (pressed = 1), so
+the physical buttons drive the sim through the same debounce as a click.
 """
 
+import argparse
 import io
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import termios
+import threading
 import tkinter as tk
 
 from PIL import Image
@@ -46,14 +56,12 @@ else:
 PANEL_W_MM = 73.44
 PANEL_H_MM = 48.96
 
-# xrandr's EDID-reported size, and Tk's screen-mm fallback below it, both
-# came out roughly half of what the panel needed to look right on the
-# monitor this was actually tuned against -- some combination of a
-# desktop scaling factor neither of them knows about and EDID values that
-# just aren't trustworthy. Rather than chase that per-machine, apply the
-# correction as a flat multiplier; DASH_SIM_PX_PER_MM below still bypasses
-# it entirely for anyone who wants to dial in an exact number instead.
-SIZE_CALIBRATION = 1.5
+# 1.0 is true size: the window is the panel's real millimetres at the
+# monitor's EDID-reported pixel density (7.5 px/mm on a 2560x1600 340 mm
+# laptop screen, so the glass is 553x369 px). It was 1.5 for a while because
+# the sim was tuned to look big rather than right. If a monitor's EDID lies,
+# hold a ruler to the window and set DASH_SIM_PX_PER_MM, which bypasses this.
+SIZE_CALIBRATION = 1.0
 
 
 def _detect_px_per_mm(root):
@@ -172,6 +180,49 @@ COMMANDS = [
 ]
 
 
+# Which MCP23017 port-A pin each button is wired to: A B C D E.
+# Keep in step with core::input::kPodPin.
+POD_PINS = {"A": 3, "B": 5, "C": 7, "D": 4, "E": 6}
+
+
+class PodSerial(threading.Thread):
+    """Reads GPIOA lines from the pod's Arduino and queues (letter, down)."""
+
+    def __init__(self, port):
+        super().__init__(daemon=True)
+        self.q = queue.Queue()
+        self.fd = os.open(port, os.O_RDONLY | os.O_NOCTTY)
+        a = termios.tcgetattr(self.fd)
+        a[0] = a[1] = a[3] = 0                      # raw
+        a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        a[4] = a[5] = termios.B115200
+        a[6][termios.VMIN], a[6][termios.VTIME] = 1, 0
+        termios.tcsetattr(self.fd, termios.TCSANOW, a)
+        self.mask = 0
+
+    def run(self):
+        buf = b""
+        while True:
+            try:
+                chunk = os.read(self.fd, 256)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                m = re.match(rb"GPIOA=0x([0-9A-Fa-f]+)", line.strip())
+                if not m:
+                    continue
+                v = int(m.group(1), 16)
+                for letter, pin in POD_PINS.items():
+                    down = bool(v & (1 << pin))
+                    if down != bool(self.mask & (1 << pin)):
+                        self.q.put((letter, down))
+                self.mask = v
+
+
 class Sim:
     """The simulator process, and the pipe to it."""
 
@@ -245,8 +296,9 @@ class Sim:
 
 
 class App:
-    def __init__(self, root, sim):
+    def __init__(self, root, sim, pod=None):
         self.sim = sim
+        self.pod = pod
         self.root = root
         self.blink = False
         self.native_size = (0, 0)
@@ -470,7 +522,19 @@ class App:
         if position_ms is not None:
             self.sim.send(f"set position {position_ms}")
 
+    def drain_pod(self):
+        while self.pod is not None:
+            try:
+                letter, down = self.pod.q.get_nowait()
+            except queue.Empty:
+                return
+            self.sim.send(f"btn {letter} {'down' if down else 'up'}")
+            b = self.button_widgets.get(letter)
+            if b is not None:
+                b.configure(bg=b["activebackground"] if down else "#161a22")
+
     def pump(self):
+        self.drain_pod()
         frame = self.sim.read_frame()
         if frame is None:
             self.status.config(text="simulator exited")
@@ -533,9 +597,17 @@ class App:
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pod", metavar="PORT",
+                    help="serial port of an Arduino reading the real button pod")
+    args = ap.parse_args()
+    pod = None
+    if args.pod:
+        pod = PodSerial(args.pod)
+        pod.start()
     sim = Sim(SIM)
     root = tk.Tk()
-    App(root, sim)
+    App(root, sim, pod)
     root.mainloop()
 
 

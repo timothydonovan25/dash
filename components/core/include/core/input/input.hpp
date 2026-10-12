@@ -16,6 +16,20 @@ namespace core::input {
 
 inline constexpr uint8_t kButtonCount = 5;   // A B C D E
 
+// Which MCP23017 port-A pin each button is wired to, measured on the pod
+// itself (2026-10-11): A=GPA3, B=GPA5, C=GPA7, D=GPA4, E=GPA6. GPA0..2 are
+// not connected. Index is the button, bit 0 = A.
+inline constexpr uint8_t kPodPin[kButtonCount] = {3, 5, 7, 4, 6};
+
+// GPIOA as read from the pod (pressed = 1 after IPOL) to the button mask the
+// Decoder takes: bit 0 = A, set means pressed.
+constexpr uint8_t pod_pins_to_buttons(uint8_t gpa) {
+    uint8_t m = 0;
+    for (uint8_t b = 0; b < kButtonCount; ++b)
+        if (gpa & (1u << kPodPin[b])) m |= static_cast<uint8_t>(1u << b);
+    return m;
+}
+
 struct Config {
     // A press must read the same for this long before it counts. Bar-mounted
     // switches on a vibrating dirt bike bounce for a few milliseconds.
