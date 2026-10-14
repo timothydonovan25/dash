@@ -41,8 +41,12 @@ void gnss_task(void* arg) {
         if (hal::ok(s)) {
             bool updated = false;
             for (size_t i = 0; i < n; ++i) {
+                const uint32_t utc_before = fix.utc_ms;
                 if (parser.feed(buf[i], fix) == core::nmea::Result::Updated) {
                     updated = true;
+                    // A new UTC is a new fix; the second sentence of the
+                    // same fix carries the same time and keeps the stamp.
+                    if (fix.utc_ms != utc_before) fix.rx_ms = now;
                 }
             }
             if (updated) {
@@ -64,7 +68,10 @@ void gnss_task(void* arg) {
         // the health tracker's staleness timer fed.
         (void)last_fix_ms;
 
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // 5 ms, not 20: the poll is how late a fix is stamped, and the lap
+        // timer interpolates line crossings from that stamp. Reading an
+        // idle UART is a few microseconds.
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 

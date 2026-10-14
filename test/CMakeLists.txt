@@ -31,6 +31,8 @@ add_library(core STATIC
     ${CORE}/src/delta.cpp
     ${CORE}/src/gear.cpp
     ${CORE}/src/power.cpp
+    ${CORE}/src/sun.cpp
+    ${CORE}/src/alert.cpp
     ${CORE}/src/media.cpp
     ${CORE}/src/pairing.cpp
     ${CORE}/src/ota.cpp
@@ -67,7 +69,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi wire ui)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -86,6 +88,12 @@ add_executable(test_logic_gearcal test_logic_gearcal.cpp ${SVC}/src/logic_tick.c
 target_include_directories(test_logic_gearcal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_logic_gearcal PRIVATE core ui hal)
 add_test(NAME logic_gearcal COMMAND test_logic_gearcal)
+
+# `logic`'s half of the lap timer: fixes at 10 Hz through a 50 Hz tick.
+add_executable(test_logic_lap test_logic_lap.cpp ${SVC}/src/logic_tick.cpp)
+target_include_directories(test_logic_lap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_lap PRIVATE core ui hal)
+add_test(NAME logic_lap COMMAND test_logic_lap)
 
 foreach(t ui wire)
     target_link_libraries(test_${t} PRIVATE ui hal)

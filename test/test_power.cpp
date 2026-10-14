@@ -62,5 +62,86 @@ int main() {
         CHECK(lamp_master_pct(true, 250, 30) == 100);
     }
 
+
+    // --- FailDetector ----------------------------------------------------
+    using E = FailDetector::Event;
+    auto run = [](FailDetector& d, float v, int n) {
+        E last = E::None;
+        for (int i = 0; i < n; ++i) {
+            const E e = d.feed(v);
+            if (e != E::None) last = e;
+        }
+        return last;
+    };
+
+    CASE("USB power never trips, however long it is watched");
+    {
+        FailDetector d;
+        CHECK(run(d, 4.5f, 5000) == E::None);
+        CHECK(!d.armed());
+        CHECK(run(d, 0.0f, 100) == E::None);
+    }
+
+    CASE("it arms on a bike supply and trips on a cut, once");
+    {
+        FailDetector d;
+        run(d, 13.8f, 50);
+        CHECK(d.armed());
+        // 13.8 V falling at 5 V/ms on a 9 ms hold-up.
+        int tripped_at = -1, events = 0;
+        float v = 13.8f;
+        for (int ms = 0; ms < 10; ++ms, v -= 1.0f) {
+            if (d.feed(v) == E::Tripped) { ++events; tripped_at = ms; }
+        }
+        CHECK(events == 1);
+        // 13.8, 12.8 ... first sample below 9.0 is ms 5 (8.8 V), confirmed at ms 6.
+        CHECK(tripped_at == 6);
+        CHECK(d.tripped());
+    }
+
+    CASE("a cranking dip above the trip voltage does nothing");
+    {
+        FailDetector d;
+        run(d, 12.6f, 50);
+        CHECK(run(d, 9.6f, 500) == E::None);
+        CHECK(d.armed());
+    }
+
+    CASE("one low sample is noise, not a cut");
+    {
+        FailDetector d;
+        run(d, 13.8f, 50);
+        CHECK(d.feed(5.0f) == E::None);
+        CHECK(run(d, 13.8f, 10) == E::None);
+        CHECK(d.feed(5.0f) == E::None);
+        CHECK(d.armed());
+    }
+
+    CASE("a trip that comes back hands everything back");
+    {
+        FailDetector d;
+        run(d, 13.8f, 50);
+        CHECK(run(d, 6.0f, 5) == E::Tripped);
+        CHECK(run(d, 12.0f, 10) == E::None);            // not yet convincing
+        CHECK(d.tripped());
+        CHECK(run(d, 12.0f, 60) == E::Recovered);
+        CHECK(d.armed());
+        CHECK(run(d, 6.0f, 5) == E::Tripped);           // and it can trip again
+    }
+
+    CASE("still alive a second after a trip means USB: let go, and stay quiet");
+    {
+        FailDetector d;
+        run(d, 13.8f, 50);
+        CHECK(run(d, 6.0f, 5) == E::Tripped);
+        CHECK(run(d, 4.5f, 2000) == E::Recovered);
+        CHECK(!d.tripped());
+        CHECK(!d.armed());
+        CHECK(run(d, 4.5f, 2000) == E::None);
+        // Plugged back into the bike, it arms again.
+        run(d, 13.8f, 50);
+        CHECK(d.armed());
+    }
+
     return check::report("power");
 }

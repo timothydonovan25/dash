@@ -335,6 +335,32 @@ duty is capped on USB.
 write, about 100 µs at 1 MHz. If you add anything to core 0 above
 priority 18, you have broken it.
 
+### 8.1 Power-fail
+
+`power` (core 1, priority 22, 1 kHz) is the only thing that reacts to the
+bike being switched off, and it has never run. With USB connected as well
+as the bike supply, so the board survives the cut:
+
+1. Run on the bike supply for a few seconds, then switch the ignition off.
+   The serial console should print `power: VIN x.x V: supply cut. dark in N
+   us, totals saved in M us`. The backlight and the lamps go dark.
+2. **Read M.** The hold-up is about 9 ms at full load and the trip is at
+   9 V, so what is really available after the trip is about 3 ms with
+   everything on and 6 ms with the loads shed. If "dark" is more than a
+   millisecond or "saved" more than ~3 ms, the NVS write cannot be trusted
+   to finish on a real cut, and the choice is more capacitance (the 470 µF
+   option in the pin map) or giving up on the odometer write.
+3. With USB still holding the board up you should then see `supply back,
+   resuming` about a second later, the backlight returns, and logging
+   resumes. If it does not, `power_fail` is stuck.
+4. Crank the engine with a weak battery. VIN dipping toward 9 V must not
+   trip; if it does, lower `trip_v` in `core::power::FailDetector::Config`
+   (and expect less time left).
+5. Cut the supply with a scope on VIN and the 3V3 rail: that is the real
+   test of how long the board has.
+
+Not done, and not possible on this board: flushing the log file.
+
 ---
 
 ## 9. Storage, then the radio

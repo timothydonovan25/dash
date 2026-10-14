@@ -71,6 +71,11 @@ size_t two_digits(char* out, uint32_t v) {
 
 }  // namespace
 
+float rpm_for_display(float rpm) {
+    if (!std::isfinite(rpm)) return rpm;
+    return std::round(rpm / 10.0f) * 10.0f;
+}
+
 float speed_for_display(float mph, System s, const char** unit) {
     if (s == System::Metric) { if (unit) *unit = "km/h"; return kmh_from_mph(mph); }
     if (unit) *unit = "mph";

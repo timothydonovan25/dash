@@ -90,6 +90,11 @@ int main() {
     CHECK(n == 3);
     CHECK(small[3] == '\0');
     CHECK(eq(small, "123"));
+    CASE("rpm on screen is to the nearest ten");
+    CHECK_NEAR(rpm_for_display(4123.0f), 4120.0, 1e-3);
+    CHECK_NEAR(rpm_for_display(4125.0f), 4130.0, 1e-3);
+    CHECK_NEAR(rpm_for_display(0.0f), 0.0, 1e-6);
+
     // Zero-length buffers are not a crash.
     CHECK(fmt_float(nullptr, 0, 1.0f, 0) == 0);
 

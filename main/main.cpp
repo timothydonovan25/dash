@@ -74,6 +74,7 @@ extern "C" void app_main() {
     services::start_logger(deps);
     services::start_storage(deps);
     services::start_keeper(deps);
+    services::start_power(deps);
     services::start_ota(deps);
     // Last, so a radio that is slow to come up, or never does, delays
     // nothing above it (§11.8).

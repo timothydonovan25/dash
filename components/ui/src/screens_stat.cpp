@@ -44,7 +44,7 @@ void AllDataScreen::update(const Frame& f) {
               0, unit, f.health.ok(Dev::Gnss));
     table_.set_row(0, "Speed", v);
 
-    row_value(v, sizeof v, f.engine.rpm, 0, "rpm", f.engine.rpm > 0.0f);
+    row_value(v, sizeof v, u::rpm_for_display(f.engine.rpm), 0, "rpm", f.engine.rpm > 0.0f);
     table_.set_row(1, "RPM", v);
 
     unit = "C";
@@ -128,8 +128,13 @@ void EngineScreen::update(const Frame& f) {
     // RPM comes from the inductive pickup, not the ECU, and stays available
     // whatever the adapter is doing.
     const bool have_rpm = f.engine.rpm > 0.0f || f.engine.neutral;
-    rpm_.set(f.engine.rpm, have_rpm);
-    if (have_rpm) rpm_trace_.push(f.engine.rpm);
+    rpm_.set(u::rpm_for_display(f.engine.rpm), have_rpm);
+    // 10 Hz, not every frame: 64 points is then ~6 s of history rather than
+    // one, and the 250x80 trace is sent a tenth as often.
+    if (have_rpm && f.t_ms - rpm_trace_ms_ >= kRpmTraceMs) {
+        rpm_trace_ms_ = f.t_ms;
+        rpm_trace_.push(f.engine.rpm);
+    }
 
     const char* tunit = "C";
     coolant_.set(u::temp_for_display(f.engine.coolant_c, units(), &tunit),

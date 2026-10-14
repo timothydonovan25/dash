@@ -42,6 +42,11 @@ New code, all under `main/`:
 - `touch_buttons.{hpp,cpp}` — reads a GT911 touch controller and turns taps
   on five right-edge zones (A-E, top to bottom) into the same raw button
   mask `core::input::Decoder` already knows how to debounce.
+- `pod_buttons.{hpp,cpp}` — the real handlebar pod (MCP23017, 0x20) on
+  CN3, the board's 4-pin I2C connector (1 GND, 2 3V3, 3 SCL = GPIO8,
+  4 SDA = GPIO7). It shares the touch bus, and its buttons OR into the
+  touch mask, so either one works. Optional: nothing plugged in is fine,
+  and a pod plugged in later is found within a second.
 - `demo_render.{hpp,cpp}` — the render loop, simplified from the real
   `render_service.cpp` because this panel has no SPI wire budget to protect.
 - `demo_bike_task.{hpp,cpp}` — runs `services::logic_tick` and hands BLE

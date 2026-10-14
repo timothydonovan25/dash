@@ -98,9 +98,17 @@ public:
     // LapClear. Forgets the line and the whole session.
     void clear();
 
-    // Call once per `logic` tick with the newest fix, whether or not it is
-    // new — a repeated fix is harmless, the crossing test needs movement.
+    // Call once per new fix, with the time the fix was taken, and with
+    // `valid` false when the receiver has none. Not once per `logic` tick:
+    // see advance().
     Update update(const Fix& f, const Config& c);
+
+    // Moves the running lap clock to `now_ms` between fixes, so it counts
+    // at the caller's rate rather than the receiver's. Call update() once
+    // per *new* fix only: feeding it the same fix again makes the next
+    // segment look 20 ms long instead of 100, and every crossing is then
+    // interpolated over the wrong interval.
+    void advance(uint32_t now_ms);
 
     const State& state() const { return pub_; }
     bool has_line() const { return has_line_; }

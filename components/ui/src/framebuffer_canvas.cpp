@@ -154,27 +154,80 @@ void FrameBufferCanvas::fill_arc(int16_t cx, int16_t cy, int16_t r_outer,
     if (r_outer <= 0 || end_deg <= start_deg) return;
     if (r_inner < 0) r_inner = 0;
 
-    // Walk the bounding box and test each pixel. At gauge sizes this is a
-    // few thousand pixels, which is cheaper than getting the trigonometry of
-    // a scanline sweep right for arcs that cross twelve o'clock.
+    // Only the rows and columns that can land: the window intersected with
+    // the clip. The old version walked the whole bounding box and called
+    // atan2 for every pixel of it, for every strip a widget was drawn in --
+    // the lean gauge alone was ~45k atan2 a render, and a full repaint of the
+    // speed screen ~15 ms on a desktop CPU. Sides of the sector are now
+    // tested with cross products against its two edge directions.
+    int vx0 = ox_, vy0 = oy_, vx1 = ox_ + w_, vy1 = oy_ + h_;
+    if (clipped_) {
+        if (clip_.x > vx0) vx0 = clip_.x;
+        if (clip_.y > vy0) vy0 = clip_.y;
+        if (clip_.right() < vx1) vx1 = clip_.right();
+        if (clip_.bottom() < vy1) vy1 = clip_.bottom();
+    }
+    const int y_lo = cy - r_outer > vy0 ? cy - r_outer : vy0;
+    const int y_hi = cy + r_outer + 1 < vy1 ? cy + r_outer + 1 : vy1;
+    const int x_lo = cx - r_outer > vx0 ? cx - r_outer : vx0;
+    const int x_hi = cx + r_outer + 1 < vx1 ? cx + r_outer + 1 : vx1;
+    if (y_lo >= y_hi || x_lo >= x_hi) return;
+
+    // Also handles a sector crossing north from the left (end_deg > 360),
+    // which the old wrap test missed: the lean marker lost its right half
+    // between -7 and 0 degrees.
+    //
+    // Angles are degrees clockwise from north; a pixel offset (dx, dy) is the
+    // vector v = (dx, -dy) in (east, north). With u = (sin a, cos a),
+    // cross(u, v) = u.x*v.y - u.y*v.x is <= 0 when v is clockwise of u.
+    // sin/cos of a clockwise-from-north angle. Multiples of 45 degrees are
+    // snapped to exact values so pixels exactly on an axis or diagonal ray
+    // are decided by exact zeros, not by which side float rounding fell on.
+    struct Dir { float x, y; };
+    const auto dir = [](float deg) -> Dir {
+        constexpr float kR = 0.70710678118654752f;
+        static const float kS[8] = {0, kR, 1, kR, 0, -kR, -1, -kR};
+        static const float kC[8] = {1, kR, 0, -kR, -1, -kR, 0, kR};
+        const float q = deg / 45.0f;
+        const float fq = std::floor(q);
+        if (q == fq) {
+            int k = static_cast<int>(fq) % 8;
+            if (k < 0) k += 8;
+            return Dir{kS[k], kC[k]};
+        }
+        constexpr float kDegToRad = 0.017453292519943295f;
+        return Dir{std::sin(deg * kDegToRad), std::cos(deg * kDegToRad)};
+    };
+    const Dir ds = dir(start_deg), de = dir(end_deg);
+    const float sx = ds.x, sy = ds.y, ex = de.x, ey = de.y;
+    const bool full = end_deg - start_deg >= 360.0f;
+    const bool reflex = end_deg - start_deg > 180.0f;
+
     const int ro2 = r_outer * r_outer;
     const int ri2 = r_inner * r_inner;
-    for (int16_t dy = static_cast<int16_t>(-r_outer); dy <= r_outer; ++dy) {
-        for (int16_t dx = static_cast<int16_t>(-r_outer); dx <= r_outer; ++dx) {
-            const int d2 = dx * dx + dy * dy;
-            if (d2 > ro2 || d2 < ri2) continue;
-            // Degrees clockwise from twelve o'clock. Screen y grows down, so
-            // -dy puts north at the top where a rider expects it.
-            float a = std::atan2(static_cast<float>(dx),
-                                 static_cast<float>(-dy)) * 57.2957795f;
-            if (a < 0.0f) a += 360.0f;
-            if (a < start_deg || a > end_deg) {
-                if (!(start_deg < 0.0f && a - 360.0f >= start_deg &&
-                      a - 360.0f <= end_deg)) {
-                    continue;
-                }
+    for (int y = y_lo; y < y_hi; ++y) {
+        const int dy = y - cy;
+        const int rem = ro2 - dy * dy;               // > 0 for |dy| <= r_outer
+        if (rem < 0) continue;
+        int xo = static_cast<int>(std::sqrt(static_cast<float>(rem)));
+        while ((xo + 1) * (xo + 1) <= rem) ++xo;     // exact integer floor sqrt
+        while (xo * xo > rem) --xo;
+        const int a = cx - xo > x_lo ? cx - xo : x_lo;
+        const int b = cx + xo + 1 < x_hi ? cx + xo + 1 : x_hi;
+        const float vy = static_cast<float>(-dy);
+        Color* row = px_ + (y - oy_) * stride_ - ox_;
+        for (int x = a; x < b; ++x) {
+            const int dx = x - cx;
+            if (dx * dx + dy * dy < ri2) continue;
+            if (!full) {
+                const float vx = static_cast<float>(dx);
+                const float cs = sx * vy - sy * vx;
+                const float ce = ex * vy - ey * vx;
+                const bool in = reflex ? !(cs > 0.0f && ce < 0.0f)
+                                       : (cs <= 0.0f && ce >= 0.0f);
+                if (!in) continue;
             }
-            put(static_cast<int16_t>(cx + dx), static_cast<int16_t>(cy + dy), c);
+            row[x] = c;
         }
     }
 }

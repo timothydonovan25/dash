@@ -36,6 +36,15 @@ void Timer::begin_lap(Instant at) {
     pub_.current_ms = 0;
 }
 
+void Timer::advance(uint32_t now_ms) {
+    // Never backwards: the last fix may be stamped a moment after `now_ms`
+    // was read by the caller.
+    if (pub_.phase == Phase::Timing &&
+        static_cast<int32_t>(now_ms - lap_start_.ms) > static_cast<int32_t>(pub_.current_ms)) {
+        pub_.current_ms = now_ms - lap_start_.ms;
+    }
+}
+
 Update Timer::update(const Fix& f, const Config& c) {
     Update out;
 

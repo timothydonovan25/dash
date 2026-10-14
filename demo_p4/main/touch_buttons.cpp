@@ -103,6 +103,8 @@ hal::Status TouchButtons::init() {
     return hal::Status::Ok;
 }
 
+void* TouchButtons::bus() const { return g_i2c_bus; }
+
 hal::Status TouchButtons::read_mask(uint8_t& mask_out) {
     mask_out = 0;
     if (!tp_) return hal::Status::NotPresent;

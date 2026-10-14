@@ -8,6 +8,20 @@
 namespace ui {
 
 namespace {
+
+// A non-finite reading is no reading. NaN also compares unequal to itself,
+// so letting one through would mark its widget dirty on every frame.
+inline bool usable(float v, bool valid) { return valid && std::isfinite(v); }
+
+// Lean, as the gauges hold it: half-degree steps, and a step taken only
+// once the angle has moved a whole degree from what is shown. IMU noise
+// dithering across a half-degree boundary otherwise repaints a 31k px arc
+// on almost every frame of a ride.
+constexpr float kLeanHoldDeg = 1.0f;
+inline float held_lean(float shown, bool was_valid, float lean_deg) {
+    const float q = std::round(lean_deg * 2.0f) / 2.0f;
+    return was_valid && std::fabs(q - shown) < kLeanHoldDeg ? shown : q;
+}
 constexpr float kPi = 3.14159265358979f;
 
 // Copy with truncation. Returns whether anything changed, which is what
@@ -80,7 +94,8 @@ void ValueBox::set(float value, bool valid) {
     // fourth decimal must not repaint the widget 30 times a second.
     float scale = 1.0f;
     for (int i = 0; i < decimals_; ++i) scale *= 10.0f;
-    const float q = std::round(value * scale) / scale;
+    valid = usable(value, valid);
+    const float q = valid ? std::round(value * scale) / scale : value_;
     const bool changed = assign_t(valid_, valid) | (valid && assign(value_, q));
     if (changed) touch();
 }
@@ -116,7 +131,8 @@ void BigNumber::configure(const char* unit, int decimals, uint8_t scale) {
 void BigNumber::set(float value, bool valid) {
     float scale = 1.0f;
     for (int i = 0; i < decimals_; ++i) scale *= 10.0f;
-    const float q = std::round(value * scale) / scale;
+    valid = usable(value, valid);
+    const float q = valid ? std::round(value * scale) / scale : value_;
     const bool changed = assign_t(valid_, valid) | (valid && assign(value_, q));
     if (changed) touch();
 }
@@ -149,11 +165,13 @@ void Bar::configure(Color fill, Color warn_fill, float warn_above) {
 }
 
 void Bar::set(float fraction, bool valid) {
+    valid = usable(fraction, valid);
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
-    // A pixel of bar is worth repainting for; a thousandth is not.
+    // A pixel of bar is worth repainting for; a thousandth is not. A bar
+    // showing "no reading" does not follow the dead value underneath it.
     const float q = std::round(fraction * 100.0f) / 100.0f;
-    const bool changed = assign_t(valid_, valid) | assign(fraction_, q);
+    const bool changed = assign_t(valid_, valid) | (valid && assign(fraction_, q));
     if (changed) touch();
 }
 
@@ -238,8 +256,8 @@ void ShiftStrip::render(Canvas& c) {
 // --- DeltaBar -----------------------------------------------------------
 
 void DeltaBar::set(int32_t delta_ms, bool valid) {
-    const bool a = assign_t(delta_ms_, delta_ms);
     const bool b = assign_t(valid_, valid);
+    const bool a = valid && assign_t(delta_ms_, delta_ms);
     if (a || b) touch();
 }
 
@@ -285,10 +303,14 @@ void DeltaBar::render(Canvas& c) {
 // --- LeanIndicator ------------------------------------------------------
 
 void LeanIndicator::set(float lean_deg, bool valid) {
-    const float q = std::round(lean_deg * 2.0f) / 2.0f;
-    const bool a = assign(lean_deg_, q);
+    valid = usable(lean_deg, valid);
+    const bool was_valid = valid_;
     const bool b = assign_t(valid_, valid);
+    bool a = false;
     if (valid) {
+        a = assign(lean_deg_, held_lean(lean_deg_, was_valid, lean_deg));
+        // Peaks are records, so they take the half-degree step, not the hold.
+        const float q = std::round(lean_deg * 2.0f) / 2.0f;
         if (q < peak_left_)  { peak_left_ = q;  touch(); }
         if (q > peak_right_) { peak_right_ = q; touch(); }
     }
@@ -396,7 +418,7 @@ void Table::set_row(size_t i, const char* left, const char* right) {
     const bool a = left_[i].set(left);
     const bool b = right_[i].set(right);
     if (i + 1 > rows_) rows_ = i + 1;
-    if (a || b) touch();
+    if (a || b) mark_row(i);
 }
 
 void Table::set_row_count(size_t n) {
@@ -405,31 +427,90 @@ void Table::set_row_count(size_t n) {
 }
 
 void Table::clear_rows() {
+    // Only if there is something to clear: the lap history calls this every
+    // frame while there are no laps, and an unconditional touch() sent the
+    // whole 452x256 table, 23 ms of wire, sixty times a second.
+    bool any = rows_ != 0;
+    for (size_t i = 0; i < kRows && !any; ++i) any = !left_[i].empty() || !right_[i].empty();
+    if (!any) return;
     for (size_t i = 0; i < kRows; ++i) { left_[i].set(""); right_[i].set(""); }
     rows_ = 0;
     touch();
 }
 
-void Table::set_focus(int focus) { assign_t(focus_, focus); }
+void Table::set_focus(int focus) {
+    if (focus == focus_) return;
+    // A move that scrolls the list moves every row; one that does not
+    // changes only the two rows the highlight leaves and lands on.
+    if (first_visible(focus) != first_visible(focus_)) {
+        focus_ = focus;
+        touch();
+        return;
+    }
+    if (focus_ >= 0) mark_row(static_cast<size_t>(focus_));
+    focus_ = focus;
+    if (focus_ >= 0) mark_row(static_cast<size_t>(focus_));
+}
+
+void Table::mark_row(size_t r) {
+    if (r < kRows) row_mask_ = static_cast<uint16_t>(row_mask_ | (1u << r));
+    touch_part();
+}
+
+size_t Table::first_visible(int focus) const {
+    // Scroll so the focused row stays on screen. Without this the config
+    // list simply stops responding once the cursor walks past the bottom.
+    if (focus >= 0 && static_cast<size_t>(focus) >= visible_) {
+        return static_cast<size_t>(focus) - visible_ + 1;
+    }
+    return 0;
+}
+
+int16_t Table::line_px() const {
+    return static_cast<int16_t>(font_5x7().height * scale_ + 6);
+}
+
+int Table::damage(Rect* out, int max) const {
+    if (whole_) { out[0] = bounds; return 1; }
+    const size_t first = first_visible(focus_);
+    const int16_t line = line_px();
+    // A row owns the band from 2 px above its text to the next row's, which
+    // is where render() puts the focus highlight. Adjacent changed rows go
+    // as one rectangle: a transfer's command overhead is worth ~25 px.
+    int n = 0;
+    size_t i = 0;
+    while (i < visible_) {
+        if (first + i >= kRows || !(row_mask_ & (1u << (first + i)))) { ++i; continue; }
+        size_t j = i;
+        while (j + 1 < visible_ && first + j + 1 < kRows &&
+               (row_mask_ & (1u << (first + j + 1)))) {
+            ++j;
+        }
+        if (n == max) { out[0] = bounds; return 1; }
+        const Rect band{bounds.x, static_cast<int16_t>(bounds.y + i * line - 2), bounds.w,
+                        static_cast<int16_t>((j - i + 1) * line)};
+        const Rect r = band.clipped_to(bounds);
+        if (!r.empty()) out[n++] = r;
+        i = j + 1;
+    }
+    return n;
+}
 
 void Table::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
-    const int16_t line = static_cast<int16_t>(c.text_height(scale_) + 6);
-
-    // Scroll so the focused row stays on screen. Without this the config
-    // list simply stops responding once the cursor walks past the bottom.
-    size_t first = 0;
-    if (focus_ >= 0 && static_cast<size_t>(focus_) >= visible_) {
-        first = static_cast<size_t>(focus_) - visible_ + 1;
-    }
+    const int16_t line = line_px();
+    const size_t first = first_visible(focus_);
 
     for (size_t i = 0; i < visible_ && first + i < rows_; ++i) {
         const size_t r = first + i;
         const int16_t y = static_cast<int16_t>(bounds.y + i * line);
         const bool focused = static_cast<int>(r) == focus_;
         if (focused) {
+            // Inside the bounds: on the first row the band starts above
+            // them, and a partial repaint never clears what is out there.
             c.fill_rect(Rect{bounds.x, static_cast<int16_t>(y - 2), bounds.w,
-                             static_cast<int16_t>(line)}, color::kPanel);
+                             static_cast<int16_t>(line)}.clipped_to(bounds),
+                        color::kPanel);
         }
         c.draw_text(bounds.x, y, left_[r].s,
                     focused ? color::kWhite : color::kText, scale_, Align::Left);
@@ -442,12 +523,17 @@ void Table::render(Canvas& c) {
 
 void MapView::set_source(const IPointSource* src) { src_ = src; touch(); }
 
-void MapView::set_position(float x_ft, float y_ft, float heading_deg, bool valid) {
-    const bool a = assign(x_ft_, x_ft);
-    const bool b = assign(y_ft_, y_ft);
-    const bool d = assign(heading_deg_, heading_deg);
-    const bool e = assign_t(valid_, valid);
-    if (a || b || d || e) touch();
+void MapView::set_live(bool valid) {
+    assign_t(valid_, valid);
+    // The trace is redrawn as it grows, every 10 points (1 s at 10 Hz), or
+    // at once when it is cleared for a new lap. Nothing else moves it: the
+    // GPS course used to dirty it on every fix, 79k px (16 ms of wire) for
+    // a heading the map never drew.
+    const size_t t = src_ ? src_->total() : 0;
+    if (t < drawn_total_ || t >= drawn_total_ + kRedrawPoints) {
+        drawn_total_ = t;
+        touch();
+    }
 }
 
 void MapView::render(Canvas& c) {
@@ -497,9 +583,10 @@ void MapView::render(Canvas& c) {
         have_prev = true;
     }
 
-    if (valid_) {
-        const int16_t bx = static_cast<int16_t>(in.cx() + (x_ft_ - (min_x + max_x) / 2) * s);
-        const int16_t by = static_cast<int16_t>(in.cy() - (y_ft_ - (min_y + max_y) / 2) * s);
+    float hx, hy;
+    if (valid_ && src_->point(n - 1, hx, hy)) {
+        const int16_t bx = static_cast<int16_t>(in.cx() + (hx - (min_x + max_x) / 2) * s);
+        const int16_t by = static_cast<int16_t>(in.cy() - (hy - (min_y + max_y) / 2) * s);
         c.fill_circle(bx, by, 3, color::kWarn);
     }
 }
@@ -541,8 +628,36 @@ void TachBar::set(float fraction) {
     // other one is still the same rows of unlit track it was before.
     const bool was = covers(marker_y_);
     const bool now = covers(y);
+    const int16_t old = marker_y_;
     marker_y_ = y;
-    if (was || now) touch();
+    if (!was && !now) return;
+
+    // Only the rows between the old marker and the new one, within this
+    // instance's strip, have changed.
+    int16_t top = y;
+    int16_t bottom = static_cast<int16_t>(y + kMarkerH);
+    if (was) {
+        if (old < top) top = old;
+        if (old + kMarkerH > bottom) bottom = static_cast<int16_t>(old + kMarkerH);
+    }
+    if (top < y_top_) top = y_top_;
+    if (bottom > y_bottom_) bottom = y_bottom_;
+    if (moved_) {
+        if (moved_top_ < top) top = moved_top_;
+        if (moved_bottom_ > bottom) bottom = moved_bottom_;
+    }
+    moved_ = true;
+    moved_top_ = top;
+    moved_bottom_ = bottom;
+    touch_part();
+}
+
+int TachBar::damage(Rect* out, int max) const {
+    (void)max;
+    if (whole_ || !moved_) { out[0] = bounds; return 1; }
+    out[0] = Rect{bounds.x, moved_top_, bounds.w,
+                  static_cast<int16_t>(moved_bottom_ - moved_top_)}.clipped_to(bounds);
+    return out[0].empty() ? 0 : 1;
 }
 
 void TachBar::set_scale(uint16_t base_rpm) {
@@ -581,10 +696,12 @@ void TachBar::render(Canvas& c) {
 // --- LeanGauge ----------------------------------------------------------
 
 void LeanGauge::set(float lean_deg, bool valid) {
-    // Half a degree is finer than the arc can draw at this radius.
-    const float q = std::round(lean_deg * 2.0f) / 2.0f;
-    const bool a = assign(lean_deg_, q);
+    // Half a degree is finer than the arc can draw at this radius, and the
+    // hold keeps noise from walking it back and forth.
+    valid = usable(lean_deg, valid);
+    const bool was_valid = valid_;
     const bool b = assign_t(valid_, valid);
+    const bool a = valid && assign(lean_deg_, held_lean(lean_deg_, was_valid, lean_deg));
     if (a || b) touch();
 }
 
@@ -639,11 +756,13 @@ void GBall::set(float g_lat, float g_lon, bool valid) {
     // moving, and this is the largest widget on the screen — at 3 bytes a
     // pixel that is 60 kB down the SPI bus for a dot that has not visibly
     // gone anywhere.
-    const float qx = std::round(g_lat * 50.0f) / 50.0f;
-    const float qy = std::round(g_lon * 50.0f) / 50.0f;
-    const bool a = assign(g_lat_, qx);
-    const bool b = assign(g_lon_, qy);
+    valid = valid && std::isfinite(g_lat) && std::isfinite(g_lon);
     const bool d = assign_t(valid_, valid);
+    bool a = false, b = false;
+    if (valid) {
+        a = assign(g_lat_, std::round(g_lat * 50.0f) / 50.0f);
+        b = assign(g_lon_, std::round(g_lon * 50.0f) / 50.0f);
+    }
     if (a || b || d) touch();
 }
 
@@ -1005,6 +1124,7 @@ namespace ui {
 void NavArrow::set(float rel_deg, bool heading_up, bool valid) {
     // Two-degree steps: a parked GPS wanders, and an arrow that redraws on
     // every fix for a change nobody could see costs a blit each time.
+    valid = usable(rel_deg, valid);     // lround(NaN) is undefined
     const int16_t q = valid ? static_cast<int16_t>(std::lround(rel_deg / 2.0f) * 2) : 0;
     assign_t(rel_deg_, q);
     assign_t(heading_up_, heading_up);

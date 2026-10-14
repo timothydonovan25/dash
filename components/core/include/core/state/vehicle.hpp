@@ -73,6 +73,15 @@ struct Gnss {
     float    course_deg = 0.0f;
     float    speed_mph  = 0.0f;   // Doppler, not differenced positions
     uint32_t utc_ms     = 0;
+    // Day of the year, 1..366, from the RMC date; 0 until a sentence has
+    // carried one. utc_ms is time of day only, so this is what lets
+    // core/sun know the season.
+    uint16_t day_of_year = 0;
+    // The system clock (ms since boot, the clock every task's `now` comes
+    // from) when this fix's first sentence finished arriving. Moves once
+    // per fix, not per sentence, so it is how `logic` tells a new fix from
+    // the same one read again, and it is the fix's time for the lap timer.
+    uint32_t rx_ms = 0;
 };
 
 struct Trip {
@@ -104,10 +113,11 @@ struct Lap {
 Lap to_published(const lap::State& s, int32_t delta_ms = 0,
                  bool delta_valid = false);
 
+// The P4 board senses VIN only (R17/R18 on GPIO20). There is no sense on
+// the 5 V or 3V3 rails, so there are no fields for them: DIAG showed two
+// rows that could never hold a number.
 struct Elec {
     float vbat = 0.0f;    // VIN through the sense divider; 0 = no reading
-    float v5   = 0.0f;
-    float v3v3 = 0.0f;
 };
 
 // Written by the `ble` task, from the phone's §11.1 Feed lines through

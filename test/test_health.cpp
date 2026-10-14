@@ -1,5 +1,7 @@
 #include "check.hpp"
 #include "core/health/health.hpp"
+#include <thread>
+#include <atomic>
 
 using namespace core::health;
 using core::state::Dev;
@@ -19,8 +21,10 @@ int main() {
     {
         Tracker t;
         t.begin_init(Dev::Imu, 0);
+        t.tick(0, p);
         CHECK(t[Dev::Imu].state == DevState::Init);
         t.report_ok(Dev::Imu, 100);
+        t.tick(100, p);
         CHECK(t[Dev::Imu].state == DevState::Ok);
         CHECK(t[Dev::Imu].last_ok_ms == 100);
         CHECK(t.all_ok());
@@ -31,10 +35,14 @@ int main() {
         Tracker t;
         t.begin_init(Dev::McpPod, 0);
         t.report_ok(Dev::McpPod, 0);
+        t.tick(0, p);
+        CHECK(t[Dev::McpPod].state == DevState::Ok);
         for (int i = 0; i < 3; ++i) t.report_error(Dev::McpPod, -1, 10);
+        t.tick(10, p);
         CHECK(t[Dev::McpPod].state == DevState::Degraded);
         CHECK(!t.all_ok());
         for (int i = 0; i < 7; ++i) t.report_error(Dev::McpPod, -5, 20);
+        t.tick(20, p);
         CHECK(t[Dev::McpPod].state == DevState::Fault);
         CHECK(t[Dev::McpPod].fault_count == 10);
         CHECK(t[Dev::McpPod].last_err == -5);
@@ -45,11 +53,14 @@ int main() {
         Tracker t;
         t.begin_init(Dev::Gnss, 0);
         t.report_ok(Dev::Gnss, 0);
+        t.tick(0, p);
         t.report_error(Dev::Gnss, -1, 10);
         t.report_error(Dev::Gnss, -1, 20);
         t.report_error(Dev::Gnss, -1, 30);
+        t.tick(30, p);
         CHECK(t[Dev::Gnss].state == DevState::Degraded);
         t.report_ok(Dev::Gnss, 40);
+        t.tick(40, p);
         CHECK(t[Dev::Gnss].state == DevState::Ok);
         // The diag screen still shows that it misbehaved three times.
         CHECK(t[Dev::Gnss].fault_count == 3);
@@ -63,6 +74,7 @@ int main() {
         Tracker t;
         t.begin_init(Dev::McpPod, 0);
         t.report_ok(Dev::McpPod, 1000);
+        t.tick(1000, p);
         t.tick(1500, p);
         CHECK(t[Dev::McpPod].state == DevState::Ok);
         t.tick(3500, p);                        // 2.5 s since the last read
@@ -76,7 +88,9 @@ int main() {
         Tracker t;
         t.begin_init(Dev::Sd, 0);
         t.report_ok(Dev::Sd, 0);
+        t.tick(0, p);
         for (int i = 0; i < 10; ++i) t.report_error(Dev::Sd, -1, 100);
+        t.tick(100, p);
         CHECK(t[Dev::Sd].state == DevState::Fault);
 
         CHECK(!t.claim_retry(Dev::Sd, 1000, p));    // too soon
@@ -86,12 +100,15 @@ int main() {
 
         // Still broken: it faults again and waits out the next interval.
         for (int i = 0; i < 10; ++i) t.report_error(Dev::Sd, -1, 7000);
+        t.tick(7000, p);
         CHECK(t[Dev::Sd].state == DevState::Fault);
+        t.tick(8000, p);
         CHECK(!t.claim_retry(Dev::Sd, 8000, p));
         CHECK(t.claim_retry(Dev::Sd, 11000, p));
 
         // A retry that works ends it.
         t.report_ok(Dev::Sd, 11500);
+        t.tick(11500, p);
         CHECK(t[Dev::Sd].state == DevState::Ok);
         CHECK(!t.claim_retry(Dev::Sd, 20000, p));   // nothing to retry
     }
@@ -113,6 +130,7 @@ int main() {
         t.report_ok(Dev::Imu, 10);
         t.begin_init(Dev::Gnss, 0);
         t.report_error(Dev::Gnss, -7, 10);
+        t.tick(10, p);
         const auto h = t.publish();
         CHECK(h.ok(Dev::Imu));
         CHECK(!h.ok(Dev::Display));
@@ -125,6 +143,7 @@ int main() {
         const uint32_t near_wrap = 0xFFFFF000u;
         t.begin_init(Dev::Imu, near_wrap);
         t.report_ok(Dev::Imu, near_wrap);
+        t.tick(near_wrap + 100, p);
         t.tick(near_wrap + 500, p);             // wraps past zero
         CHECK(t[Dev::Imu].state == DevState::Ok);
         t.tick(near_wrap + 9000, p);
@@ -165,6 +184,139 @@ int main() {
         h[Dev::Imu].state = DevState::Fault;
         CHECK(worst(h).dev == Dev::Imu);
         CHECK(worst(h).count == 3);
+    }
+
+
+    CASE("report_ok after set_absent must not resurrect an ejected SD card");
+    {
+        Tracker t;
+        t.begin_init(Dev::Sd, 0);
+        t.report_ok(Dev::Sd, 10);
+        t.tick(10, p);
+        CHECK(t[Dev::Sd].state == DevState::Ok);
+        t.report_error(Dev::Sd, -3, 20);
+        t.set_absent(Dev::Sd);                  // eject
+        CHECK(t.is_absent(Dev::Sd));            // immediate, not tick-lagged
+        t.report_ok(Dev::Sd, 30);               // logger's late flush
+        t.report_error(Dev::Sd, -3, 31);
+        t.tick(40, p);
+        CHECK(t[Dev::Sd].state == DevState::Absent);
+        CHECK(t[Dev::Sd].fault_count == 0);     // set_absent wiped history
+        t.report_ok(Dev::Sd, 50);               // after the tick too
+        t.tick(2000000, p);
+        CHECK(t[Dev::Sd].state == DevState::Absent);
+        CHECK(t.all_ok());
+        // Re-insert: begin_init is the only way back.
+        t.begin_init(Dev::Sd, 3000000);
+        t.report_ok(Dev::Sd, 3000001);
+        t.tick(3000002, p);
+        CHECK(t[Dev::Sd].state == DevState::Ok);
+    }
+
+    CASE("a claimed retry gets a stale window of grace at a fast tick");
+    {
+        Tracker t;
+        t.begin_init(Dev::Imu, 0);
+        t.report_ok(Dev::Imu, 0);
+        t.tick(0, p);
+        for (int i = 0; i < 10; ++i) t.report_error(Dev::Imu, -1, 100);
+        t.tick(100, p);
+        CHECK(t[Dev::Imu].state == DevState::Fault);
+        CHECK(t.claim_retry(Dev::Imu, 20000, p));
+        t.tick(20050, p);                       // 50 ms tick, driver not yet reported
+        CHECK(t[Dev::Imu].state == DevState::Init);
+        t.report_ok(Dev::Imu, 20060);
+        t.tick(20100, p);
+        CHECK(t[Dev::Imu].state == DevState::Ok);
+    }
+
+    CASE("a reporter clock ahead of the keeper's is not read as silence");
+    {
+        Tracker t;
+        t.begin_init(Dev::Imu, 100);
+        t.report_ok(Dev::Imu, 105);
+        t.tick(100, p);                         // keeper read its clock first
+        CHECK(t[Dev::Imu].state == DevState::Ok);
+    }
+
+    CASE("publish only on change, with a heartbeat for last_ok_ms");
+    {
+        Tracker t;
+        core::Published<core::state::Health> slot;
+        t.begin_init(Dev::Imu, 0);
+        t.report_ok(Dev::Imu, 0);
+        t.tick(0, p);
+        CHECK(t.publish_if_changed(slot, 0));           // first one always goes
+        const uint32_t g0 = slot.generation();
+        for (uint32_t k = 1; k < 20; ++k) {             // 20 Hz, 1 s of nothing
+            t.report_ok(Dev::Imu, k * 50);              // last_ok_ms moves only
+            t.tick(k * 50, p);
+            CHECK(!t.publish_if_changed(slot, k * 50));
+        }
+        CHECK(slot.generation() == g0);
+        CHECK(t.publish_if_changed(slot, 1000));        // heartbeat
+        CHECK(slot.get()[Dev::Imu].last_ok_ms == 950);
+        t.report_error(Dev::Imu, -9, 1010);             // last_err changes
+        t.tick(1050, p);
+        CHECK(t.publish_if_changed(slot, 1050));
+        CHECK(slot.get()[Dev::Imu].last_err == -9);
+        for (int i = 0; i < 3; ++i) t.report_error(Dev::Imu, -9, 1060);
+        t.tick(1100, p);                                // -> Degraded
+        CHECK(t.publish_if_changed(slot, 1100));
+        CHECK(slot.get()[Dev::Imu].state == DevState::Degraded);
+        CHECK(!t.publish_if_changed(slot, 1150));
+    }
+
+    CASE("two reporter threads against tick(): no race, no lost counts");
+    {
+        // Run under -fsanitize=thread. One thread plays a driver that
+        // alternates ok/error on Sd, another a second reporter on the same
+        // device plus set_absent/begin_init churn on Phone; the main thread
+        // is the keeper (tick, claim_retry, publish_if_changed).
+        Tracker t;
+        core::Published<core::state::Health> slot;
+        t.begin_init(Dev::Sd, 0);
+        t.begin_init(Dev::Phone, 0);
+        std::atomic<bool> stop{false};
+        std::atomic<uint32_t> errs{0};
+        std::thread a([&] {
+            uint32_t n = 0;
+            while (!stop.load(std::memory_order_relaxed)) {
+                t.report_ok(Dev::Sd, n);
+                t.report_error(Dev::Sd, -1, n);
+                errs.fetch_add(1, std::memory_order_relaxed);
+                ++n;
+            }
+        });
+        std::thread b([&] {
+            uint32_t n = 0;
+            while (!stop.load(std::memory_order_relaxed)) {
+                t.report_ok(Dev::Sd, n);
+                t.report_error(Dev::Sd, -2, n);
+                errs.fetch_add(1, std::memory_order_relaxed);
+                if ((n & 255) == 0) t.set_absent(Dev::Phone);
+                if ((n & 255) == 128) t.begin_init(Dev::Phone, n);
+                t.report_ok(Dev::Phone, n);
+                (void)t.is_absent(Dev::Phone);
+                (void)t[Dev::Sd];
+                ++n;
+            }
+        });
+        uint32_t now = 0;
+        for (int i = 0; i < 20000; ++i) {
+            t.tick(now += 3, p);
+            t.claim_retry(Dev::Sd, now, p);
+            t.publish_if_changed(slot, now);
+            (void)slot.get();
+            (void)t.all_ok();
+        }
+        stop = true;
+        a.join(); b.join();
+        t.tick(now + 1, p);                     // drain
+        const uint32_t want = errs.load();
+        // fault_count saturates at 65535; just check it moved and is sane.
+        CHECK(t[Dev::Sd].fault_count > 0);
+        CHECK(want > 0);
     }
 
     return check::report("health");

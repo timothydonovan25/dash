@@ -102,6 +102,25 @@ double degrees_from_ddmm(const char* s, char hemi) {
     return out;
 }
 
+// "ddmmyy" to day of the year, 0 when the field is empty or nonsense. Two-digit
+// years are 2000-2099, which outlasts the hardware.
+static uint16_t day_of_year_from_ddmmyy(const char* f) {
+    for (int i = 0; i < 6; ++i) {
+        if (f[i] < '0' || f[i] > '9') return 0;
+    }
+    if (f[6] != '\0') return 0;
+    auto two = [&](int i) { return (f[i] - '0') * 10 + (f[i + 1] - '0'); };
+    const int day = two(0), month = two(2), year = 2000 + two(4);
+    if (month < 1 || month > 12 || day < 1) return 0;
+    const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    static const uint8_t kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int doy = 0;
+    for (int m = 1; m < month; ++m) doy += kDays[m - 1] + (m == 2 && leap ? 1 : 0);
+    const int dim = kDays[month - 1] + (month == 2 && leap ? 1 : 0);
+    if (day > dim) return 0;
+    return static_cast<uint16_t>(doy + day);
+}
+
 Result Parser::feed(char ch, state::Gnss& out) {
     if (ch == '$') {
         // A '$' mid-sentence means the previous one was cut short. Start
@@ -186,6 +205,11 @@ Result Parser::parse_rmc(state::Gnss& out) {
     bool ok = false;
     const uint32_t t = read_time_ms(field_[1], &ok);
     if (ok) out.utc_ms = t;
+
+    // ddmmyy. Kept even for a void fix, like the time: the clock is right
+    // before the position is.
+    const uint16_t doy = day_of_year_from_ddmmyy(field_[9]);
+    if (doy != 0) out.day_of_year = doy;
 
     if (!valid) {
         // A void fix still carries the time, which is worth keeping — but

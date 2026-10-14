@@ -19,7 +19,9 @@ static_assert(bsp::kLedBacklight0 + bsp::kLedBacklightCount <= 16 &&
 namespace {
 
 constexpr i2c_port_t kPort = I2C_NUM_1;
-constexpr TickType_t kTimeout = pdMS_TO_TICKS(10);
+// A transfer here is ~0.2 ms at 1 MHz, and `ctrl` makes it inside a 2 ms
+// tick: a wedged bus must cost a tick, not five of them.
+constexpr TickType_t kTimeout = pdMS_TO_TICKS(2);
 
 // Register map, datasheet Rev. 2.3 Table 7.
 constexpr uint8_t kMode1   = 0x00;

@@ -9,6 +9,7 @@
 #include "core/log/log.hpp"
 #include "drivers/sdcard.hpp"
 
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdio>
@@ -24,13 +25,27 @@ constexpr size_t kBatch = 64;
 void logger_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
-    char     block[kBlockBytes];
+    // Static and in PSRAM, not on the stack: the block alone is bigger than
+    // this task's 6 kB stack, and the batch below is 6.6 kB more. One logger
+    // task, so these are its own; nothing here is time-critical enough to
+    // care about PSRAM's latency.
+    EXT_RAM_BSS_ATTR static char block[kBlockBytes];
+    EXT_RAM_BSS_ATTR static core::log::Record batch[kBatch];
     size_t   used = 0;
     char     path[32] = {};
     bool     header_written = false;
     uint32_t written_records = 0;
 
     for (;;) {
+        // The supply has been cut and the board is on its capacitors. A
+        // write started now would probably be the one that is interrupted,
+        // and a half-written FAT cluster costs more than a few lost rows.
+        // Nothing is popped, so the ring simply fills; if power returns the
+        // drain carries on where it was.
+        if (d.power_fail.load(std::memory_order_relaxed)) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
         auto* card = static_cast<drivers::SdCard*>(d.card);
         if (!d.blackbox || !card || !card->present()) {
             // No card, or it has been pulled. Keep draining the ring so the
@@ -69,7 +84,6 @@ void logger_task(void* arg) {
             if (hal::ok(card->append(path, head, n))) header_written = true;
         }
 
-        core::log::Record batch[kBatch];
         const size_t n = d.blackbox->pop_batch(batch, kBatch);
 
         for (size_t i = 0; i < n; ++i) {

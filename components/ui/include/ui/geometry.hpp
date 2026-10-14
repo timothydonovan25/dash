@@ -57,6 +57,19 @@ struct Rect {
     constexpr bool contains(int16_t px, int16_t py) const {
         return px >= x && py >= y && px < right() && py < bottom();
     }
+    constexpr bool intersects(const Rect& o) const {
+        return !empty() && !o.empty() && x < o.right() && o.x < right() &&
+               y < o.bottom() && o.y < bottom();
+    }
+    // The overlap, or an empty rectangle.
+    constexpr Rect clipped_to(const Rect& o) const {
+        const int16_t l = x > o.x ? x : o.x;
+        const int16_t t = y > o.y ? y : o.y;
+        const int16_t r = right() < o.right() ? right() : o.right();
+        const int16_t b = bottom() < o.bottom() ? bottom() : o.bottom();
+        if (r <= l || b <= t) return Rect{};
+        return Rect{l, t, static_cast<int16_t>(r - l), static_cast<int16_t>(b - t)};
+    }
 };
 
 enum class Align : uint8_t { Left = 0, Center, Right };

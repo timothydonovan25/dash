@@ -11,8 +11,10 @@ class VinSense final : public hal::IRailSense {
 public:
     hal::Status init() override;
     hal::Status read_vin_pin_mv(uint32_t& mv) override;
+    hal::Status read_vin_pin_mv_fast(uint32_t& mv) override;
 
 private:
+    hal::Status read_avg(int samples, uint32_t& mv);
     void* unit_ = nullptr;    // adc_oneshot_unit_handle_t
     void* cali_ = nullptr;    // adc_cali_handle_t, null if uncalibrated
     int   channel_ = -1;

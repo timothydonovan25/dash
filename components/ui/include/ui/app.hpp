@@ -5,6 +5,7 @@
 // means, and the render task calls `update()` then `render()` once a frame.
 #pragma once
 #include "ui/screens.hpp"
+#include "core/alert/alert.hpp"
 #include "core/nav/nav.hpp"
 
 namespace ui {
@@ -30,14 +31,31 @@ public:
     // True while a whole-screen repaint is outstanding: the first frame, a
     // screen change, or an alert being dismissed. The render task asks, and
     // clears it once it has actually pushed a full frame.
-    // The splash asks for one every frame: it is a whole-screen animation
-    // with no widgets, and it is over in a second and a half.
     bool needs_full_repaint() const { return needs_full_; }
+
+    // A partial update, for when no full repaint is due. One rectangle that
+    // has to go to the panel, and what draws it (null: the splash).
+    struct Damage {
+        Widget* w = nullptr;
+        Rect    r;
+    };
+    static constexpr size_t kMaxDamage = 64;
+
+    // This frame's rectangles, in order. Each is drawn with draw_damage()
+    // into a canvas windowed onto it, which puts the alert and the dev tag
+    // back on top wherever it overlaps them, so an overlay is resent only
+    // when it changed itself. Clears nothing: call clear_damage() once all
+    // of them are on the panel, or they come round again next frame.
+    // The bike's render task, the simulator and test_ui all use this, so
+    // what is costed, what is sent and what is checked are one thing.
+    size_t damage(Damage* out, size_t max);
+    void draw_damage(Canvas& c, const Damage& d);
+    void clear_damage();
 
     // The name card at key-on, before the sweep. Whole milliseconds.
     static constexpr uint32_t kSplashMs = 1500;
     bool splashing() const { return splash_on_; }
-    void clear_full_repaint() { needs_full_ = false; }
+    void clear_full_repaint() { needs_full_ = false; splash_bar_dirty_ = false; }
 
     Screen& current();
     const core::nav::State& nav_state() const { return nav_; }
@@ -86,6 +104,10 @@ private:
     GearCalScreen    gearcal_;
 
     AlertOverlay     alert_;
+    // Decides what goes in alert_; see update_alert().
+    core::alert::Alerter alerter_;
+    core::alert::Kind    alert_kind_ = core::alert::Kind::None;
+    void             update_alert(const core::state::Frame& f);
 
     // A dev image (§11.7) wears this on every screen.
     DevTag           dev_tag_;
@@ -102,6 +124,7 @@ private:
     bool             splash_on_ = false;
     uint32_t         splash_start_ms_ = 0;
     uint16_t         splash_permille_ = 0;
+    bool             splash_bar_dirty_ = false;
     char             splash_ver_[32] = {};
     void             render_splash(Canvas& c);
 

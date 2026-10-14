@@ -59,18 +59,22 @@ hal::Status VinSense::init() {
     return hal::Status::Ok;
 }
 
-hal::Status VinSense::read_vin_pin_mv(uint32_t& mv) {
+hal::Status VinSense::read_vin_pin_mv(uint32_t& mv) { return read_avg(kSamples, mv); }
+
+hal::Status VinSense::read_vin_pin_mv_fast(uint32_t& mv) { return read_avg(1, mv); }
+
+hal::Status VinSense::read_avg(int samples, uint32_t& mv) {
     if (!unit_) return hal::Status::NotPresent;
     auto* unit = static_cast<adc_oneshot_unit_handle_t>(unit_);
     const auto chan = static_cast<adc_channel_t>(channel_);
 
     int sum = 0;
-    for (int i = 0; i < kSamples; ++i) {
+    for (int i = 0; i < samples; ++i) {
         int raw = 0;
         if (adc_oneshot_read(unit, chan, &raw) != ESP_OK) return hal::Status::IoError;
         sum += raw;
     }
-    const int raw = sum / kSamples;
+    const int raw = sum / samples;
 
     int out_mv = 0;
     if (cali_ && adc_cali_raw_to_voltage(static_cast<adc_cali_handle_t>(cali_),

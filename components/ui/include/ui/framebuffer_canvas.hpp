@@ -42,6 +42,9 @@ public:
 
     void set_clip(const Rect& r) override { clip_ = r; clipped_ = true; }
     void clear_clip() override { clipped_ = false; }
+    bool intersects(const Rect& r) const override {
+        return Rect{ox_, oy_, w_, h_}.intersects(r);
+    }
 
     // The band this canvas represents within the full screen. The render
     // task sets it so a screen can draw in whole-screen coordinates while

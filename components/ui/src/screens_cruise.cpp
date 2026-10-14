@@ -169,7 +169,7 @@ void SpeedScreen::update(const Frame& f) {
                           f.motion.rear_mph > 0.0f;
     speed_.set(shown, speed_ok);
 
-    rpm_.set(f.engine.rpm, f.engine.rpm > 0.0f || f.engine.neutral);
+    rpm_.set(u::rpm_for_display(f.engine.rpm), f.engine.rpm > 0.0f || f.engine.neutral);
     shift_.set(f.engine.shift_mask, f.engine.shift_flash);
 
     // Neutral is sensed; the gear is inferred. An unknown gear is a dash
@@ -660,7 +660,7 @@ void TripMapScreen::update(const Frame& f) {
                f.gnss.fix);
     speed_.set_unit(sunit);
 
-    map_.set_position(0.0f, 0.0f, f.gnss.course_deg, f.gnss.fix);
+    map_.set_live(f.gnss.fix);
 }
 
 WidgetList TripMapScreen::widgets() { return WidgetList{list_, 4}; }

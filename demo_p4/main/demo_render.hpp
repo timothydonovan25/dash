@@ -1,13 +1,11 @@
 // The demo's render loop — the same job components/services/src/
-// render_service.cpp does for the real dash, simplified because this board
-// doesn't have the ILI9488's SPI bottleneck (components/services/src/
-// render_service.cpp's comment block explains why the real one bands and
-// diffs: 92ms for a whole frame over 4-wire SPI at 40MHz). The DPI panel's
-// framebuffer is written directly and scanned out by hardware, so there's
-// no wire budget to protect — this always repaints the whole 480x320 canvas
-// every tick, which keeps the code an order of magnitude smaller than the
-// real render task for a build that only ever needs to look good, not run
-// forever on a bike.
+// render_service.cpp does for the real dash. There is no 8-bit bus here:
+// the DPI panel's framebuffer is written directly and scanned out by
+// hardware. But every pixel written is a 1.5x scale and a 90-degree turn
+// into PSRAM on the CPU, ~345k destination pixels for the whole screen, so
+// it sends what changed the same way the bike does (ui::App::damage()) and
+// repaints whole only when the App asks for it. It also stands in for
+// `keeper` on the health table, since this board has no keeper.
 #pragma once
 #include "services/services.hpp"
 

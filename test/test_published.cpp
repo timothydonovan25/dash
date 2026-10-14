@@ -6,6 +6,19 @@ using core::Published;
 
 // A payload big enough that a torn read would be obvious. Every field
 // carries the same counter, so any inconsistency is detectable.
+// A writer "preempted" between filling its buffer and publishing it: the
+// hook runs a read right there, which is what a higher-priority reader on
+// the same core sees. The seqlock this replaced spun forever at this point.
+struct MidPublish {
+    static inline void (*fn)() = nullptr;
+    static void mid() { if (fn) fn(); }
+};
+
+struct Defaults {
+    int   a = 7;
+    float b = 1.5f;
+};
+
 struct Wide {
     uint32_t a[16];
     bool consistent() const {
@@ -29,6 +42,22 @@ int main() {
     for (int i = 0; i < 10; ++i) p.publish(i);
     CHECK(p.generation() == 11);
     CHECK(p.get() == 9);
+
+    CASE("a slot reads its member defaults before the first publish");
+    Published<Defaults> d;
+    CHECK(d.get().a == 7);
+    CHECK(d.get().b == 1.5f);
+
+    CASE("a read inside an unfinished publish returns the last completed value");
+    static Published<int, MidPublish> s;
+    static int seen = -1;
+    s.publish(1);
+    MidPublish::fn = [] { seen = s.get(); };
+    s.publish(2);
+    MidPublish::fn = nullptr;
+    CHECK(seen == 1);
+    CHECK(s.get() == 2);
+    CHECK(s.generation() == 2);
 
     CASE("a reader never observes a torn value under contention");
     Published<Wide> w;

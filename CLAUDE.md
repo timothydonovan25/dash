@@ -164,10 +164,18 @@ Core 1 absorbs what can be late: `render` (60 Hz), `logger`, `storage`,
 Tach edge to shift lamp must stay under 3 ms. If you add anything to
 core 0 above priority 18, you have broken that.
 
+**A flash write freezes core 0** for its whole length — up to ~20 ms when
+NVS erases a page — because IDF suspends the other core's scheduler and
+the P4 has no flash auto-suspend (IDF v6.0). So nothing writes flash while
+the bike moves: `keeper` saves the odometer, hours and settings only below
+0.5 mph, OTA only parked, and `power` saves the totals at key-off.
+
 The panel is the other budget. A whole 480x320 frame is 307 kB in RGB565
 — about 31 ms on the 8-bit bus at the 10 MHz starting write clock, two
 whole periods of the 60 Hz render loop. `render` therefore sends only the widgets that
-changed, and **anything that moves must be a widget**: background chrome
+changed — and only the part that changed, where a widget can say
+(`Widget::damage()`: a table's changed rows, the tach marker's rows), via
+`ui::App::damage()`, which the sim and `test_ui` use too — and **anything that moves must be a widget**: background chrome
 is redrawn on a full repaint and never in between, so live data painted
 there stops moving. `test_ui` checks that a partial update lands the same
 pixels as a full repaint, which is the property that catches it.
@@ -190,19 +198,26 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 31 host test suites, all passing.
+the media half of step 9 is written. 35 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
-- `state/` — the seqlock slot, the slot table, `Frame` + `snapshot()`, the
-  `TrackBuffer` ring for bulk data, the `Command` type
+- `state/` — the `Published<T>` slot, the slot table, `Frame` + `snapshot()`, the
+  `TrackBuffer` ring for bulk data, the `Command` type. `Published<T>` is two
+  buffers, not a seqlock: a seqlock reader that preempted its writer on the
+  same core spun forever (ctrl at 18 reading gnss at 12). A reader never
+  waits on a writer that has stopped half way
 - `nav/` mode and screen machine · `shift/` RPM to lamp pattern
 - `geo/` distance, bearing, finish-line crossing with sub-sample interpolation
 - `lap/` arm, score, best lap, and the speed / min-lap / fix-gap gates that
   turn a geometric crossing into a real lap
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
-- `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy
+- `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy.
+  Any task reports into the one `Tracker` through per-device atomics; only
+  `keeper` (20 Hz) turns reports into states and publishes, on change, so the
+  health slot has one writer. A report for an absent device is ignored: an
+  ejected SD card stays ejected. A device that reports must `begin_init` first
 - `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
@@ -227,6 +242,18 @@ the media half of step 9 is written. 31 host test suites, all passing.
   run is open. Road speed is `Motion::best_mph`, the same number
   `gear::estimate` divides by, so the table stays tied to the wheel it is
   measured on: set the wheel circumference first.
+- `sun/` sun elevation from the GPS date, time and position, and the
+  backlight dim curve behind CONFIG → Display → Dim at night. `Gnss` carries
+  `day_of_year` from the RMC date because `utc_ms` is time of day only
+- `alert/` which single alert the overlay shows (bike down, charging fault,
+  dead wheel sensor, SD, lamps, IMU, GPS lost mid-lap), with onset delays,
+  clear delays and a dismissal that holds until the fault genuinely clears.
+  `ui::App` runs it on every Frame. Low fuel is deliberately not here: the
+  burn model is a guess and there is no fuel-reset action to re-arm it
+- `power/` also holds `FailDetector`: the VIN-cut trigger behind the
+  `power` task (1 kHz, core 1): dark, stop SD writes, save the odometer.
+  Hold-up is only a few ms, so it cannot flush a file. Never run on the board
+  (bringup §8.1)
 - `delta/` lap delta against the session best — a **placeholder**, see below
 - `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.
@@ -259,8 +286,8 @@ is not working: the drivers are written against datasheets and a netlist,
 and the board has not arrived yet. See `components/drivers/README.md` for the
 specific BRINGUP holes.
 
-Twelve tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
-storage, keeper, ota, ble, wifi on core 1.
+Thirteen tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
+storage, keeper, power, ota, ble, wifi on core 1.
 
 **Stable and dev firmware are built, and have never run on the board**
 (architecture §11.7). The two 6 MB app slots hold a stable and a dev image;

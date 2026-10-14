@@ -30,6 +30,8 @@ private:
     void*    io_      = nullptr;    // esp_lcd_panel_io_handle_t
     void*    panel_   = nullptr;    // esp_lcd_panel_handle_t
     uint16_t* fb_      = nullptr;   // native framebuffer, 480(w) x 800(h)
+    // blit()'s source row for each destination row (the 480-row view).
+    uint16_t  src_row_[480] = {};
     bool     backlight_gpio_only_ = true;   // true until LEDC dimming configures
 };
 

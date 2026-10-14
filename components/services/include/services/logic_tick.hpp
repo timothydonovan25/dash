@@ -43,6 +43,11 @@ struct LogicState {
     bool     have_origin = false;
     uint32_t last_trace_ms = 0;
 
+    // The last fix handed to the lap timer (Gnss::rx_ms), and whether it has
+    // already been told the receiver went quiet.
+    uint32_t last_lap_rx_ms = 0;
+    bool     lap_told_stale = false;
+
     // Which ticks get a blackbox row. The rate is a setting, so this is not
     // simply every tick.
     core::log::Decimator log_gate;

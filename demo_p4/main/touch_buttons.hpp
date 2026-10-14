@@ -22,6 +22,10 @@ public:
     // this does not need to.
     hal::Status read_mask(uint8_t& mask_out);
 
+    // The I2C bus init() made (an i2c_master_bus_handle_t), or null if it
+    // failed. The pod on CN3 hangs off the same wires; see p4_pins.hpp.
+    void* bus() const;
+
 private:
     void* io_ = nullptr;      // esp_lcd_panel_io_handle_t
     void* tp_  = nullptr;     // esp_lcd_touch_handle_t

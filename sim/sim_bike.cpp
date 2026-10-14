@@ -205,6 +205,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     g.course_deg = heading_deg_;
     g.speed_mph = c.speed_mph;
     g.utc_ms = c.utc_ms;
+    g.rx_ms = now_ms;            // a new fix every step
     slots.gnss.publish(g);
 
     // What `ble` will publish once it exists, taken meanwhile from whatever
@@ -246,8 +247,6 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
 
     core::state::Elec el;
     el.vbat = c.vbat;
-    el.v5 = 5.02f;
-    el.v3v3 = 3.31f;
     slots.elec.publish(el);
 }
 

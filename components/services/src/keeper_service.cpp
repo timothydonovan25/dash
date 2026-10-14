@@ -1,14 +1,20 @@
-// `keeper` — core 1, priority 3, 1 Hz.
+// `keeper` — core 1, priority 3. Health at 20 Hz, everything else at 1 Hz.
 //
 // The slow, boring, important one: it writes the odometer to NVS, it ticks
 // the health tracker, and it retries whatever is faulted. That last job is
 // what turns a loose GH1.25 connector into a self-healing problem instead of
 // a dead sensor for the rest of the ride (§12).
+//
+// It is the one task that turns health reports into states and publishes
+// them, which is what makes the health table single-writer (rule 2). It
+// does that at 20 Hz so a fault reaches `ctrl` and the screen in 50 ms
+// rather than a second; the table is only republished when it changes.
 #include "services/services.hpp"
 #include "services/settings_store.hpp"
 #include "drivers/pca9955b.hpp"
 #include "drivers/pod.hpp"
 #include "core/power/power.hpp"
+#include "core/sun/sun.hpp"
 #include "bsp/pins.hpp"
 
 #include "esp_heap_caps.h"
@@ -24,6 +30,12 @@ namespace {
 // to be asked to.
 constexpr double kOdoWriteThresholdMi = 0.01;
 
+// The same threshold OTA uses for "not moving" (core::ota::may_write).
+constexpr float kStoppedMph = 0.5f;
+
+constexpr uint32_t kHealthPeriodMs = 50;
+constexpr uint32_t kSlowEvery = 1000 / kHealthPeriodMs;   // passes per second
+
 void keeper_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
@@ -32,8 +44,12 @@ void keeper_task(void* arg) {
     double last_saved_hours = -1.0;
 
     SettingsSaver settings_saver;
+    core::sun::AutoDim auto_dim;
+    uint32_t pass = 0;
+    TickType_t next = xTaskGetTickCount();
 
     for (;;) {
+        vTaskDelayUntil(&next, pdMS_TO_TICKS(kHealthPeriodMs));
         const uint32_t now = d.clock->now_ms();
 
         // Notices the devices that went quiet without ever reporting an
@@ -58,17 +74,29 @@ void keeper_task(void* arg) {
             d.panel->init();
         }
 
+        d.health->publish_if_changed(d.slots->health, now);
+
+        if (++pass < kSlowEvery) continue;
+        pass = 0;
+
         // An LED driver that browned out comes back with every output at
         // zero current and looks alive. Re-write its configuration whether
         // or not it has complained; `ctrl` re-sends the lamp duty and the
         // backlight duty is re-sent below.
         if (auto* leds = static_cast<drivers::Pca9955b*>(d.lamps)) leds->refresh_config();
 
-        d.slots->health.publish(d.health->publish());
-
         // --- life data --------------------------------------------------
+        // Only while stopped. A flash write suspends core 0 for its whole
+        // length -- up to ~20 ms when NVS erases a page, every couple of
+        // minutes at speed -- and `ctrl` cannot run through it: the shift
+        // lights would stall mid-pull. P4 has no flash auto-suspend (IDF
+        // v6.0). Stopped with the engine idling is fine: the lamps are dark
+        // there, and a setting changed in the garage must not wait for the
+        // engine to go off, since `power` saves only the totals at key-off.
+        // Miles covered are saved here the first second the bike stops.
         const core::state::Trip t = d.slots->trip.get();
-        if (d.storage) {
+        const bool stopped = d.slots->motion.get().best_mph < kStoppedMph;
+        if (d.storage && stopped) {
             const double odo = t.odo_mi;
             const double hours = t.eng_hours;
             if (last_saved_odo < 0.0 ||
@@ -119,13 +147,24 @@ void keeper_task(void* arg) {
             }
         }
 
-        // Backlight follows the config setting. Sent every second rather than
-        // on change, which is also what restores it after an LED-driver
-        // brown-out. There is no light sensor, so auto-dim is not an option
-        // yet (§18).
-        if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
+        // Backlight follows the config setting, turned down after dark when
+        // "Dim at night" is on. The sun comes from the GPS clock and
+        // position (core/sun), since the board has no light sensor. Sent
+        // every second rather than on change, which is also what restores it
+        // after an LED-driver brown-out.
+        if (d.panel) {
+            const core::state::Gnss g = d.slots->gnss.get();
+            const uint8_t dim = auto_dim.update(g.fix && g.day_of_year != 0, g.day_of_year,
+                                                g.utc_ms, g.lat, g.lon,
+                                                d.settings->dim_at_night);
+            // Dark while the supply is failing, so a slow `keeper` pass
+            // cannot undo what `power` just did.
+            d.panel->set_backlight(
+                d.power_fail.load(std::memory_order_relaxed)
+                    ? 0
+                    : core::sun::apply_dim(d.settings->brightness_pct, dim));
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 

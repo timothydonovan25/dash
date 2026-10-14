@@ -211,5 +211,32 @@ int main() {
         CHECK(g.sats == 8);
     }
 
+
+    CASE("the RMC date becomes a day of the year");
+    {
+        Parser p;
+        Gnss g;
+        send(p, g, kGoodRmc);                    // 23 March 1994
+        CHECK(g.day_of_year == 31 + 28 + 23);
+        send(p, g, "GPRMC,000000,A,4807.038,N,01131.000,E,0,0,291224,,");   // 2024 is a leap year
+        CHECK(g.day_of_year == 364);
+        send(p, g, "GPRMC,000000,A,4807.038,N,01131.000,E,0,0,010101,,");
+        CHECK(g.day_of_year == 1);
+    }
+
+    CASE("a missing or impossible date leaves the last good one alone");
+    {
+        Parser p;
+        Gnss g;
+        send(p, g, kGoodRmc);
+        const uint16_t before = g.day_of_year;
+        send(p, g, "GPRMC,123520,A,4807.038,N,01131.000,E,022.4,084.4,,,");
+        CHECK(g.day_of_year == before);
+        send(p, g, "GPRMC,123521,A,4807.038,N,01131.000,E,022.4,084.4,310224,,");   // no 31 Feb
+        CHECK(g.day_of_year == before);
+        send(p, g, "GPRMC,123522,A,4807.038,N,01131.000,E,022.4,084.4,231394,,");   // month 13
+        CHECK(g.day_of_year == before);
+    }
+
     return check::report("nmea");
 }

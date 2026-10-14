@@ -36,6 +36,18 @@ inline constexpr int kTouchInt   = 21;
 // I2C bus speed itself is fixed at 100kHz by the vendor macro
 // ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG() in touch_buttons.cpp, not here.
 
+// The handlebar pod's MCP23017 plugs into CN3, the board's 4-pin I2C
+// connector (MX1.25): 1 GND, 2 ESP_3V3, 3 ES_I2C_SCL, 4 ES_I2C_SDA. Those
+// are the codec's I2C lines, which are the touch bus above (GPIO8 SCL,
+// GPIO7 SDA), so the pod shares it with the GT911 (0x14) and the ES8311
+// (0x18); 0x20 clashes with neither. The same lines are also on JP1 pins
+// 23 (SDA) and 25 (SCL). From Guition's schematic, sheet "INPUT", via
+// github.com/ultramcu/guition-jc4880p443c-i-w. 3V3 only: the MCP23017
+// runs on it, and this bus must never see 5 V.
+inline constexpr int     kPodSda  = kTouchSda;
+inline constexpr int     kPodScl  = kTouchScl;
+inline constexpr uint8_t kPodAddr = 0x20;   // A2..A0 low, as on the bike
+
 // The panel's native resolution as manufactured (portrait). The board is
 // physically rotated to landscape for this demo, so the driver swaps these
 // when it talks to the DSI/DPI panel and reports width()/height() in the

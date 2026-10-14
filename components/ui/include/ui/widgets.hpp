@@ -171,14 +171,23 @@ public:
     void clear_rows();
     size_t row_count() const { return rows_; }
     void render(Canvas& c) override;
+    // Only the rows that changed. A DIAG table is 452x264, ~24 ms of wire
+    // whole, and one changing number used to send all of it every frame.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override { Widget::clear_dirty(); row_mask_ = 0; }
 
 private:
+    size_t first_visible(int focus) const;
+    int16_t line_px() const;
+    void mark_row(size_t r);
+
     TextBuf<20> left_[kRows];
     TextBuf<14> right_[kRows];
     size_t      rows_ = 0;
     int         focus_ = -1;
     uint8_t     visible_ = kRows;
     uint8_t     scale_ = 1;
+    uint16_t    row_mask_ = 0;     // rows changed since the last send
 };
 
 // The track and trip maps read their points through this rather than owning
@@ -190,17 +199,23 @@ public:
     virtual ~IPointSource() = default;
     virtual size_t count() const = 0;
     virtual bool   point(size_t i, float& x_ft, float& y_ft) const = 0;
+    // Points ever added, which keeps moving after a full buffer's count()
+    // stops: what the map watches to know the trace has grown.
+    virtual size_t total() const { return count(); }
 };
 
 class MapView : public Widget {
 public:
     void set_source(const IPointSource* src);
-    void set_position(float x_ft, float y_ft, float heading_deg, bool valid);
+    // Called every frame. The marker is drawn on the newest trace point,
+    // which is where the bike is; `valid` is whether to draw it at all.
+    void set_live(bool valid);
     void render(Canvas& c) override;
 
 private:
     const IPointSource* src_ = nullptr;
-    float x_ft_ = 0.0f, y_ft_ = 0.0f, heading_deg_ = 0.0f;
+    static constexpr size_t kRedrawPoints = 10;
+    size_t drawn_total_ = 0;
     bool  valid_ = false;
 };
 
@@ -234,6 +249,10 @@ public:
     void set_scale(uint16_t base_rpm);
 
     void render(Canvas& c) override;
+    // The rows the marker left and arrived on: ~600 px a move instead of the
+    // whole 25x295 stem, which was 1.5 ms of wire nearly every frame.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override { Widget::clear_dirty(); moved_ = false; }
 
     // How wide the bar is at a given row. One function for the track and the
     // marker both, so the two can never disagree about where the edge is,
@@ -266,6 +285,10 @@ private:
     uint8_t  tick_count_ = 0;
     // Off the bar entirely, so the first set() always counts as a move.
     int16_t marker_y_ = -1000;
+    // Rows the marker has swept since the last send.
+    bool    moved_ = false;
+    int16_t moved_top_ = 0;
+    int16_t moved_bottom_ = 0;
 };
 
 // The lean gauge on the speed screen: a half annulus with a marker on it and

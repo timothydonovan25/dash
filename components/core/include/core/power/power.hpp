@@ -47,4 +47,49 @@ Source classify(float vin_v, const Thresholds& t = Thresholds{});
 // raise it.
 uint8_t lamp_master_pct(bool on_bike, uint8_t setting_pct, uint8_t usb_cap_pct);
 
+// Has the bike's supply just been cut?
+//
+// The bulk capacitance on VIN lasts about 9 ms at full load (docs/p4-board-
+// pin-map.md), 17 ms with the backlight and lamps shed. That is enough to
+// stop writing to the card and save the odometer; it is not enough to
+// flush a file. So this is a trigger and nothing more: fed one VIN sample
+// per millisecond, it says "Tripped" once, as early as it can be sure.
+//
+// It only ever fires after the dash has seen a bike supply, so a dash on
+// USB (4.5 V, always) never trips, and a cranking dip that stays above
+// `trip_v` does not either. If it does trip on a dip that then recovers,
+// `Recovered` hands everything back: the cost of a false alarm is a second
+// without a backlight, not a lost ride.
+class FailDetector {
+public:
+    struct Config {
+        float    arm_v   = 10.5f;   // seen this long enough => on the bike
+        float    trip_v  = 9.0f;    // below this, for `trip_n`, is a cut
+        float    ok_v    = 10.5f;   // back above this, for `ok_n`, is a recovery
+        uint16_t arm_n   = 20;      // samples
+        uint16_t trip_n  = 2;
+        uint16_t ok_n    = 50;
+        // Still alive this long after a trip, with the rail low and steady,
+        // means USB is holding the board up. Let go and carry on.
+        uint16_t usb_n   = 1000;
+    };
+    enum class Event : uint8_t { None, Tripped, Recovered };
+
+    FailDetector() = default;
+    explicit FailDetector(const Config& c) : cfg_(c) {}
+
+    // One sample, at a steady rate.
+    Event feed(float vin_v);
+
+    bool tripped() const { return state_ == State::Tripped; }
+    bool armed() const { return state_ == State::Armed; }
+
+private:
+    enum class State : uint8_t { Idle, Armed, Tripped };
+    Config   cfg_;
+    State    state_ = State::Idle;
+    uint16_t run_ = 0;       // consecutive samples of whatever is being waited on
+    uint16_t since_trip_ = 0;
+};
+
 }  // namespace core::power

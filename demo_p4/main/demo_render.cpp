@@ -23,6 +23,7 @@ public:
     explicit TraceSource(Buffer* b) : buf_(b) {}
 
     size_t count() const override { return buf_ ? buf_->size() : 0; }
+    size_t total() const override { return buf_ ? buf_->total() : 0; }
     bool point(size_t i, float& x_ft, float& y_ft) const override {
         core::state::TrackPoint p;
         if (!buf_ || !buf_->read_nth(i, p)) return false;
@@ -76,19 +77,26 @@ void render_task_impl(void* arg) {
     // DIAG's System screen (ui::SystemInfo) was reading this struct's
     // untouched, default-constructed zeros — heap/PSRAM/uptime/render Hz
     // all "0" forever, which reads as a genuine reading rather than as
-    // "nobody's measured this." Same fix as health.publish() above: this
-    // is the one place that already loops continuously. Mirrors exactly
+    // "nobody's measured this." Filled in below, since this is the one
+    // place that already loops continuously. Mirrors exactly
     // what keeper_service.cpp and render_service.cpp do for the real
     // dash; log/GPS/ctrl/pod/IMU counters stay at zero here on purpose —
     // this demo has none of those things to count.
     uint32_t frames = 0;
     uint32_t last_hz_ms = d.clock->now_ms();
 
+    bool last_send_ok = true;
+    uint32_t last_stats_ms = 0;
+    const ui::Rect screen{0, 0, ui::kScreenW, ui::kScreenH};
+
     for (;;) {
         const uint32_t now = d.clock->now_ms();
 
         core::nav::InputEvent ev;
         if (services::wait_input_event(ev, kPollMs)) {
+            // A screen change lays the new screen out against the canvas, so
+            // give it the whole one, not the last damaged rectangle.
+            canvas.set_window(0, 0, ui::kScreenW, ui::kScreenH);
             app.on_input(ev, canvas);
             while (services::take_input_event(ev)) app.on_input(ev, canvas);
         }
@@ -107,32 +115,59 @@ void render_task_impl(void* arg) {
 
         const core::state::Frame frame = core::state::snapshot(*d.slots, now);
         app.update(frame);
-        app.render(canvas, true);
-        app.clear_full_repaint();
-        if (d.system && d.system->first_frame_ms == 0) {
-            d.system->first_frame_ms = now ? now : 1;
-            ESP_LOGI("render", "first frame at %u ms", static_cast<unsigned>(now));
-        }
 
         hal::Status s = hal::Status::Ok;
-        if (d.panel) {
-            s = d.panel->blit(0, 0, ui::kScreenW, ui::kScreenH, buf);
-        }
-        if (hal::ok(s)) {
-            d.health->report_ok(core::state::Dev::Display, now);
+        bool sent = false;
+        if (app.needs_full_repaint()) {
+            canvas.set_window(0, 0, ui::kScreenW, ui::kScreenH);
+            app.render(canvas, true);
+            if (d.panel) s = d.panel->blit(0, 0, ui::kScreenW, ui::kScreenH, buf);
+            sent = true;
+            if (hal::ok(s)) app.clear_full_repaint();
+            if (d.system && d.system->first_frame_ms == 0) {
+                d.system->first_frame_ms = now ? now : 1;
+                ESP_LOGI("render", "first frame at %u ms", static_cast<unsigned>(now));
+            }
         } else {
+            // Only what changed. Each rectangle is drawn into the one buffer
+            // windowed onto just that rectangle, so it comes out packed, the
+            // way blit() takes it.
+            ui::App::Damage dmg[ui::App::kMaxDamage];
+            const size_t n = app.damage(dmg, ui::App::kMaxDamage);
+            for (size_t i = 0; i < n && hal::ok(s); ++i) {
+                const ui::Rect r = dmg[i].r.clipped_to(screen);
+                if (r.empty() || !canvas.set_window(r.x, r.y, r.w, r.h)) continue;
+                app.draw_damage(canvas, dmg[i]);
+                if (d.panel) {
+                    s = d.panel->blit(static_cast<uint16_t>(r.x), static_cast<uint16_t>(r.y),
+                                      static_cast<uint16_t>(r.w), static_cast<uint16_t>(r.h),
+                                      buf);
+                }
+                sent = true;
+            }
+            if (hal::ok(s)) app.clear_damage();
+        }
+
+        // As on the bike: only a transfer says anything about the panel,
+        // and a still screen is vouched for while its last transfer worked.
+        if (sent) last_send_ok = hal::ok(s);
+        if (sent && !last_send_ok) {
             d.health->report_error(core::state::Dev::Display,
                                    static_cast<int32_t>(s), now);
+        } else if (last_send_ok) {
+            d.health->report_ok(core::state::Dev::Display, now);
         }
-        // main.cpp only publishes the tracker's snapshot into the slot once,
-        // at boot — nothing has re-published it since, which left every
-        // report_ok/report_error above (and anything ble_media.cpp reports)
-        // invisible to the Frame every screen actually reads. This is the
-        // one place in demo_p4 that already loops continuously and already
-        // touches health, so it's the natural place to keep it current.
-        d.slots->health.publish(d.health->publish());
 
-        if (d.system) {
+        // Keeper's health job, since this demo has no keeper: turn the
+        // reports (here, ble_service.cpp and the pod) into states, and
+        // publish the table when it changes.
+        d.health->tick(now, core::health::Policy{});
+        d.health->publish_if_changed(d.slots->health, now);
+
+        // Heap figures once a second, as keeper does: each call takes the
+        // heap lock, and DIAG reads them at a glance, not at 50 Hz.
+        if (d.system && now - last_stats_ms >= 1000) {
+            last_stats_ms = now;
             d.system->uptime_s = now / 1000;
             d.system->heap_free_b = static_cast<uint32_t>(
                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
@@ -160,10 +195,8 @@ std::pair<services::Deps*, services::CommandQueue*> g_render_arg;
 
 void start_demo_render(services::Deps& d, services::CommandQueue& q) {
     g_render_arg = {&d, &q};
-    // Larger than the real render task's 8192: that one draws in 40-line
-    // bands, this one draws the whole 480x320 screen in one call every
-    // tick (see demo_render.hpp for why), and a full repaint through every
-    // widget on the busiest screen overflowed 8192 on first boot.
+    // Larger than the real render task's 8192: ui::App (~10.9 kB) lives on
+    // this task's stack here, and overflowed 8192 on first boot.
     xTaskCreatePinnedToCore(render_task_impl, "render", 16384, &g_render_arg,
                             6, nullptr, 0);
 }

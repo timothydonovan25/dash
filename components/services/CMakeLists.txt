@@ -8,6 +8,7 @@ idf_component_register(
          "src/input_service.cpp"
          "src/render_service.cpp"
          "src/keeper_service.cpp"
+         "src/power_service.cpp"
          "src/logger_service.cpp"
          "src/storage_service.cpp"
          "src/ble_service.cpp"

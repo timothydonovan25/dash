@@ -2,6 +2,7 @@ idf_component_register(
     SRCS "main.cpp"
          "p4_panel.cpp"
          "touch_buttons.cpp"
+         "pod_buttons.cpp"
          "demo_render.cpp"
          "demo_bike_task.cpp"
          "ctrl_probe.cpp"
@@ -29,7 +30,7 @@ idf_component_register(
                  "../../components/services/src"
                  "../../components/drivers/include"
     REQUIRES core dash_hal ui p4_restart_fix
-             esp_lcd esp_driver_i2c esp_driver_gpio esp_driver_ledc
+             esp_lcd esp_mm esp_driver_i2c esp_driver_gpio esp_driver_ledc
              esp_timer freertos esp_driver_usb_serial_jtag
              esp_hosted bt esp_partition bootloader_support
              app_update esp_app_format nvs_flash

@@ -4,6 +4,10 @@
 namespace services {
 namespace {
 
+// How long a receiver may go without a new fix before the lap timer is told
+// it has none: ten missed fixes at 10 Hz.
+constexpr int32_t kFixSilentMs = 1000;
+
 // Local feet from a reference fix, for the map traces. Fine over a track;
 // this is a breadcrumb, not a survey.
 void to_local_ft(const core::geo::LatLon& origin, const core::geo::LatLon& p,
@@ -248,13 +252,18 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     if (d.health) {
         const auto report = [&](core::state::Dev dev, core::fusion::Wheel w) {
             const core::state::DevState st = (*d.health)[dev].state;
+            // Absent until first judged. The tracker ignores reports for an
+            // absent device, so the first verdict either way brings it in.
+            if (w != core::fusion::Wheel::Unknown && d.health->is_absent(dev)) {
+                d.health->begin_init(dev, now);
+            }
             if (w == core::fusion::Wheel::Ok) {
                 d.health->report_ok(dev, now);
             } else if (w == core::fusion::Wheel::Dead && st != core::state::DevState::Fault) {
                 // Errors until the tracker calls it Fault, then quiet: a
                 // Fault is not aged, and fault_count should count events,
-                // not ticks.
-                if (st == core::state::DevState::Absent) d.health->begin_init(dev, now);
+                // not ticks. (`st` is the keeper's last verdict, up to one
+                // 50 ms keeper tick behind.)
                 d.health->report_error(dev, 0, now);
             }
         };
@@ -312,13 +321,33 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     uint32_t lap_done_ms = 0;
     uint16_t lap_done_index = 0;
 
+    // Once per new fix, at the time it was taken. This tick runs at 50 Hz
+    // and fixes come at 10: handing the timer the same fix five times made
+    // every segment look 20 ms long, so each line crossing was interpolated
+    // over a fifth of the real interval and landed up to ~80 ms off.
+    //
+    // A receiver that stops talking leaves `fix` set on its last sentence;
+    // a second of silence is told to the timer as no fix, so a lap across
+    // the dropout is marked rather than scored as if nothing happened.
+    const bool new_fix = g.rx_ms != s.last_lap_rx_ms;
+    const bool silent = static_cast<int32_t>(now - g.rx_ms) > kFixSilentMs;
     core::lap::Fix lf;
     lf.pos = core::geo::LatLon{g.lat, g.lon};
     lf.speed_mph = g.speed_mph;      // Doppler, not differenced positions
-    lf.valid = g.fix;
-    lf.t_ms = now;
-
-    const core::lap::Update lu = s.lap.update(lf, lc);
+    core::lap::Update lu;
+    if (new_fix) {
+        s.last_lap_rx_ms = g.rx_ms;
+        s.lap_told_stale = false;
+        lf.valid = g.fix;
+        lf.t_ms = g.rx_ms;
+        lu = s.lap.update(lf, lc);
+    } else if (silent && !s.lap_told_stale && s.last_lap_rx_ms != 0) {
+        s.lap_told_stale = true;
+        lf.valid = false;
+        lf.t_ms = now;
+        lu = s.lap.update(lf, lc);
+    }
+    s.lap.advance(now);
     const bool lap_event = lu.event != core::lap::Event::None;
     if (lu.event == core::lap::Event::Started) {
         if (d.delta) d.delta->start_lap();
@@ -350,7 +379,8 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         core::state::to_published(s.lap.state(), delta_ms, delta_valid));
 
     // --- traces ---------------------------------------------------------
-    if (g.fix && now - s.last_trace_ms >= 100) {     // 10 Hz, one per fix
+    // One point per fix, at most 10 Hz (the sim makes a fix every tick).
+    if (g.fix && new_fix && now - s.last_trace_ms >= 90) {
         s.last_trace_ms = now;
         if (!s.have_origin) {
             s.origin = core::geo::LatLon{g.lat, g.lon};

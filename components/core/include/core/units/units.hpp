@@ -51,6 +51,11 @@ constexpr float gal_from_l(float l)       { return l / kLitrePerGal; }
 // label to draw next to it. The label is a literal with static lifetime.
 
 float speed_for_display(float mph, System s, const char** unit);
+
+// Revs as a number on screen: to the nearest 10. Nobody reads single rpm at
+// 60 Hz, and the last digit flickering with tach noise repainted the rpm
+// tile on every frame. The tach bar and the lamps use the raw value.
+float rpm_for_display(float rpm);
 float distance_for_display(float mi, System s, const char** unit);
 float temp_for_display(float c, System s, const char** unit);
 float pressure_for_display(float psi, System s, const char** unit);

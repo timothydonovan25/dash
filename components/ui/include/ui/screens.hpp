@@ -207,6 +207,11 @@ private:
     const uint32_t* laps_ = nullptr;
     size_t          lap_count_ = 0;
     uint32_t        best_ms_ = 0;
+    // What the table was last built from. It only changes when a lap is
+    // scored, so it is not rebuilt (and reformatted) every frame.
+    bool            shown_ = false;
+    size_t          shown_count_ = 0;
+    uint32_t        shown_best_ = 0;
 };
 
 class TrackMapScreen final : public Screen {
@@ -252,6 +257,8 @@ private:
     ValueBox  rpm_, coolant_, tps_, volts_;
     Bar       coolant_bar_, tps_bar_;
     Sparkline rpm_trace_;
+    static constexpr uint32_t kRpmTraceMs = 100;
+    uint32_t  rpm_trace_ms_ = 0;
     Label     ecu_;
     Widget*   list_[8] = {};
 };

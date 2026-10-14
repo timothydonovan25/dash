@@ -15,6 +15,10 @@ public:
     virtual Status init() = 0;
     // Millivolts at the VIN sense pin, calibrated.
     virtual Status read_vin_pin_mv(uint32_t& mv) = 0;
+    // The same, but one conversion instead of an average and quick enough to
+    // run every millisecond. Noisier; for watching the supply fall, not for
+    // showing it.
+    virtual Status read_vin_pin_mv_fast(uint32_t& mv) { return read_vin_pin_mv(mv); }
 };
 
 }  // namespace hal

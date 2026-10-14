@@ -19,4 +19,39 @@ uint8_t lamp_master_pct(bool on_bike, uint8_t setting_pct, uint8_t usb_cap_pct) 
     return want < usb_cap_pct ? want : usb_cap_pct;
 }
 
+FailDetector::Event FailDetector::feed(float v) {
+    switch (state_) {
+        case State::Idle:
+            run_ = v >= cfg_.arm_v ? static_cast<uint16_t>(run_ + 1) : 0;
+            if (run_ >= cfg_.arm_n) { state_ = State::Armed; run_ = 0; }
+            return Event::None;
+
+        case State::Armed:
+            run_ = v < cfg_.trip_v ? static_cast<uint16_t>(run_ + 1) : 0;
+            if (run_ >= cfg_.trip_n) {
+                state_ = State::Tripped;
+                run_ = 0;
+                since_trip_ = 0;
+                return Event::Tripped;
+            }
+            return Event::None;
+
+        case State::Tripped:
+            run_ = v >= cfg_.ok_v ? static_cast<uint16_t>(run_ + 1) : 0;
+            if (run_ >= cfg_.ok_n) {
+                state_ = State::Armed;
+                run_ = 0;
+                return Event::Recovered;
+            }
+            if (since_trip_ < 0xFFFF) ++since_trip_;
+            if (since_trip_ >= cfg_.usb_n) {
+                state_ = State::Idle;      // re-arms only on a bike supply
+                run_ = 0;
+                return Event::Recovered;
+            }
+            return Event::None;
+    }
+    return Event::None;
+}
+
 }  // namespace core::power

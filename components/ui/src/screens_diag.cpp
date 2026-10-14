@@ -1,5 +1,6 @@
 #include "ui/screens.hpp"
 #include "core/fusion/speed.hpp"
+#include "core/power/power.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
 
@@ -197,10 +198,16 @@ void SystemScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, static_cast<float>(s->log_dropped), 0, true);
     table_.set_row(7, "Log dropped", v);
 
-    u::fmt_value(v, sizeof v, f.elec.v3v3, 2, f.elec.v3v3 > 0.0f);
-    table_.set_row(8, "3V3 rail", v);
-    u::fmt_value(v, sizeof v, f.elec.v5, 2, f.elec.v5 > 0.0f);
-    table_.set_row(9, "5V rail", v);
+    // Which supply the board is on, as `ctrl` decides it for the lamp cap.
+    const char* supply = "--";
+    switch (core::power::classify(f.elec.vbat)) {
+        case core::power::Source::Bike: supply = "bike"; break;
+        case core::power::Source::Usb:  supply = "USB";  break;
+        default: break;
+    }
+    table_.set_row(8, "Supply", supply);
+    u::fmt_value(v, sizeof v, f.elec.vbat, 1, f.elec.vbat > 0.0f);
+    table_.set_row(9, "VIN", v);
 
     u::fmt_value(v, sizeof v, static_cast<float>(s->imu_timeouts), 0, true);
     table_.set_row(10, "IMU int miss", v);

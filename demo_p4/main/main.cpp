@@ -13,6 +13,7 @@
 #include "drivers/nvs_storage.hpp"
 #include "p4_panel.hpp"
 #include "touch_buttons.hpp"
+#include "pod_buttons.hpp"
 #include "drivers/clock.hpp"
 #include "hal/i_engine.hpp"
 #include "core/input/input.hpp"
@@ -55,24 +56,45 @@ EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_t
 drivers::EspClock g_clock;
 demo::P4Panel     g_panel;
 demo::TouchButtons g_touch;
+demo::PodButtons   g_pod;     // the real pod on CN3, if plugged in
 hal::NullEngine   g_engine;
 drivers::NvsStorage g_storage;   // the real driver: settings and BLE bonds   // no ECU here, same as the real board (§10.1)
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
 
+// DIAG -> Sensors' "MCP pod" row (and DIAG -> Bus's "I2C0 pod"). The pod is
+// optional here, so a demo that never had one shows it absent, not faulted;
+// one that has been seen and then pulled degrades and faults as on the
+// bike, and goes back to Ok when it answers again.
+void report_pod(hal::Status s, uint32_t now) {
+    constexpr auto kDev = core::state::Dev::McpPod;
+    if (s == hal::Status::Busy) return;   // no transaction this poll
+    if (hal::ok(s)) {
+        if (g_health.is_absent(kDev)) g_health.begin_init(kDev, now);
+        g_health.report_ok(kDev, now);
+    } else if (!g_health.is_absent(kDev)) {
+        g_health.report_error(kDev, static_cast<int32_t>(s), now);
+    }
+}
+
 void touch_input_task(void*) {
     core::input::Decoder decoder;
     core::input::Config  cfg;
 
     for (;;) {
-        uint8_t mask = 0;
-        if (hal::ok(g_touch.read_mask(mask))) {
-            core::nav::InputEvent ev[core::input::kButtonCount];
-            const size_t n = decoder.update(mask, g_clock.now_ms(), cfg, ev,
-                                            core::input::kButtonCount);
-            for (size_t i = 0; i < n; ++i) services::post_input_event(ev[i]);
-        }
+        // Touch zones and the pod OR into one mask, so one Decoder sees
+        // a button as held whichever of them is holding it. A read that
+        // fails counts as nothing pressed: the other source keeps working,
+        // and a pod pulled out mid-press releases rather than sticks.
+        const uint32_t now = g_clock.now_ms();
+        uint8_t touch = 0, pod = 0;
+        g_touch.read_mask(touch);
+        report_pod(g_pod.read_mask(pod, now), now);
+        core::nav::InputEvent ev[core::input::kButtonCount];
+        const size_t n = decoder.update(touch | pod, now, cfg, ev,
+                                        core::input::kButtonCount);
+        for (size_t i = 0; i < n; ++i) services::post_input_event(ev[i]);
         vTaskDelay(pdMS_TO_TICKS(1000 / kTouchPollHz));
     }
 }
@@ -110,6 +132,7 @@ extern "C" void app_main(void) {
 
     const hal::Status touch_status = g_touch.init();
     ESP_LOGI(kTag, "touch: %s", hal::status_name(touch_status));
+    report_pod(g_pod.init(g_touch.bus()), g_clock.now_ms());   // logs its own status
 
     // No real sensors, no card, no radio — every pointer left null is a
     // device every service already treats as "not fitted" rather than
@@ -129,6 +152,8 @@ extern "C" void app_main(void) {
     g_deps.lap_trace   = &g_lap_trace;
     g_deps.commands    = &g_commands;
 
+    // demo_render keeps the table from here on; this demo has no keeper.
+    g_health.tick(g_clock.now_ms(), core::health::Policy{});
     g_slots.health.publish(g_health.publish());
     g_commands.begin();
 

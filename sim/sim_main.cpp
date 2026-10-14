@@ -13,7 +13,8 @@
 //                                vbat, sats, neutral, ecu, fix, auto,
 //                                duration (media track length, ms),
 //                                position (ms into the track, now),
-//                                playstate (0 stop 1 play 2 pause)
+//                                playstate (0 stop 1 play 2 pause),
+//                                bus_mhz (panel write clock, 0 = instant)
 //        btn <A-E> down|up       real debounce and long-press timing
 //        cmd <lapline|laparm|lapclear|tripreset|jump>
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
@@ -23,6 +24,7 @@
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac>\n
 //        P6\n320 480\n255\n<pixels>
 #include "sim_bike.hpp"
+#include "panel_sim.hpp"
 
 #include "core/config/config.hpp"
 #include "core/health/health.hpp"
@@ -292,6 +294,7 @@ int main() {
         using Buffer = core::state::TrackBuffer<core::state::TrackPoint, 4096>;
         explicit TraceSource(Buffer* b) : buf(b) {}
         size_t count() const override { return buf ? buf->size() : 0; }
+        size_t total() const override { return buf ? buf->total() : 0; }
         bool point(size_t i, float& x, float& y) const override {
             core::state::TrackPoint p;
             if (!buf || !buf->read_nth(i, p)) return false;
@@ -313,6 +316,9 @@ int main() {
     ui::wire::Panel wire_panel = ui::wire::i80_8bit(10000000u);   // bsp::kTftWrHz
     wire_panel.bus_limit_bytes = kBusLimitBytes;
     ui::wire::Model wire(wire_panel, kBandPixels, kBandLines);
+    // What the glass shows: the canvas as the bus has delivered it so far.
+    sim::PanelSim panel(kBandPixels, kBandLines);
+    panel.set_bus_limit(kBusLimitBytes);
 
     sim::Bike     bike;
     sim::Controls controls;
@@ -364,7 +370,9 @@ int main() {
             } else if (std::sscanf(line.c_str(), "set %31s %f", a, &v) == 2) {
                 // Position is an anchor, so it needs the sim clock and
                 // cannot go through apply_set with the plain controls.
-                if (std::strcmp(a, "position") == 0) {
+                if (std::strcmp(a, "bus_mhz") == 0) {
+                    panel.set_clock_hz(v > 0.0f ? static_cast<uint32_t>(v * 1e6f) : 0u);
+                } else if (std::strcmp(a, "position") == 0) {
                     controls.media_position_known = true;
                     controls.media_position_ms = v > 0.0f ? static_cast<uint32_t>(v) : 0;
                     controls.media_position_at_ms = now;
@@ -449,46 +457,62 @@ int main() {
             }
         }
 
-        health.tick(now, core::health::Policy{});
         for (uint8_t i = 0; i < core::state::kDevCount; ++i) {
             const auto dev = static_cast<core::state::Dev>(i);
-            if (health.publish()[dev].state != core::state::DevState::Absent) {
-                health.report_ok(dev, now);
-            }
+            if (!health.is_absent(dev)) health.report_ok(dev, now);
         }
-        slots.health.publish(health.publish());
+        health.tick(now, core::health::Policy{});
+        health.publish_if_changed(slots.health, now);
         system.uptime_s = now / 1000;
+
+        // The bus runs whether or not a frame is due.
+        panel.advance(static_cast<uint64_t>(kTickMs) * 1000000ull);
 
         // --- one frame --------------------------------------------------
         if (now - last_frame < kFrameMs) continue;
         last_frame = now;
+        // render is blocked in its blit while the last frame is still on the
+        // wire, so a slow bus drops frames instead of queueing them. The
+        // glass keeps filling in; just redraw it.
+        const bool bus_busy = panel.busy();
 
-        app.set_lap_history(lap_history.ms, lap_history.count,
-                            lap_history.best_ms);
-        app.update(core::state::snapshot(slots, now));
+        ui::wire::Cost cost{};
+        if (!bus_busy) {
+            app.set_lap_history(lap_history.ms, lap_history.count,
+                                lap_history.best_ms);
+            app.update(core::state::snapshot(slots, now));
 
-        // Price the frame before rendering it: `update` is what sets the
-        // dirty flags and `render` is what clears them, so this is the one
-        // moment the real set of moved widgets exists. The decision mirrors
-        // render_service's — full repaint or dirty widgets, nothing else.
-        if (app.needs_full_repaint()) {
-            wire.full_repaint();
-        } else {
-            for (ui::Widget* w : app.current().widgets()) {
-                if (w && w->dirty) wire.region(w->bounds);
+            // Price the frame before rendering it: `update` is what sets the
+            // dirty flags and `render` is what clears them, so this is the
+            // one moment the real set of moved widgets exists. The decision
+            // mirrors render_service's — full repaint or dirty widgets.
+            const bool full = app.needs_full_repaint();
+            std::vector<ui::Rect> sent;
+            if (full) {
+                wire.full_repaint();
+            } else {
+                ui::App::Damage dmg[ui::App::kMaxDamage];
+                const size_t n = app.damage(dmg, ui::App::kMaxDamage);
+                for (size_t i = 0; i < n; ++i) {
+                    wire.region(dmg[i].r);
+                    sent.push_back(dmg[i].r);
+                }
             }
-            if (app.alert().active()) wire.region(app.alert().bounds);
-        }
-        const ui::wire::Cost cost = wire.end_frame();
+            cost = wire.end_frame();
 
-        // The window is one canvas, not eight bands, so it repaints whole.
-        // What was just costed is what the panel would have sent.
-        app.render(canvas, true);
-        app.clear_full_repaint();
+            // The canvas is the firmware's idea of the screen and is always
+            // whole. Only what was costed goes down the bus; the rest of the
+            // panel keeps what it had, which is how a widget that was not
+            // made a widget goes visibly stale.
+            app.render(canvas, true);
+            app.clear_full_repaint();
+            if (full) panel.queue_full(px.data());
+            else for (const ui::Rect& r : sent) panel.queue_region(r, px.data());
+        }
         if (system.first_frame_ms == 0) system.first_frame_ms = now ? now : 1;
 
         for (size_t i = 0; i < px.size(); ++i) {
-            const ui::Color c = px[i];
+            const ui::Color c = panel.shown()[i];
             rgb[i * 3 + 0] = static_cast<unsigned char>((c >> 8) & 0xF8);
             rgb[i * 3 + 1] = static_cast<unsigned char>((c >> 3) & 0xFC);
             rgb[i * 3 + 2] = static_cast<unsigned char>((c << 3) & 0xF8);
@@ -500,14 +524,15 @@ int main() {
         const core::state::Lap lapv = slots.lap.get();
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
-                    "over=%u\n",
+                    "over=%u busy=%d pend=%u\n",
                     lamp_mask, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
                     delta.reference_points(), delta.last_match_ft(),
                     static_cast<double>(cost.ms()), cost.pixels, cost.transfers,
                     static_cast<double>(wire.peak().ms()),
-                    wire.total().oversized);
+                    wire.total().oversized, bus_busy ? 1 : 0,
+                    panel.pending_px());
         std::printf("P6\n%d %d\n255\n", ui::kScreenW, ui::kScreenH);
         std::fwrite(rgb.data(), 1, rgb.size(), stdout);
         std::fflush(stdout);

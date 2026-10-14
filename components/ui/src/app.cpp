@@ -3,6 +3,7 @@
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
 #include <cstdio>
+#include <cstring>
 
 namespace ui {
 
@@ -16,6 +17,12 @@ namespace {
 constexpr Rect kAlertBox{20, 170, 280, 120};
 // Top-right corner: small, but on every screen.
 constexpr Rect kDevTag{448, 0, 32, 11};
+// The splash's progress bar: a track that fills over kSplashMs.
+constexpr int16_t kSplashBarW = 300, kSplashBarH = 8, kSplashBarY = 220;
+constexpr Rect kSplashBar{static_cast<int16_t>(kScreenW / 2 - kSplashBarW / 2), kSplashBarY,
+                          kSplashBarW, kSplashBarH};
+// The most rectangles one widget may ask for before it is sent whole.
+constexpr int kMaxPerWidget = 6;
 }  // namespace
 
 App::App(const Context& ctx) : ctx_(ctx) {
@@ -89,6 +96,8 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     // they have seen must go away on the first press they make.
     if (alert_.active()) {
         if (e.button == Button::E) {
+            alerter_.acknowledge();
+            alert_kind_ = core::alert::Kind::None;
             alert_.dismiss();
             needs_full_ = true;
             return;
@@ -113,8 +122,28 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     }
 }
 
+void App::update_alert(const core::state::Frame& f) {
+    using core::alert::Kind;
+    const Kind k = alerter_.update(f);
+    // Nothing is drawn over the name card or the gauge sweep, and the
+    // alerter has kept its clock meanwhile, so a fault present at key-on is
+    // shown the moment the dash is.
+    if (splash_on_ || !sweep_done_) return;
+    if (k == alert_kind_) return;
+    alert_kind_ = k;
+    if (k == Kind::None) {
+        // Whatever it covered has to be painted back.
+        alert_.dismiss();
+        needs_full_ = true;
+    } else {
+        const bool grave = k == Kind::BikeDown || k == Kind::BatteryHigh;
+        alert_.show(core::alert::text(k), grave ? color::kAlarm : color::kWarn);
+    }
+}
+
 void App::update(const core::state::Frame& f) {
     if (!entered_) return;
+    update_alert(f);
     const bool dev = f.ota.known && f.ota.role != core::ota::Role::Stable;
     if (dev != dev_running_) {
         dev_running_ = dev;
@@ -144,10 +173,20 @@ void App::update(const core::state::Frame& f) {
     if (splash_on_) {
         const uint32_t t = f.t_ms - splash_start_ms_;
         if (t < kSplashMs) {
-            splash_permille_ = static_cast<uint16_t>(t * 1000u / kSplashMs);
-            std::snprintf(splash_ver_, sizeof splash_ver_, "%s",
-                          f.ota.known ? f.ota.running_ver : "");
-            needs_full_ = true;
+            // The card is painted whole once; after that only the bar
+            // moves, so only the bar goes to the panel (a whole frame each
+            // time was 31 ms of wire, every frame, for a second and a half).
+            const uint16_t pm = static_cast<uint16_t>(t * 1000u / kSplashMs);
+            if (pm != splash_permille_) {
+                splash_permille_ = pm;
+                splash_bar_dirty_ = true;
+            }
+            char ver[sizeof splash_ver_];
+            std::snprintf(ver, sizeof ver, "%s", f.ota.known ? f.ota.running_ver : "");
+            if (std::strcmp(ver, splash_ver_) != 0) {
+                std::memcpy(splash_ver_, ver, sizeof ver);
+                needs_full_ = true;
+            }
             return;
         }
         splash_on_ = false;
@@ -190,13 +229,12 @@ void App::render_splash(Canvas& c) {
         c.draw_text(cx, 270, splash_ver_, theme::secondary, 1, Align::Center);
     }
     // A bar that fills over the splash, so it reads as "starting", not hung.
-    constexpr int16_t kW = 300, kH = 8, kY = 220;
-    const Rect track{static_cast<int16_t>(cx - kW / 2), kY, kW, kH};
+    const Rect& track = kSplashBar;
     c.draw_rect(track, theme::rule);
-    const int16_t w = static_cast<int16_t>((kW - 4) * splash_permille_ / 1000);
+    const int16_t w = static_cast<int16_t>((kSplashBarW - 4) * splash_permille_ / 1000);
     if (w > 0) {
-        c.fill_rect(Rect{static_cast<int16_t>(track.x + 2), static_cast<int16_t>(kY + 2), w,
-                         static_cast<int16_t>(kH - 4)},
+        c.fill_rect(Rect{static_cast<int16_t>(track.x + 2), static_cast<int16_t>(track.y + 2), w,
+                         static_cast<int16_t>(kSplashBarH - 4)},
                     color::kAlarm);
     }
 }
@@ -228,22 +266,69 @@ void App::render(Canvas& c, bool full) {
         needs_full_ = false;
     }
 
+    // A widget outside the canvas's band is still cleared: on a band-by-band
+    // repaint the band that does hold it has drawn it, or will.
     for (Widget* w : current().widgets()) {
         if (!w || !w->dirty) continue;
-        w->render(c);
+        if (c.intersects(w->bounds)) w->render(c);
         w->clear_dirty();
     }
 
     // Last, and over everything: the one widget allowed to break the
     // one-screen-at-a-time rule (§7.4).
     if (alert_.active()) {
-        alert_.render(c);
+        if (c.intersects(alert_.bounds)) alert_.render(c);
         alert_.clear_dirty();
     }
     if (dev_running_) {
-        dev_tag_.render(c);
+        if (c.intersects(dev_tag_.bounds)) dev_tag_.render(c);
         dev_tag_.clear_dirty();
     }
+}
+
+size_t App::damage(Damage* out, size_t max) {
+    if (!entered_ || needs_full_ || max == 0) return 0;
+    size_t n = 0;
+    if (splash_on_) {
+        if (splash_bar_dirty_) out[n++] = Damage{nullptr, kSplashBar};
+        return n;
+    }
+
+    for (Widget* w : current().widgets()) {
+        if (!w || !w->dirty) continue;
+        Rect rs[kMaxPerWidget];
+        const int k = w->damage(rs, kMaxPerWidget);
+        if (n + static_cast<size_t>(k) > max) {
+            // More than a frame's worth of pieces: send the lot.
+            needs_full_ = true;
+            return 0;
+        }
+        for (int i = 0; i < k; ++i) out[n++] = Damage{w, rs[i]};
+    }
+    // The overlays go only when they changed themselves. Where a widget
+    // under them changed, draw_damage() has already put them back on top.
+    if (alert_.active() && alert_.dirty && n < max) out[n++] = Damage{&alert_, alert_.bounds};
+    if (dev_running_ && dev_tag_.dirty && n < max) out[n++] = Damage{&dev_tag_, dev_tag_.bounds};
+    return n;
+}
+
+void App::draw_damage(Canvas& c, const Damage& d) {
+    if (!d.w) {
+        render_splash(c);
+        return;
+    }
+    d.w->render(c);
+    // Over everything, as on a full repaint: an overlay whose own pixels
+    // did not change still has to cover what was just drawn under it.
+    if (d.w != &alert_ && alert_.active() && d.r.intersects(alert_.bounds)) alert_.render(c);
+    if (d.w != &dev_tag_ && dev_running_ && d.r.intersects(dev_tag_.bounds)) dev_tag_.render(c);
+}
+
+void App::clear_damage() {
+    splash_bar_dirty_ = false;
+    for (Widget* w : current().widgets()) if (w) w->clear_dirty();
+    alert_.clear_dirty();
+    dev_tag_.clear_dirty();
 }
 
 }  // namespace ui

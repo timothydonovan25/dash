@@ -134,6 +134,9 @@ services::Deps& build() {
     g_deps.lap_history= &g_lap_history;
     g_deps.commands   = &g_commands;
 
+    // States are derived on a tick, which is keeper's job once it runs;
+    // until start_keeper() this boot thread is the only one ticking.
+    g_health.tick(g_clock.now_ms(), core::health::Policy{});
     g_slots.health.publish(g_health.publish());
     g_commands.begin();
     return g_deps;
@@ -149,6 +152,7 @@ void finish() {
     // Any of these may be absent; none of them stop the boot.
     bring_up(core::state::Dev::Imu, g_imu.init());
     bring_up(core::state::Dev::McpPod, g_pod.init());
+    g_health.tick(g_clock.now_ms(), core::health::Policy{});
     g_slots.health.publish(g_health.publish());
 }
 

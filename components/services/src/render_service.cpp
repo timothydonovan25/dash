@@ -56,6 +56,7 @@ public:
     explicit TraceSource(Buffer* b) : buf_(b) {}
 
     size_t count() const override { return buf_ ? buf_->size() : 0; }
+    size_t total() const override { return buf_ ? buf_->total() : 0; }
     bool point(size_t i, float& x_ft, float& y_ft) const override {
         core::state::TrackPoint p;
         if (!buf_ || !buf_->read_nth(i, p)) return false;
@@ -68,16 +69,16 @@ private:
     Buffer* buf_;
 };
 
-// Push one widget's rectangle, in horizontal strips that fit the one band
+// Push one damaged rectangle, in horizontal strips that fit the one band
 // buffer. A tall widget becomes a few transfers rather than needing a
 // framebuffer the size of the screen.
-hal::Status blit_widget(Deps& d, ui::FrameBufferCanvas& canvas, ui::Color* buf,
-                        ui::Widget& w) {
+hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
+                        ui::Color* buf, const ui::App::Damage& dmg) {
     // The clip and the strip split are in ui/blit_plan.hpp so that the
     // wire-cost model prices exactly what this sends, rather than its own
     // idea of it.
     ui::Rect strips[ui::kMaxStrips];
-    const int n = ui::plan_strips(w.bounds, kBandPixels, strips, ui::kMaxStrips);
+    const int n = ui::plan_strips(dmg.r, kBandPixels, strips, ui::kMaxStrips);
     if (n == 0) return hal::Status::Ok;
     if (n < 0)  return hal::Status::Unsupported;
 
@@ -85,7 +86,7 @@ hal::Status blit_widget(Deps& d, ui::FrameBufferCanvas& canvas, ui::Color* buf,
     for (int i = 0; i < n; ++i) {
         const ui::Rect& r = strips[i];
         if (!canvas.set_window(r.x, r.y, r.w, r.h)) return hal::Status::Unsupported;
-        w.render(canvas);
+        app.draw_damage(canvas, dmg);
         if (d.panel) {
             s = d.panel->blit(static_cast<uint16_t>(r.x),
                               static_cast<uint16_t>(r.y),
@@ -107,7 +108,11 @@ void render_task(void* arg) {
     ctx.commands = &q;
     ctx.system = d.system;
 
-    ui::App app(ctx);
+    // Static, not on the stack: App is ~10.9 kB (every screen and widget),
+    // more than this task's whole 8 kB stack, and was overflowing it on the
+    // first line. One render task, so one App; internal RAM, because every
+    // frame touches it.
+    static ui::App app(ctx);
     app.bind_settings(d.settings);
 
     TraceSource trip_src(d.trip_trace);
@@ -139,6 +144,7 @@ void render_task(void* arg) {
 
     uint32_t frames = 0;
     uint32_t last_hz_ms = d.clock->now_ms();
+    bool last_send_ok = true;
 
     uint32_t start_ms = d.clock->now_ms();
     uint32_t frame_no = 1;
@@ -182,46 +188,54 @@ void render_task(void* arg) {
         app.update(frame);
 
         hal::Status blit_status = hal::Status::Ok;
+        bool sent = false;
 
         if (app.needs_full_repaint()) {
+            sent = true;
             // The panel's contents are unknown, so everything goes out: the
             // background chrome as well as every widget, band by band.
             for (int16_t y = 0; y < ui::kScreenH; y += kBandLines) {
                 canvas.set_window(0, y, ui::kScreenW, kBandLines);
                 app.render(canvas, true);
-                if (d.panel) {
+                if (d.panel && hal::ok(blit_status)) {
                     blit_status = d.panel->blit(0, static_cast<uint16_t>(y),
                                                 ui::kScreenW, kBandLines, band);
                 }
             }
-            app.clear_full_repaint();
+            // A band that did not go out leaves the panel unknown: repaint
+            // again next frame rather than call it done.
+            if (hal::ok(blit_status)) app.clear_full_repaint();
             if (d.system && d.system->first_frame_ms == 0) {
                 d.system->first_frame_ms = now ? now : 1;
                 // The boot-time number: switch to a picture, less the rails.
                 ESP_LOGI(kTag, "first frame at %u ms", static_cast<unsigned>(now));
             }
         } else {
-            // Only what moved. Each widget clears its own bounds before
-            // drawing, and the background chrome sits outside those bounds,
-            // so what is already on the panel underneath stays correct.
-            for (ui::Widget* w : app.current().widgets()) {
-                if (!w || !w->dirty) continue;
-                blit_status = blit_widget(d, canvas, band, *w);
-                w->clear_dirty();
+            // Only what moved, and only the part of it that moved. Each
+            // widget clears its own bounds before drawing, and the
+            // background chrome sits outside those bounds, so what is
+            // already on the panel underneath stays correct.
+            ui::App::Damage dmg[ui::App::kMaxDamage];
+            const size_t n = app.damage(dmg, ui::App::kMaxDamage);
+            for (size_t i = 0; i < n && hal::ok(blit_status); ++i) {
+                blit_status = blit_damage(d, app, canvas, band, dmg[i]);
+                sent = true;
             }
-            // The alert sits over everything, so anything repainted under it
-            // has to be covered again.
-            if (app.alert().active()) {
-                blit_status = blit_widget(d, canvas, band, app.alert());
-                app.alert().clear_dirty();
-            }
+            // A failed send leaves it all dirty, to go again next frame.
+            if (hal::ok(blit_status)) app.clear_damage();
         }
 
-        if (hal::ok(blit_status)) {
-            d.health->report_ok(core::state::Dev::Display, now);
-        } else {
+        // Only a transfer says anything about the panel. Reporting Ok on
+        // the frames that sent nothing used to wipe the error streak of a
+        // panel that fails only when written to.
+        // A still screen sends nothing for seconds, so an idle frame
+        // vouches for the panel only while its last transfer worked.
+        if (sent) last_send_ok = hal::ok(blit_status);
+        if (sent && !last_send_ok) {
             d.health->report_error(core::state::Dev::Display,
                                    static_cast<int32_t>(blit_status), now);
+        } else if (last_send_ok) {
+            d.health->report_ok(core::state::Dev::Display, now);
         }
 
         ++frames;

@@ -94,6 +94,12 @@ public:
     virtual void set_clip(const Rect& r) = 0;
     virtual void clear_clip() = 0;
 
+    // Whether anything drawn inside `r` could land in this canvas. A band
+    // canvas says no for everything outside its band, so a full repaint
+    // (eight bands) skips the widgets a band cannot show instead of drawing
+    // every widget eight times over. Conservative: true unless sure.
+    virtual bool intersects(const Rect& r) const { (void)r; return true; }
+
     int16_t text_width(const char* text, uint8_t scale = 1) const;
     int16_t text_height(uint8_t scale = 1) const;
 

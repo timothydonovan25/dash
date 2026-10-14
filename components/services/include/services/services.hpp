@@ -27,6 +27,7 @@
 // is pinned to core 1 by sdkconfig; `ble` lowers ESP-Hosted's below every
 // core-0 task, because it creates them at priority 23 with no affinity.
 #pragma once
+#include <atomic>
 #include "hal/hal.hpp"
 #include "core/state/slots.hpp"
 #include "core/state/track_buffer.hpp"
@@ -95,6 +96,13 @@ struct Deps {
     // The command queue, for a task that is not handed it at start: the
     // Wi-Fi page posts ConfigSet through it like the config screen does.
     ui::ICommandSink* commands = nullptr;
+
+    // Set by `power` when VIN has just been cut and the board is running on
+    // what is left in its capacitors. Everything that writes or draws power
+    // stands down while it is set: `logger` stops starting SD writes, `ctrl`
+    // keeps the lamps dark, `keeper` keeps the backlight off. Cleared if the
+    // supply comes back, or if the board turns out to be on USB.
+    std::atomic<bool> power_fail{false};
 };
 
 // The one command queue (§4.5). Screens post, `logic` drains, and every
@@ -121,6 +129,7 @@ void start_logic(Deps& d, CommandQueue& q);
 void start_input(Deps& d, CommandQueue& q);
 void start_render(Deps& d, CommandQueue& q);
 void start_keeper(Deps& d);
+void start_power(Deps& d);
 void start_logger(Deps& d);
 void start_storage(Deps& d);
 // Stable/dev slots and updates (§11.7). Core 1, priority 2.

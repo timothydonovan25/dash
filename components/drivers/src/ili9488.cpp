@@ -123,28 +123,38 @@ hal::Status Ili9488::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     if (err != ESP_OK) return from_esp(err);
 
     const size_t bytes = px * 2;
-    std::memcpy(staging_, pixels, bytes);
+    const auto* src = reinterpret_cast<const uint8_t*>(pixels);
 
-    // The aligned bulk by DMA. It is queued, not waited for: the next blit's
-    // window write is what waits, so drawing the next widget overlaps this
-    // transfer.
-    const size_t bulk = bytes & ~(kDmaAlign - 1);
-    if (bulk) {
-        err = esp_lcd_panel_io_tx_color(io, kRamwr, staging_, bulk);
+    // The odd bytes go first, as command parameters: fewer than sixteen
+    // pixels, which bypass the DMA's 32-byte rule but also the I80 byte
+    // swap, so they are swapped here. First and not last, because a
+    // parameter write waits for every transfer in flight: sent after the
+    // bulk, it held this call until the whole DMA had finished, which was
+    // most widgets (57% of strips are not a multiple of 16 px) and threw
+    // away the overlap of drawing the next widget with this one's wire time.
+    // Here nothing is in flight yet -- the window writes above waited.
+    //
+    // BRINGUP: this relies on the panel continuing a 0x2C write with 0x3C,
+    // as the old tail did the other way round. A strip edge with the wrong
+    // colours in its first few pixels means it does not.
+    const size_t head = bytes & (kDmaAlign - 1);
+    if (head) {
+        uint8_t t[kDmaAlign];
+        for (size_t i = 0; i < head; i += 2) {
+            t[i]     = src[i + 1];
+            t[i + 1] = src[i];
+        }
+        err = esp_lcd_panel_io_tx_param(io, kRamwr, t, head);
         if (err != ESP_OK) return from_esp(err);
     }
 
-    // Fewer than sixteen pixels left over. They go out as command
-    // parameters, which bypass the DMA rule but also the I80 byte swap, so
-    // they are swapped here.
-    const size_t tail = bytes - bulk;
-    if (tail) {
-        uint8_t t[kDmaAlign];
-        for (size_t i = 0; i < tail; i += 2) {
-            t[i]     = staging_[bulk + i + 1];
-            t[i + 1] = staging_[bulk + i];
-        }
-        err = esp_lcd_panel_io_tx_param(io, bulk ? kRamwrCon : kRamwr, t, tail);
+    // The aligned rest by DMA, continuing the write the head started. It is
+    // queued, not waited for: the next blit's window write is what waits,
+    // so drawing the next widget overlaps this transfer.
+    const size_t bulk = bytes - head;
+    if (bulk) {
+        std::memcpy(staging_, src + head, bulk);
+        err = esp_lcd_panel_io_tx_color(io, head ? kRamwrCon : kRamwr, staging_, bulk);
         if (err != ESP_OK) return from_esp(err);
     }
     return hal::Status::Ok;

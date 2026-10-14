@@ -638,7 +638,10 @@ a fault, an ignition-off), flush the last N seconds to a separate file.
 run-on capacitance sized for a flush: at about 0.4 A the bulk on VIN
 lasts a few ms, not the ~50 ms a flush needs. Consequences, still:
 
-- You cannot flush the blackbox on power loss.
+- You cannot flush the blackbox on power loss. (What *is* done: `power`
+  sees VIN fall below 9 V, blanks the backlight and lamps, makes `logger`
+  stop starting writes, and saves the odometer and engine hours. See
+  bringup §8.1; none of it has run on the board.)
 - The FAT filesystem can be left dirty by a sudden cut.
 
 Mitigation now: pre-allocate log files, call `fsync` every second, and
@@ -1379,8 +1382,12 @@ erases NVS, and NVS holds your odometer.
 
 ## 18. Open questions
 
-- Backlight: auto-dim from a light sensor, or a manual CONFIG setting?
-  There is no light sensor on the board today.
+- ~~Backlight: auto-dim from a light sensor?~~ **Built without one:**
+  CONFIG → Display → Dim at night scales the brightness setting by the
+  sun's elevation, worked out from the GPS date, time and position
+  (`core/sun`): full above the horizon, 35 % by six degrees below it.
+  It holds its last value through a GPS dropout and is full until the
+  first fix. Overcast, tunnels and street lights are not seen.
 - Lap delta needs a reference lap trace stored per track. Store the best
   lap of the session, or a saved reference on the SD card?
 - Track map: auto-detect the track outline from the first lap, as in V1,

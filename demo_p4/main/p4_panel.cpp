@@ -28,6 +28,7 @@
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_ldo_regulator.h"
+#include "esp_cache.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -378,6 +379,8 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                           const uint16_t* pixels) {
     if (!fb_) return hal::Status::NotPresent;
 
+    if (w == 0 || h == 0 || !pixels) return hal::Status::Ok;
+
     // Nearest-neighbor 1.5x upscale: walk the *destination* pixels for this
     // rect (not the source ones), so every output pixel gets written even
     // though 1.5x means some source pixels cover a 2x2 block and others a
@@ -386,28 +389,57 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     const int dst_x1 = (x + w) * kScaleNum / kScaleDen;
     const int dst_y0 = y * kScaleNum / kScaleDen;
     const int dst_y1 = (y + h) * kScaleNum / kScaleDen;
+    if (dst_x1 <= dst_x0 || dst_y1 <= dst_y0) return hal::Status::Ok;
 
+    // The whole destination must land on the panel; checked once at the
+    // corners rather than for every pixel. A stray write into someone
+    // else's PSRAM is far worse than a dropped rectangle.
+    const int first = native_index(kMarginY + dst_y0, kMarginX + dst_x0);
+    const int last = native_index(kMarginY + dst_y1 - 1, kMarginX + dst_x1 - 1);
+    if (first < 0 || last < 0 ||
+        native_index(kMarginY + dst_y1 - 1, kMarginX + dst_x0) < 0 ||
+        native_index(kMarginY + dst_y0, kMarginX + dst_x1 - 1) < 0) {
+        return hal::Status::Unsupported;
+    }
+
+    // Source row for every destination row, worked out once (at most 480).
+    uint16_t* src_row = src_row_;
+    static_assert(sizeof src_row_ / sizeof src_row_[0] >= kViewH, "src_row_ too small");
     for (int dvy = dst_y0; dvy < dst_y1; ++dvy) {
         int sy = dvy * kScaleDen / kScaleNum;
-        if (sy < y) sy = y;
         if (sy > y + h - 1) sy = y + h - 1;
-        const uint16_t* src = pixels + static_cast<size_t>(sy - y) * w;
-        const int view_row = kMarginY + dvy;
+        src_row[dvy - dst_y0] = static_cast<uint16_t>(sy - y);
+    }
 
-        for (int dvx = dst_x0; dvx < dst_x1; ++dvx) {
-            int sx = dvx * kScaleDen / kScaleNum;
-            if (sx < x) sx = x;
-            if (sx > x + w - 1) sx = x + w - 1;
-            const int view_col = kMarginX + dvx;
-
-            const int idx = native_index(view_row, view_col);
-            if (idx < 0) continue;   // shouldn't happen with a correct
-                                      // margin, but a stray write into
-                                      // someone else's PSRAM is far worse
-                                      // than a dropped pixel
-            fb_[idx] = src[sx - x];
+    // In the framebuffer's own order. The panel is turned a quarter, so a
+    // view *column* is a native row and stepping down the view is stepping
+    // along it: one sequential run of stores per column instead of a 960-
+    // byte stride per pixel, with the bounds and clamps above, not in here.
+    const int step = kRotateCw ? 1 : -1;
+    for (int dvx = dst_x0; dvx < dst_x1; ++dvx) {
+        int sx = dvx * kScaleDen / kScaleNum;
+        if (sx > x + w - 1) sx = x + w - 1;
+        const uint16_t* col = pixels + (sx - x);
+        uint16_t* out = fb_ + native_index(kMarginY + dst_y0, kMarginX + dvx);
+        for (int i = 0, n = dst_y1 - dst_y0; i < n; ++i, out += step) {
+            *out = col[static_cast<size_t>(src_row[i]) * w];
         }
     }
+
+    // The framebuffer is PSRAM behind the CPU's cache, and the DSI DMA reads
+    // PSRAM, not the cache: without a write-back, pixels reach the glass
+    // only when the cache happens to evict them. The IDF's own draw_bitmap
+    // does this; writing the buffer directly means doing it here. The span
+    // is the native rows this touched, start to end.
+    int lo = first, hi = last;
+    for (int idx : {native_index(kMarginY + dst_y1 - 1, kMarginX + dst_x0),
+                    native_index(kMarginY + dst_y0, kMarginX + dst_x1 - 1)}) {
+        if (idx < lo) lo = idx;
+        if (idx > hi) hi = idx;
+    }
+    if (hi < lo) std::swap(lo, hi);
+    esp_cache_msync(fb_ + lo, static_cast<size_t>(hi - lo + 1) * sizeof(uint16_t),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     return hal::Status::Ok;
 }
 

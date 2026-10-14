@@ -153,7 +153,14 @@ void LapHistoryScreen::set_history(const uint32_t* laps_ms, size_t count,
 }
 
 void LapHistoryScreen::update(const Frame& f) {
-    if (!laps_ || lap_count_ == 0) {
+    const size_t count = laps_ ? lap_count_ : 0;
+    const uint32_t best = best_ms_ ? best_ms_ : f.lap.best_ms;
+    if (shown_ && count == shown_count_ && best == shown_best_) return;
+    shown_ = true;
+    shown_count_ = count;
+    shown_best_ = best;
+
+    if (count == 0) {
         table_.clear_rows();
         table_.set_row(0, "no laps yet", "");
         return;
@@ -174,7 +181,6 @@ void LapHistoryScreen::update(const Frame& f) {
         left[k] = '\0';
 
         char right[16];
-        const uint32_t best = best_ms_ ? best_ms_ : f.lap.best_ms;
         if (best > 0) {
             // Two decimals here: this is one measured lap time against
             // another, not a position-matched estimate, and the crossing
@@ -235,7 +241,7 @@ void TrackMapScreen::update(const Frame& f) {
     to_line_.set(f.lap.dist_to_line_ft,
                  f.gnss.fix && f.lap.phase != core::lap::Phase::NoLine);
     delta_.set(f.lap.delta_ms, f.lap.delta_valid);
-    map_.set_position(0.0f, 0.0f, f.gnss.course_deg, f.gnss.fix);
+    map_.set_live(f.gnss.fix);
 }
 
 WidgetList TrackMapScreen::widgets() { return WidgetList{list_, 4}; }

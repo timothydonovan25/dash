@@ -172,6 +172,10 @@ int main(int argc, char** argv) {
     }
 
     core::config::Settings settings;
+    // Riding, not key-on: the frames below never move the clock on, so with
+    // the splash on every screen would be priced as the splash's bar.
+    settings.splash = false;
+    settings.gauge_sweep = false;
     NullSink sink;
     SystemInfo sys{};
     Context ctx;
@@ -218,22 +222,31 @@ int main(int argc, char** argv) {
                     m.full_repaint();
                     ++full_frames;
                 } else {
+                    // Exactly what render_service sends: App::damage(), which
+                    // is the changed part of each widget, not its bounds.
+                    App::Damage dmg[App::kMaxDamage];
+                    const size_t nd = app.damage(dmg, App::kMaxDamage);
                     size_t i = 0;
                     for (Widget* w : ws) {
-                        if (w && w->dirty) {
-                            // Price this widget alone, so the per-widget
-                            // column is the real split of the frame.
-                            wire::Model one(p, kBandPixels, kBandLines);
-                            one.region(w->bounds);
+                        // Price this widget alone, so the per-widget
+                        // column is the real split of the frame.
+                        wire::Model one(p, kBandPixels, kBandLines);
+                        bool any = false;
+                        for (size_t k = 0; k < nd; ++k) {
+                            if (!w || dmg[k].w != w) continue;
+                            one.region(dmg[k].r);
+                            any = true;
+                        }
+                        if (any) {
                             const wire::Cost c = one.end_frame();
                             rows[i].pixels    += c.pixels;
                             rows[i].transfers += c.transfers;
                             rows[i].ms        += c.ms();
                             rows[i].dirty_frames++;
-                            m.region(w->bounds);
                         }
                         ++i;
                     }
+                    for (size_t k = 0; k < nd; ++k) m.region(dmg[k].r);
                 }
                 app.render(canvas, true);
                 app.clear_full_repaint();

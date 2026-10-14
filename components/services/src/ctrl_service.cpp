@@ -30,15 +30,25 @@ constexpr TickType_t kPeriod = pdMS_TO_TICKS(2);
 // Once a second is 0.1 ms of I2C per 500 ticks.
 constexpr uint32_t kResendTicks = kHz;
 
+// After a failed lamp write, wait this long before the next attempt rather
+// than retrying every tick: a wedged bus would otherwise spend each tick in
+// an I2C timeout (rule 5).
+constexpr uint32_t kRetryTicks = kHz / 20;   // 50 ms
+
 void ctrl_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
     core::tach::Meter      tach;
     core::tach::WheelMeter front;
     core::tach::WheelMeter rear;
-    uint8_t last_mask = 0;
+    // `prev_mask` is what the pattern's hysteresis compares against, and
+    // moves every tick; `lit_mask` is what the LED driver has acknowledged.
+    // They differ only after a failed write, which is retried, not forgotten.
+    uint8_t prev_mask = 0;
+    uint8_t lit_mask = 0;
     uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
     uint32_t ticks = 0;
+    uint32_t retry_tick = 0;
     // The start-up sweep (core/sweep): the lamps follow the screen's tach up
     // and back, from render's first frame. If no frame has gone out by
     // kSweepWaitMs -- a dead panel -- there is no tach to follow, so skip it.
@@ -96,13 +106,16 @@ void ctrl_task(void* arg) {
                 sweep_done = true;
             }
         }
-        const uint8_t mask = core::shift::pattern(lamp_rpm, sc, last_mask);
+        const uint8_t mask = core::shift::pattern(lamp_rpm, sc, prev_mask);
+        prev_mask = mask;
         const bool resend = ++ticks % kResendTicks == 0;
+        const bool may_try = static_cast<int32_t>(ticks - retry_tick) >= 0;
         hal::Status lamp_status = hal::Status::Ok;
         bool wrote = false;
-        if ((mask != last_mask || resend) && d.lamps) {
+        if (((mask != lit_mask && may_try) || resend) && d.lamps) {
             lamp_status = d.lamps->set_mask(mask);
-            last_mask = mask;
+            if (hal::ok(lamp_status)) lit_mask = mask;
+            else retry_tick = ticks + kRetryTicks;
             wrote = true;
         }
 
@@ -115,23 +128,50 @@ void ctrl_task(void* arg) {
             core::power::classify(d.slots->elec.get().vbat);
         const bool full = src == core::power::Source::Bike ||
                           (src == core::power::Source::Unknown && tach.running());
-        const uint8_t master = core::power::lamp_master_pct(
-            full, d.settings->shift_brightness_pct,
-            static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255));
-        if (master != last_master && d.lamps) {
+        // Dark while the supply is failing: the lamps are the biggest load
+        // on the rail that is still holding the board up (see `power`).
+        const uint8_t master = d.power_fail.load(std::memory_order_relaxed)
+            ? 0
+            : core::power::lamp_master_pct(
+                  full, d.settings->shift_brightness_pct,
+                  static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255));
+        if (master != last_master && may_try && d.lamps) {
             const hal::Status ms = d.lamps->set_master(master);
+            if (hal::ok(ms)) last_master = master;
+            else retry_tick = ticks + kRetryTicks;
             if (hal::ok(lamp_status)) lamp_status = ms;
-            last_master = master;
             wrote = true;
         }
 
         const uint32_t now_ms_early = d.clock->now_ms();
+
+        // A wheel sensor `logic` has found dead (read 0 at speed) is skipped,
+        // so the speedo falls through to the other wheel, then GPS, instead
+        // of showing 0 mph for the rest of the ride.
+        const core::state::Health hl = d.slots->health.get();
+        const bool front_live = hl[core::state::Dev::FrontWheel].state != core::state::DevState::Fault;
+        const bool rear_live = hl[core::state::Dev::RearWheel].state != core::state::DevState::Fault;
+        const core::state::Gnss g = d.slots->gnss.get();
+
+        core::state::Motion m;
+        m.front_mph = front.mph();
+        m.rear_mph = rear.mph();
+        m.gps_mph = g.speed_mph;
+        m.best_mph = core::tach::best_speed_mph(
+            m.front_mph, hal::ok(s) && front_live,
+            m.rear_mph, hal::ok(s) && rear_live,
+            m.gps_mph, g.fix);
 
         core::state::Engine e;
         e.shift_mask = mask;
         e.shift_flash = core::shift::over_limit(lamp_rpm, sc);
         e.rpm = tach.rpm();
         e.neutral = c.neutral;
+        // Needs both rpm and road speed, and this is the one task that has
+        // them first-hand. Before the publish: it was once set after it, on
+        // a copy nobody read again, and the gear read 0 on every screen.
+        e.gear = core::gear::estimate(tach.rpm(), m.best_mph, c.neutral,
+                                      core::config::gear_view(*d.settings));
         e.ecu_online = d.engine && d.engine->online();
         if (e.ecu_online) {
             hal::EngineData ed;
@@ -141,30 +181,6 @@ void ctrl_task(void* arg) {
             }
         }
         d.slots->engine.publish(e);
-
-        // A wheel sensor `logic` has found dead (read 0 at speed) is skipped,
-        // so the speedo falls through to the other wheel, then GPS, instead
-        // of showing 0 mph for the rest of the ride.
-        const core::state::Health hl = d.slots->health.get();
-        const bool front_live = hl[core::state::Dev::FrontWheel].state != core::state::DevState::Fault;
-        const bool rear_live = hl[core::state::Dev::RearWheel].state != core::state::DevState::Fault;
-
-        // Needs both rpm and road speed, and this is the one task that has
-        // them first-hand.
-        const float road_mph = core::tach::best_speed_mph(
-            front.mph(), front_live, rear.mph(), rear_live,
-            d.slots->gnss.get().speed_mph, d.slots->gnss.get().fix);
-        e.gear = core::gear::estimate(tach.rpm(), road_mph, c.neutral,
-                                      core::config::gear_view(*d.settings));
-
-        core::state::Motion m;
-        m.front_mph = front.mph();
-        m.rear_mph = rear.mph();
-        m.gps_mph = d.slots->gnss.get().speed_mph;
-        m.best_mph = core::tach::best_speed_mph(
-            m.front_mph, hal::ok(s) && front_live,
-            m.rear_mph, hal::ok(s) && rear_live,
-            m.gps_mph, d.slots->gnss.get().fix);
         d.slots->motion.publish(m);
 
         // Only a write says anything about the LED driver. A quiet tick is
@@ -183,10 +199,17 @@ void ctrl_task(void* arg) {
         // Missing a deadline here is the one timing failure on this bike that
         // a rider would feel, so it is counted and shown on DIAG → System
         // rather than logged where nobody looks.
-        const TickType_t before = xTaskGetTickCount();
+        //
+        // Lateness against the schedule, not the length of the sleep: a tick
+        // that overran (a stuck I2C write, a flash write freezing the core)
+        // makes vTaskDelayUntil return at once, and timing the sleep counted
+        // that as zero. After an overrun the schedule restarts from now
+        // instead of running the missed ticks back to back.
         vTaskDelayUntil(&next, kPeriod);
-        if (xTaskGetTickCount() - before > kPeriod + 1) {
+        const TickType_t woke = xTaskGetTickCount();
+        if (woke - next > 1) {
             if (d.system) d.system->ctrl_late = static_cast<uint16_t>(++late);
+            next = woke;
         }
     }
 }

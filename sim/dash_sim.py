@@ -140,6 +140,9 @@ SLIDERS = [
     ("coolant", "Coolant  C",     0,  130,    1,   82),
     ("vbat",    "Battery  V",     0,   15,  0.1, 12.6),
     ("sats",    "Satellites",     0,   16,    1,   11),
+    # The panel's write clock. 10 is the firmware's starting value; drop it
+    # to watch a repaint arrive line by line. 0 is an ideal, instant bus.
+    ("bus_mhz", "Panel bus  MHz  (0 = instant)", 0, 20, 0.5, 10),
 ]
 
 TOGGLES = [
@@ -586,6 +589,8 @@ class App:
         text = (f"{mode} / {screen}   wire {ms:5.1f} ms"
                 f"   {tail.get('px', '0')} px in {tail.get('tx', '0')} tx"
                 f"   peak {float(tail.get('peak', 0.0)):.1f} ms")
+        if int(tail.get("busy", 0)):
+            text += f"   bus busy, {tail.get('pend', '0')} px in flight"
         if over:
             text += f"   {over} transfers over the bus limit"
         self.status.config(text=text, fg=colour)
