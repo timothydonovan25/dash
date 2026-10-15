@@ -220,6 +220,9 @@ int main() {
         CHECK(g.day_of_year == 31 + 28 + 23);
         send(p, g, "GPRMC,000000,A,4807.038,N,01131.000,E,0,0,291224,,");   // 2024 is a leap year
         CHECK(g.day_of_year == 364);
+        CHECK(g.year == 2024);                   // and as a calendar date
+        CHECK(g.month == 12);
+        CHECK(g.day == 29);
         send(p, g, "GPRMC,000000,A,4807.038,N,01131.000,E,0,0,010101,,");
         CHECK(g.day_of_year == 1);
     }
@@ -234,6 +237,7 @@ int main() {
         CHECK(g.day_of_year == before);
         send(p, g, "GPRMC,123521,A,4807.038,N,01131.000,E,022.4,084.4,310224,,");   // no 31 Feb
         CHECK(g.day_of_year == before);
+        CHECK(g.month == 3);                     // not half-updated to February
         send(p, g, "GPRMC,123522,A,4807.038,N,01131.000,E,022.4,084.4,231394,,");   // month 13
         CHECK(g.day_of_year == before);
     }

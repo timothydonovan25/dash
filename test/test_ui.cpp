@@ -1129,14 +1129,19 @@ int main() {
         fx.app.begin(s.canvas);
         go_to(fx.app, s.canvas, Mode::Cruise, 4);
         CHECK(std::strcmp(fx.app.current().name(), "NAV") == 0);
-        CHECK(fx.app.current().focus_count() == 2);
+        CHECK(fx.app.current().focus_count() == 5);      // START TRUCK CAMP FUEL MARK
         fx.sink.posted.clear();
+        // Opens on START: short E puts it here.
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         CHECK(fx.sink.posted.size() == 1);
         CHECK(fx.sink.posted.back().id == core::state::CommandId::NavDropWaypoint);
+        CHECK(fx.sink.posted.back().i == 0);
+        // D to CAMP, then long E clears that one.
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
         CHECK(fx.sink.posted.back().id == core::state::CommandId::NavClearWaypoint);
+        CHECK(fx.sink.posted.back().i == 2);
 
         // No waypoint draws, and so does one 1000 ft ahead.
         core::state::Frame f;
@@ -1148,7 +1153,8 @@ int main() {
         f.gnss.fix = true;
         f.gnss.lat = 40.0;
         f.gnss.lon = -75.0;
-        f.waypoint = core::state::Waypoint{true, 40.0 + 1000.0 / 364000.0, -75.0, 0};
+        // CAMP, which is where the cursor is.
+        f.waypoint.pts[2] = core::state::Waypoint{true, 40.0 + 1000.0 / 364000.0, -75.0, 0, 0};
         fx.app.update(f);
         s.wipe();
         fx.app.render(s.canvas, true);
@@ -1261,7 +1267,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 4);   // RADIO
+        go_to(fx.app, s.canvas, Mode::Diag, 5);   // RADIO
 
         Frame f = busy_frame();
         fx.app.update(f);
@@ -1293,7 +1299,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 5);   // UPDATE
+        go_to(fx.app, s.canvas, Mode::Diag, 6);   // UPDATE
         CHECK(std::strcmp(fx.app.current().name(), "UPDATE") == 0);
 
         Frame f = busy_frame();
@@ -1445,6 +1451,53 @@ int main() {
             if (partial.px[i] != whole.px[i]) ++differing;
         }
         CHECK(differing == 0);
+    }
+
+    CASE("wheelspin shows as a bar across the top, and clearing it repaints");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 partial;
+        fx.app.begin(partial.canvas);
+        go_to(fx.app, partial.canvas, Mode::Cruise, 0);
+        Frame a = busy_frame();
+        a.fused.speed_valid = true;
+        a.fused.speed_mph = 20.0f;
+        a.motion.front_mph = 20.0f;
+        a.motion.rear_mph = 20.0f;
+        fx.app.update(a);
+        fx.app.render(partial.canvas, true);
+        fx.app.clear_full_repaint();
+        CHECK(!fx.app.slip_bar().active());
+
+        Frame b = a;
+        b.t_ms += 17;
+        b.motion.rear_mph = 28.0f;                  // 40% spin
+        fx.app.update(b);
+        CHECK(fx.app.slip_bar().active());
+        CHECK(!fx.app.needs_full_repaint());        // shown as a partial update
+        send_damage(fx.app, partial.px);
+        Screen320x480 whole;
+        fx.app.render(whole.canvas, true);
+        size_t differing = 0;
+        for (size_t i = 0; i < partial.px.size(); ++i) {
+            if (partial.px[i] != whole.px[i]) ++differing;
+        }
+        CHECK(differing == 0);
+        CHECK(partial.px[5 * kScreenW + 5] == color::kWarn);    // amber, top left
+
+        Frame c = a;                                 // grip again...
+        c.t_ms = b.t_ms + 2000;                      // ...past the hold
+        fx.app.update(c);
+        CHECK(!fx.app.slip_bar().active());
+        CHECK(fx.app.needs_full_repaint());         // the top comes back whole
+
+        fx.settings.slip_bar = false;                // and it can be turned off
+        fx.app.clear_full_repaint();
+        Frame d = b;
+        d.t_ms = c.t_ms + 17;
+        fx.app.update(d);
+        CHECK(!fx.app.slip_bar().active());
     }
 
     CASE("a table sends only the rows that changed");

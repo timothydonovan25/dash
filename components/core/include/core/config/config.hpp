@@ -36,6 +36,8 @@ struct Settings {
     uint8_t unit_system    = static_cast<uint8_t>(units::System::Imperial);
     int32_t tz_offset_h    = -5;
     bool    dim_at_night   = false;
+    // The wheelspin / lockup bar across the top of every screen (core/slip).
+    bool    slip_bar       = true;
 
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.

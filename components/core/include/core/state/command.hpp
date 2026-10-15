@@ -31,8 +31,8 @@ enum class CommandId : uint8_t {
     OtaBootDevOnce,   // restart into dev; the next reset returns to stable
     OtaPromote,       // from dev: keep the running dev image as stable (§11.7)
     WifiToggle,       // the update hotspot on, or off if it is on
-    NavDropWaypoint,  // remember the current fix as the waypoint
-    NavClearWaypoint,
+    NavDropWaypoint,  // i: which named waypoint (core::waypoint) to put here
+    NavClearWaypoint, // i: which one to forget
     GearCalStart,     // open the calibration page (CONFIG -> Gearing)
     GearCalNext,      // E: start, move on once a gear is ready, accept
     GearCalSkip,      // long E: leave this gear out

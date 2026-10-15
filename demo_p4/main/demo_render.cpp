@@ -2,11 +2,12 @@
 #include "esp_log.h"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
+#include "drivers/chip_temp.hpp"
+#include "core/wifi/wifi.hpp"
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <utility>
 
 namespace demo {
 namespace {
@@ -36,10 +37,33 @@ private:
     Buffer* buf_;
 };
 
+struct RenderArg {
+    services::Deps*         deps;
+    services::CommandQueue* commands;
+    StateRequest*           state_req;
+};
+
+// The answer to `state`, as key=value so a script can parse it. Screen and
+// focus are 0-based, the way B and D presses count them.
+void log_state(ui::App& app, const core::state::Frame& f) {
+    const core::nav::State& n = app.nav_state();
+    ui::Screen& s = app.current();
+    ESP_LOGI("state", "mode=%s screen=%u/%u name=%s focus=%u/%u menu=%d splash=%d "
+             "slip=%d wifi=%s clients=%u",
+             app.mode_name(), static_cast<unsigned>(n.screen),
+             static_cast<unsigned>(app.layout().screens[static_cast<uint8_t>(n.mode)]),
+             s.name(), static_cast<unsigned>(n.focus),
+             static_cast<unsigned>(s.focus_count()), n.menu_open ? 1 : 0,
+             app.splashing() ? 1 : 0, app.slip_bar().active() ? 1 : 0,
+             core::wifi::state_name(f.wifi.state),
+             static_cast<unsigned>(f.wifi.clients));
+}
+
 void render_task_impl(void* arg) {
-    auto* pair = static_cast<std::pair<services::Deps*, services::CommandQueue*>*>(arg);
-    services::Deps& d = *pair->first;
-    services::CommandQueue& q = *pair->second;
+    auto* ra = static_cast<RenderArg*>(arg);
+    services::Deps& d = *ra->deps;
+    services::CommandQueue& q = *ra->commands;
+    StateRequest& state_req = *ra->state_req;
 
     ui::Context ctx;
     ctx.settings = d.settings;
@@ -87,6 +111,8 @@ void render_task_impl(void* arg) {
 
     bool last_send_ok = true;
     uint32_t last_stats_ms = 0;
+    drivers::ChipTemp chip_temp;
+    const bool chip_temp_up = hal::ok(chip_temp.init());
     const ui::Rect screen{0, 0, ui::kScreenW, ui::kScreenH};
 
     for (;;) {
@@ -115,6 +141,8 @@ void render_task_impl(void* arg) {
 
         const core::state::Frame frame = core::state::snapshot(*d.slots, now);
         app.update(frame);
+        // After update, so a press just taken is already reflected.
+        if (state_req.pending.exchange(false)) log_state(app, frame);
 
         hal::Status s = hal::Status::Ok;
         bool sent = false;
@@ -175,6 +203,10 @@ void render_task_impl(void* arg) {
                 heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
             d.system->psram_free_b = static_cast<uint32_t>(
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            float c = 0.0f;
+            const bool ok = chip_temp_up && hal::ok(chip_temp.read(c));
+            if (ok) d.system->chip_temp_c = c;
+            d.system->chip_temp_ok = ok;
         }
 
         ++frames;
@@ -189,12 +221,13 @@ void render_task_impl(void* arg) {
     }
 }
 
-std::pair<services::Deps*, services::CommandQueue*> g_render_arg;
+RenderArg g_render_arg;
 
 }  // namespace
 
-void start_demo_render(services::Deps& d, services::CommandQueue& q) {
-    g_render_arg = {&d, &q};
+void start_demo_render(services::Deps& d, services::CommandQueue& q,
+                       StateRequest& req) {
+    g_render_arg = {&d, &q, &req};
     // Larger than the real render task's 8192: ui::App (~10.9 kB) lives on
     // this task's stack here, and overflowed 8192 on first boot.
     xTaskCreatePinnedToCore(render_task_impl, "render", 16384, &g_render_arg,

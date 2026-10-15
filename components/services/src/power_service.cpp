@@ -18,6 +18,7 @@
 // bench job is docs/bringup.md "Power-fail": cut the bike supply with USB
 // still connected and read the elapsed times this task logs.
 #include "services/services.hpp"
+#include "core/battery/battery.hpp"
 #include "core/power/power.hpp"
 #include "bsp/pins.hpp"
 
@@ -53,6 +54,16 @@ void power_task(void* arg) {
     core::power::FailDetector detector;
     TickType_t last = xTaskGetTickCount();
 
+    // Battery health (core::battery) at 100 Hz on the lowest VIN of each
+    // 10 ms: a starter's dip is a few hundred ms deep and narrow, and this
+    // is the one task that samples VIN fast enough to see it.
+    core::battery::Monitor battery;
+    const core::battery::Config battery_cfg;
+    core::state::Battery published;
+    float low_v = 0.0f;
+    uint32_t samples = 0;
+    uint32_t last_pub_ms = 0;
+
     for (;;) {
         vTaskDelayUntil(&last, 1);
         if (!d.rails) continue;
@@ -60,6 +71,27 @@ void power_task(void* arg) {
         uint32_t pin_mv = 0;
         if (!hal::ok(d.rails->read_vin_pin_mv_fast(pin_mv))) continue;
         const float vin = core::power::vin_from_pin_mv(pin_mv, div);
+
+        if (samples == 0 || vin < low_v) low_v = vin;
+        if (++samples >= 10) {
+            const uint32_t now = d.clock->now_ms();
+            battery.update(low_v, d.slots->engine.get().rpm, now, battery_cfg);
+            samples = 0;
+            // On change, and once a second regardless so DIAG's averages
+            // move: this is the slot's only writer.
+            const core::battery::Report& r = battery.report();
+            core::state::Battery b;
+            b.rest_v = r.rest_v;
+            b.crank_min_v = r.crank_min_v;
+            b.charge_v = r.charge_v;
+            b.verdict = static_cast<uint8_t>(r.verdict);
+            if (b.verdict != published.verdict || b.crank_min_v != published.crank_min_v ||
+                now - last_pub_ms >= 1000) {
+                d.slots->battery.publish(b);
+                published = b;
+                last_pub_ms = now;
+            }
+        }
 
         switch (detector.feed(vin)) {
             case core::power::FailDetector::Event::Tripped: {

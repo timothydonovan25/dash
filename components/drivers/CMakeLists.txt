@@ -9,9 +9,10 @@ idf_component_register(
          "src/vin_sense.cpp"
          "src/nvs_storage.cpp"
          "src/sdcard.cpp"
+         "src/chip_temp.cpp"
     INCLUDE_DIRS "include"
     REQUIRES dash_hal bsp core
              esp_driver_spi esp_driver_i2c esp_driver_uart
              esp_driver_gpio esp_adc
              esp_lcd esp_timer nvs_flash
-             esp_driver_sdspi fatfs vfs)
+             esp_driver_sdspi fatfs vfs esp_driver_tsens)

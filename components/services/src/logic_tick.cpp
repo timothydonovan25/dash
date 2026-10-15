@@ -68,6 +68,18 @@ void logic_restore(Deps& d, LogicState& s) {
     d.storage->read_f64(hal::kNsLife, hal::kKeyOdometerMi, odo);
     d.storage->read_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
     s.trip.restore(odo, hours);
+
+    // The waypoints, which `keeper` saves while the bike is stopped.
+    for (size_t i = 0; i < core::waypoint::kCount; ++i) {
+        const uint16_t k = static_cast<uint16_t>(hal::kKeyWaypointBase + i * 3);
+        double lat = 0.0, lon = 0.0, when = -1.0;
+        if (hal::ok(d.storage->read_f64(hal::kNsLife, k, lat)) &&
+            hal::ok(d.storage->read_f64(hal::kNsLife, static_cast<uint16_t>(k + 1), lon)) &&
+            hal::ok(d.storage->read_f64(hal::kNsLife, static_cast<uint16_t>(k + 2), when))) {
+            core::waypoint::decode(lat, lon, when, s.waypoints.pts[i]);
+        }
+    }
+    if (d.slots) d.slots->waypoint.publish(s.waypoints);
 }
 
 void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
@@ -151,13 +163,19 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::NavDropWaypoint:
                 // Like the finish line: this task decides whether the fix
                 // is good enough to drop one on.
-                if (g.fix) {
-                    d.slots->waypoint.publish(
-                        core::state::Waypoint{true, g.lat, g.lon, g.utc_ms});
+                if (g.fix && cmd.i >= 0 &&
+                    static_cast<size_t>(cmd.i) < core::waypoint::kCount) {
+                    s.waypoints.pts[cmd.i] = core::state::Waypoint{
+                        true, g.lat, g.lon, g.utc_ms,
+                        core::waypoint::gps_day(g.year, g.day_of_year)};
+                    d.slots->waypoint.publish(s.waypoints);
                 }
                 break;
             case core::state::CommandId::NavClearWaypoint:
-                d.slots->waypoint.publish(core::state::Waypoint{});
+                if (cmd.i >= 0 && static_cast<size_t>(cmd.i) < core::waypoint::kCount) {
+                    s.waypoints.pts[cmd.i] = core::state::Waypoint{};
+                    d.slots->waypoint.publish(s.waypoints);
+                }
                 break;
             case core::state::CommandId::StorageEject:
                 d.slots->storage_request.publish(core::state::StorageRequest{
@@ -298,6 +316,20 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         publish_gear_cal(d, s);
     }
 
+    // --- START ----------------------------------------------------------
+    // Once a power-on, at the first good fix with a date: the way back to
+    // where this ride began. A START from earlier in the same ride stays
+    // (core::waypoint::start_is_stale), so a key-off at lunch keeps home.
+    if (!s.start_checked && core::waypoint::good_fix(g) && g.year != 0) {
+        s.start_checked = true;
+        const uint32_t day = core::waypoint::gps_day(g.year, g.day_of_year);
+        core::state::Waypoint& start = s.waypoints.pts[core::waypoint::Start];
+        if (core::waypoint::start_is_stale(start, day, g.utc_ms)) {
+            start = core::state::Waypoint{true, g.lat, g.lon, g.utc_ms, day};
+            d.slots->waypoint.publish(s.waypoints);
+        }
+    }
+
     // --- trip -----------------------------------------------------------
     core::trip::Input ti;
     ti.speed_mph = m.best_mph;
@@ -418,6 +450,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         rec.gps_utc_ms = g.utc_ms;
         rec.fused_mph = fo.mph;
         rec.fused_sigma = fo.sigma_mph;
+        rec.alt_ft = g.alt_m * 3.28084f;
         rec.t_ms = now;
         rec.speed_mph = m.best_mph;
         rec.rpm = e.rpm;

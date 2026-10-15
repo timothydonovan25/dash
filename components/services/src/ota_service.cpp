@@ -20,6 +20,7 @@
 #include "core/ota/ota.hpp"
 
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -46,7 +47,10 @@ constexpr size_t   kChunk = 4096;
 constexpr uint32_t kIdleWaitMs = 100;
 
 // The chunk buffer. Static rather than on the stack, which stays small.
-uint8_t g_chunk[kChunk];
+// PSRAM, to keep internal .bss small (CLAUDE.md, internal RAM ceiling):
+// flash writes and card reads from here go through IDF's own internal
+// bounce buffers, which only an install pays for.
+EXT_RAM_BSS_ATTR uint8_t g_chunk[kChunk];
 
 // An upload that stops sending for this long has been abandoned: the phone
 // left the hotspot, or the page was closed.
@@ -354,8 +358,11 @@ void ota_task(void* arg) {
 
 void start_ota(Deps& d) {
     // 16 kB: four upload chunks in flight while the flash writes catch up.
+    // PSRAM: internal RAM is what the boot needs (16 kB more here and the
+    // demo could not create its idle tasks), and the bytes are copied out to
+    // the internal g_chunk before any flash write touches them.
     static StaticStreamBuffer_t sb_ctl;
-    static uint8_t sb_mem[16 * 1024 + 1];
+    EXT_RAM_BSS_ATTR static uint8_t sb_mem[16 * 1024 + 1];
     if (!d.ota_stream) {
         d.ota_stream = xStreamBufferCreateStatic(sizeof sb_mem - 1, 1, sb_mem, &sb_ctl);
     }

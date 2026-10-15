@@ -198,7 +198,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 35 host test suites, all passing.
+the media half of step 9 is written. 39 host test suites, all passing.
 
 **`core/`** — all host-tested:
 
@@ -254,6 +254,17 @@ the media half of step 9 is written. 35 host test suites, all passing.
   `power` task (1 kHz, core 1): dark, stop SD writes, save the odometer.
   Hold-up is only a few ms, so it cannot flush a file. Never run on the board
   (bringup §8.1)
+- `battery/` rest voltage, the crank dip and charging voltage, and a verdict
+  (good / weak / not charging / overcharging). `power` feeds it at 100 Hz
+  with the lowest VIN of each 10 ms, because a starter's dip is too short
+  for keeper's 1 Hz, and owns the `battery` slot. DIAG → POWER shows it
+- `slip/` wheelspin and lockup: each wheel against road speed (fused, GPS
+  behind it), held 0.7 s at its peak. `ui::App` runs it on every Frame and
+  draws a bar across the top of every screen (CONFIG → Display → Slip bar);
+  the bar clearing is a full repaint, like a dismissed alert
+- `waypoint/` the named waypoints START, TRUCK, CAMP, FUEL, MARK, the rule
+  for when START moves (not set, or from another day, or 6 h old), and
+  their NVS encoding
 - `delta/` lap delta against the session best — a **placeholder**, see below
 - `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.
@@ -321,10 +332,35 @@ slot with the same checks as the card; nothing on the network can boot an
 image. A C6 without Wi-Fi in its firmware has it replaced from `slave_fw`.
 Architecture §11.7.1. **Watch internal RAM:** the SDIO link, lwIP and NimBLE
 share it, and `wifi` logs what is free at every change of state.
+**Internal `.bss`/`.data` has a hard ceiling before that.** Until the
+scheduler starts, the only internal heap is from `_heap_start` up to
+0x4FF3AFC0 plus 18 kB; the 384 kB region at 0x4FF40000 is added after.
+ESP-Hosted's constructor took ~87 kB of it for SDIO buffers, so with
+`_heap_start` at 0x4FF21280 the demo could not create its idle tasks and
+boot-looped (`vApplicationGetIdleTaskMemory` assert). Those buffers now ask
+for PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`), but ESP-Hosted
+silently falls back to internal RAM if that fails, and that they really
+landed in PSRAM is not yet measured. Count only on `_heap_start`: check
+`nm build/dash.elf | grep _heap_start` after adding statics. The bike is at
+0x4FF1E450, 11.8 kB below the line the demo failed at. Big buffers go on a
+task stack (allocated later) or in PSRAM with `EXT_RAM_BSS_ATTR`, never in
+a plain static.
 
-**CRUISE → NAV** drops one waypoint at the current fix and points back to it:
+**CRUISE → NAV** guides back to one of five named waypoints:
 `core::geo::guide` gives distance and bearing, heading-up above 3 mph and
-north-up below. The waypoint is a `logic` slot, RAM only, lost at power-off.
+north-up below. The list shows every waypoint's distance; the row the cursor
+is on is the target, and it opens on START, which `logic` sets at the first
+good fix of a ride (a key-off at lunch keeps it). Short E puts the selected
+one here, long E clears it. `logic` owns them; `keeper` saves them to NVS
+while stopped and `logic_restore` brings them back.
+
+**Ride logs** are `logs/sNNN.csv` until the GPS gives a date, then renamed to
+the local date, `logs/2026-10-13_s007.csv` (core::log::log_file_name; the
+session number is one past the highest on the card). Each row ends with
+`AltFt`, GPS altitude. The Wi-Fi page exports any log as a GPX track,
+converted in the page's own JavaScript so the dash does no work. DIAG →
+System shows the P4's die temperature (`drivers::ChipTemp`, keeper, 1 Hz)
+and the IMU's, from its FIFO packets.
 **Startup** shows a 1.5 s splash before the gauge sweep (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System

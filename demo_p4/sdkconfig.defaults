@@ -45,6 +45,11 @@ CONFIG_COMPILER_CXX_RTTI=n
 CONFIG_ESP_HOSTED_ENABLED=y
 CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
 CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
+# SDIO buffers in PSRAM (the P4's DMA reaches it through the cache). In
+# internal RAM they are ~87 kB taken by a constructor before the scheduler
+# starts, when internal heap is only _heap_start..0x4FF3AFC0 plus 18 kB,
+# and the demo boot-looped for lack of 1.5 kB for an idle task.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
 
 # Everything below is explicit rather than left to defaults, after the
 # above experience — the choice defaults in this component don't reliably

@@ -5,6 +5,7 @@
 // every screen — is the firmware's own code, so what the window shows is
 // what the panel will show.
 #pragma once
+#include "core/battery/battery.hpp"
 #include <cstdint>
 #include "core/jump/jump.hpp"
 #include "core/state/slots.hpp"
@@ -20,6 +21,10 @@ struct Controls {
     float tps_pct    = 0.0f;
     float coolant_c  = 82.0f;
     float vbat       = 12.6f;
+    // Each wheel against road speed, percent: +30 is spinning 30% fast,
+    // -100 is locked. GPS keeps telling the truth, as it would.
+    float front_slip_pct = 0.0f;
+    float rear_slip_pct  = 0.0f;
     bool  neutral    = false;
     bool  ecu_online = false;   // NullEngine ships, so this is off by default
     bool  gps_fix    = true;
@@ -104,6 +109,7 @@ private:
     uint32_t spike_until_ms_ = 0;
 
     core::jump::Detector jump_;
+    core::battery::Monitor battery_;   // as `power` runs it, on the slider's VIN
 
     uint32_t media_position_ms_ = 0;
     char     media_title_prev_[60] = {};

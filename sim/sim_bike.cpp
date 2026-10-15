@@ -149,8 +149,10 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
 
     core::state::Motion m;
     m.gps_mph = c.speed_mph;
-    m.front_mph = c.speed_mph;
-    m.rear_mph = c.speed_mph;
+    m.front_mph = c.speed_mph * (1.0f + c.front_slip_pct / 100.0f);
+    m.rear_mph = c.speed_mph * (1.0f + c.rear_slip_pct / 100.0f);
+    if (m.front_mph < 0.0f) m.front_mph = 0.0f;
+    if (m.rear_mph < 0.0f) m.rear_mph = 0.0f;
     m.best_mph = c.speed_mph;
     m.accel_g = accel_g_;
     slots.motion.publish(m);
@@ -248,6 +250,15 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     core::state::Elec el;
     el.vbat = c.vbat;
     slots.elec.publish(el);
+
+    battery_.update(c.vbat, c.rpm, now_ms, core::battery::Config{});
+    const core::battery::Report& br = battery_.report();
+    core::state::Battery b;
+    b.rest_v = br.rest_v;
+    b.crank_min_v = br.crank_min_v;
+    b.charge_v = br.charge_v;
+    b.verdict = static_cast<uint8_t>(br.verdict);
+    slots.battery.publish(b);
 }
 
 }  // namespace sim

@@ -15,6 +15,8 @@ namespace {
 // The alert covers the middle of the screen, not all of it: the rider should
 // still be able to see their speed while deciding what to do about a tyre.
 constexpr Rect kAlertBox{20, 170, 280, 120};
+// Across the whole top, where the eye already goes for the tach.
+constexpr Rect kSlipBar{0, 0, kScreenW, 30};
 // Top-right corner: small, but on every screen.
 constexpr Rect kDevTag{448, 0, 32, 11};
 // The splash's progress bar: a track that fills over kSplashMs.
@@ -28,10 +30,11 @@ constexpr int kMaxPerWidget = 6;
 App::App(const Context& ctx) : ctx_(ctx) {
     Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &nav_screen_, &lap_,
                      &lap_history_, &track_map_, &all_data_, &engine_,
-                     &attitude_, &sensors_, &gps_, &system_, &bus_, &radio_,
+                     &attitude_, &sensors_, &gps_, &system_, &power_, &bus_, &radio_,
                      &update_, &config_, &gearcal_};
     for (Screen* s : all) s->bind(ctx_);
     alert_.set_bounds(kAlertBox);
+    slip_bar_.set_bounds(kSlipBar);
     dev_tag_.set_bounds(kDevTag);
 }
 
@@ -63,8 +66,9 @@ Screen* App::screen_for(Mode m, uint8_t index) {
                 case 0: return &sensors_;
                 case 1: return &gps_;
                 case 2: return &system_;
-                case 3: return &bus_;
-                case 4: return &radio_;
+                case 3: return &power_;
+                case 4: return &bus_;
+                case 5: return &radio_;
                 default: return &update_;
             }
         case Mode::Config:
@@ -141,9 +145,27 @@ void App::update_alert(const core::state::Frame& f) {
     }
 }
 
+void App::update_slip(const core::state::Frame& f) {
+    core::slip::Reading r;
+    const bool on = !ctx_.settings || ctx_.settings->slip_bar;
+    // Not over the name card or the sweep, which own the whole screen.
+    if (on && !splash_on_ && sweep_done_) {
+        const bool fused = f.fused.speed_valid;
+        const float road = fused ? f.fused.speed_mph : f.gnss.speed_mph;
+        r = slip_meter_.update(f.motion.front_mph, f.motion.rear_mph, road,
+                               fused || f.gnss.fix, f.t_ms, core::slip::Config{});
+    }
+    const bool was = slip_bar_.active();
+    slip_bar_.set(r.kind, r.pct);
+    // The bar covered the top of the screen, which is title and chrome, not
+    // widgets: putting it back is a full repaint, as for a dismissed alert.
+    if (was && !slip_bar_.active()) needs_full_ = true;
+}
+
 void App::update(const core::state::Frame& f) {
     if (!entered_) return;
     update_alert(f);
+    update_slip(f);
     const bool dev = f.ota.known && f.ota.role != core::ota::Role::Stable;
     if (dev != dev_running_) {
         dev_running_ = dev;
@@ -274,6 +296,11 @@ void App::render(Canvas& c, bool full) {
         w->clear_dirty();
     }
 
+    if (slip_bar_.active()) {
+        if (c.intersects(slip_bar_.bounds)) slip_bar_.render(c);
+        slip_bar_.clear_dirty();
+    }
+
     // Last, and over everything: the one widget allowed to break the
     // one-screen-at-a-time rule (§7.4).
     if (alert_.active()) {
@@ -307,6 +334,7 @@ size_t App::damage(Damage* out, size_t max) {
     }
     // The overlays go only when they changed themselves. Where a widget
     // under them changed, draw_damage() has already put them back on top.
+    if (slip_bar_.active() && slip_bar_.dirty && n < max) out[n++] = Damage{&slip_bar_, slip_bar_.bounds};
     if (alert_.active() && alert_.dirty && n < max) out[n++] = Damage{&alert_, alert_.bounds};
     if (dev_running_ && dev_tag_.dirty && n < max) out[n++] = Damage{&dev_tag_, dev_tag_.bounds};
     return n;
@@ -320,6 +348,10 @@ void App::draw_damage(Canvas& c, const Damage& d) {
     d.w->render(c);
     // Over everything, as on a full repaint: an overlay whose own pixels
     // did not change still has to cover what was just drawn under it.
+    if (d.w != &slip_bar_ && d.w != &alert_ && d.w != &dev_tag_ && slip_bar_.active() &&
+        d.r.intersects(slip_bar_.bounds)) {
+        slip_bar_.render(c);
+    }
     if (d.w != &alert_ && alert_.active() && d.r.intersects(alert_.bounds)) alert_.render(c);
     if (d.w != &dev_tag_ && dev_running_ && d.r.intersects(dev_tag_.bounds)) dev_tag_.render(c);
 }
@@ -327,6 +359,7 @@ void App::draw_damage(Canvas& c, const Damage& d) {
 void App::clear_damage() {
     splash_bar_dirty_ = false;
     for (Widget* w : current().widgets()) if (w) w->clear_dirty();
+    slip_bar_.clear_dirty();
     alert_.clear_dirty();
     dev_tag_.clear_dirty();
 }

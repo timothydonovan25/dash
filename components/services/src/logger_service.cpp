@@ -32,7 +32,9 @@ void logger_task(void* arg) {
     EXT_RAM_BSS_ATTR static char block[kBlockBytes];
     EXT_RAM_BSS_ATTR static core::log::Record batch[kBatch];
     size_t   used = 0;
-    char     path[32] = {};
+    char     path[40] = {};
+    int      session = -1;
+    bool     dated = false;
     bool     header_written = false;
     uint32_t written_records = 0;
 
@@ -54,27 +56,67 @@ void logger_task(void* arg) {
             if (d.blackbox) d.blackbox->clear();
             used = 0;
             header_written = false;
+            path[0] = '\0';           // a card put back starts a new file
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
 
         if (path[0] == '\0') {
-            // One file per power-on. There is no real-time clock on this
-            // board and the GPS may not have a fix yet, so the name is a
-            // session counter rather than a date — sortable, and it never
-            // collides with a file already on the card.
-            for (int i = 0; i < 1000; ++i) {
-                std::snprintf(path, sizeof path, "logs/s%03d.csv", i);
-                char full[64];
-                std::snprintf(full, sizeof full, "/sd/%s", path);
-                FILE* f = std::fopen(full, "rb");
-                if (!f) break;              // this one is free
-                std::fclose(f);
+            // One file per power-on (or card insertion). There is no real-
+            // time clock on this board and the GPS may not have the date
+            // yet, so it starts as logs/sNNN.csv and is renamed to the date
+            // below once it is known (core::log::log_file_name). The session
+            // number is one past the highest on the card in either form: a
+            // renamed file frees its plain name, and a second ride on the
+            // same day must not land on the first one's dated name.
+            int highest = -1;
+            card->list("logs", [](const char* name, size_t, void* ctx) {
+                int& h = *static_cast<int*>(ctx);
+                const int v = core::log::session_of(name);
+                if (v > h) h = v;
+            }, &highest);
+            session = (highest + 1) % 1000;
+            dated = false;
+            if (core::log::log_file_name(path, sizeof path, core::log::Date{},
+                                         static_cast<unsigned>(session)) == 0 ||
+                card->exists(path)) {
                 path[0] = '\0';
-            }
-            if (path[0] == '\0') {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
+            }
+        }
+
+        // The day, once the GPS has said it. Whatever is buffered goes out
+        // under the old name first, so nothing is written to a name that is
+        // about to stop existing.
+        if (!dated) {
+            const core::state::Gnss g = d.slots->gnss.get();
+            if (g.year != 0) {
+                core::log::Date utc;
+                utc.year = g.year;
+                utc.month = g.month;
+                utc.day = g.day;
+                const core::log::Date local = core::log::local_date(
+                    utc, g.utc_ms, d.settings ? d.settings->tz_offset_h : 0);
+                char dated_path[sizeof path];
+                if (core::log::log_file_name(dated_path, sizeof dated_path, local,
+                                             static_cast<unsigned>(session)) > 0) {
+                    if (!header_written) {
+                        // Nothing on the card yet: just start under the date.
+                        if (!card->exists(dated_path)) {
+                            std::snprintf(path, sizeof path, "%s", dated_path);
+                        }
+                    } else {
+                        if (used > 0 && hal::ok(card->append(path, block, used))) used = 0;
+                        if (used == 0 && hal::ok(card->rename(path, dated_path))) {
+                            std::snprintf(path, sizeof path, "%s", dated_path);
+                        }
+                    }
+                }
+                // Once, success or not: a rename that failed (a name taken,
+                // a card error) keeps the session name rather than retrying
+                // every pass.
+                dated = true;
             }
         }
 

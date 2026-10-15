@@ -62,6 +62,7 @@ public:
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
 
     AlertOverlay& alert() { return alert_; }
+    SlipBar& slip_bar() { return slip_bar_; }
 
     // Wiring for the things a screen reads but does not own.
     void set_trip_source(const IPointSource* s)  { trip_map_.set_source(s); }
@@ -97,6 +98,7 @@ private:
     SensorsScreen    sensors_;
     GpsScreen        gps_;
     SystemScreen     system_;
+    PowerScreen      power_;
     BusScreen        bus_;
     RadioScreen      radio_;
     UpdateScreen     update_;
@@ -108,6 +110,11 @@ private:
     core::alert::Alerter alerter_;
     core::alert::Kind    alert_kind_ = core::alert::Kind::None;
     void             update_alert(const core::state::Frame& f);
+
+    // Wheelspin and lockup (core/slip), over the top of every screen.
+    SlipBar              slip_bar_;
+    core::slip::Meter    slip_meter_;
+    void                 update_slip(const core::state::Frame& f);
 
     // A dev image (§11.7) wears this on every screen.
     DevTag           dev_tag_;

@@ -202,6 +202,8 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "tps")     c.tps_pct = v;
     else if (name == "coolant") c.coolant_c = v;
     else if (name == "vbat")    c.vbat = v;
+    else if (name == "fslip")   c.front_slip_pct = v;
+    else if (name == "rslip")   c.rear_slip_pct = v;
     else if (name == "sats")    c.sats = static_cast<int>(v);
     else if (name == "neutral") c.neutral = v != 0.0f;
     else if (name == "ecu")     c.ecu_online = v != 0.0f;

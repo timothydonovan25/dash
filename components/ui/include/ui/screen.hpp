@@ -54,6 +54,10 @@ struct SystemInfo {
     // CONFIG's Eject has unmounted the card and it is still in the socket:
     // safe to pull. Cleared when it comes out. Written by `storage`.
     bool     sd_ejected     = false;
+    // The P4's die temperature, from `keeper` once a second. Valid only
+    // with chip_temp_ok: there is no number that means "not read".
+    float    chip_temp_c    = 0.0f;
+    bool     chip_temp_ok   = false;
 };
 
 struct Context {

@@ -188,6 +188,34 @@ hal::Status SdCard::remove(const char* path) {
     return std::remove(full) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
 }
 
+hal::Status SdCard::rename(const char* from, const char* to) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    if (!mounted_) return hal::Status::NotPresent;
+    if (!from || !*from || !to || !*to) return hal::Status::Unsupported;
+    if (open_file_ && std::strncmp(open_path_, from, sizeof open_path_) == 0) {
+        std::fclose(static_cast<FILE*>(open_file_));
+        open_file_ = nullptr;
+        open_path_[0] = '\0';
+        unsynced_ = 0;
+    }
+    char a[96], b[96];
+    std::snprintf(a, sizeof a, "%s/%s", kMount, from);
+    std::snprintf(b, sizeof b, "%s/%s", kMount, to);
+    struct stat st;
+    if (stat(b, &st) == 0) return hal::Status::Busy;      // never clobber
+    return std::rename(a, b) == 0 ? hal::Status::Ok : hal::Status::IoError;
+}
+
+bool SdCard::exists(const char* path) {
+    const Hold hold(lock_);
+    if (!hold.held() || !mounted_ || !path) return false;
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    struct stat st;
+    return stat(full, &st) == 0;
+}
+
 hal::Status SdCard::size_of(const char* path, size_t& out) {
     out = 0;
     const Hold hold(lock_);

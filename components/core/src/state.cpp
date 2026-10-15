@@ -25,6 +25,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.trip   = s.trip.get();
     f.lap    = s.lap.get();
     f.elec   = s.elec.get();
+    f.battery = s.battery.get();
     f.media  = s.media.get();
     f.tpms   = s.tpms.get();
     f.health = s.health.get();

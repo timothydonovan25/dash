@@ -102,15 +102,18 @@ double degrees_from_ddmm(const char* s, char hemi) {
     return out;
 }
 
-// "ddmmyy" to day of the year, 0 when the field is empty or nonsense. Two-digit
-// years are 2000-2099, which outlasts the hardware.
-static uint16_t day_of_year_from_ddmmyy(const char* f) {
+// "ddmmyy" to day of the year, 0 when the field is empty or nonsense, and
+// the calendar date through the out-parameters. Two-digit years are
+// 2000-2099, which outlasts the hardware.
+static uint16_t day_of_year_from_ddmmyy(const char* f, int& year, int& month, int& day) {
     for (int i = 0; i < 6; ++i) {
         if (f[i] < '0' || f[i] > '9') return 0;
     }
     if (f[6] != '\0') return 0;
     auto two = [&](int i) { return (f[i] - '0') * 10 + (f[i + 1] - '0'); };
-    const int day = two(0), month = two(2), year = 2000 + two(4);
+    day = two(0);
+    month = two(2);
+    year = 2000 + two(4);
     if (month < 1 || month > 12 || day < 1) return 0;
     const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     static const uint8_t kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -208,8 +211,14 @@ Result Parser::parse_rmc(state::Gnss& out) {
 
     // ddmmyy. Kept even for a void fix, like the time: the clock is right
     // before the position is.
-    const uint16_t doy = day_of_year_from_ddmmyy(field_[9]);
-    if (doy != 0) out.day_of_year = doy;
+    int year = 0, month = 0, day = 0;
+    const uint16_t doy = day_of_year_from_ddmmyy(field_[9], year, month, day);
+    if (doy != 0) {
+        out.day_of_year = doy;
+        out.year = static_cast<uint16_t>(year);
+        out.month = static_cast<uint8_t>(month);
+        out.day = static_cast<uint8_t>(day);
+    }
 
     if (!valid) {
         // A void fix still carries the time, which is worth keeping — but

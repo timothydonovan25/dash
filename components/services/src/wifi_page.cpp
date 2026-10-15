@@ -19,6 +19,7 @@ button:disabled{background:#444}
 progress{width:100%;height:14px;margin-top:8px}
 .msg{margin-top:8px}.bad{color:#f66}.good{color:#6d6}.dim{color:#888}
 .row button{width:auto;margin:0;padding:2px 10px;background:#633;font-size:14px}
+.row button.gpx{background:#246;margin-right:6px}
 .set{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #2a2a2a}
 .set:last-child{border:0}.set input,.set select{font:inherit;width:120px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:3px}
 .set input[type=checkbox]{width:22px;height:22px}.u{color:#888;font-size:13px;min-width:40px}
@@ -72,7 +73,9 @@ async function logs(){
     if(!l.length){el.innerHTML='<span class="dim">No logs, or no card.</span>';return}
     l.sort((a,b)=>a.name<b.name?1:-1);
     el.innerHTML=l.map(f=>'<div class="row"><a href="/logs/'+f.name+'" download>'+f.name+
-      '</a><span class="dim">'+kb(f.size)+' <button data-del="'+f.name+'">Delete</button></span></div>').join('');
+      '</a><span class="dim">'+kb(f.size)+' <button class="gpx" data-gpx="'+f.name+'">GPX</button>'+
+      '<button data-del="'+f.name+'">Delete</button></span></div>').join('');
+    el.querySelectorAll('[data-gpx]').forEach(b=>b.onclick=()=>gpx(b.dataset.gpx,b));
     el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
       const n=b.dataset.del;if(!confirm('Delete '+n+' from the card?'))return;
       b.disabled=true;
@@ -80,6 +83,49 @@ async function logs(){
       if(r.ok)logs();else{alert('Not deleted: '+r.error);b.disabled=false}
     });
   }catch(e){el.innerHTML='<span class="bad">Could not list logs.</span>'}
+}
+// A ride as a GPX track, for Gaia, Strava or Komoot. Converted here, on
+// the phone, from the CSV the dash already serves: the dash does no work.
+// One point per GPS fix (the log repeats a fix until the next one), only
+// rows with a fix, and a new segment across a gap of more than 5 s.
+//
+// Times need the UTC date. The file is named by the *local* date it was
+// started (logs/2026-10-13_s007.csv) and GpsUtc is seconds into the UTC day,
+// so the UTC offset setting puts the two together. A log from before the
+// GPS knew the date (sNNN.csv) is exported without times.
+let tz=0;
+async function gpx(n,b){
+  const label=b.textContent;b.disabled=true;b.textContent='…';
+  try{
+    const t=await (await fetch('/logs/'+n)).text();
+    const m=/^(\d{4})-(\d\d)-(\d\d)_/.exec(n);
+    const base=m?Date.UTC(+m[1],+m[2]-1,+m[3]):null;
+    let h=null,last=null,first=-1,prev=-1,day=0,off=0,segs=[],seg=[];
+    for(const ln of t.split('\n')){
+      if(!ln||ln[0]==='#')continue;
+      const c=ln.split(',');
+      if(!h){if(c[0]==='Time'){h={};c.forEach((k,i)=>h[k.trim()]=i)}continue}
+      if(c.length<=h.GpsUtc||!(+c[h.Flags]&4))continue;    // kFlagFix; a cut-off row
+      const u=+c[h.GpsUtc];if(!isFinite(u)||u===last)continue;last=u;
+      if(first<0){first=u;const l=u+tz*3600;off=l<0?1:(l>=86400?-1:0)}
+      if(prev>=0&&u<prev-43200)day++;                     // past UTC midnight
+      if(prev>=0&&u-prev>5&&seg.length){segs.push(seg);seg=[]}
+      prev=u;
+      let p='<trkpt lat="'+c[h.Latitude]+'" lon="'+c[h.Longitude]+'">';
+      if(h.AltFt!==undefined)p+='<ele>'+(+c[h.AltFt]/3.28084).toFixed(1)+'</ele>';
+      if(base!==null)p+='<time>'+new Date(base+(off+day)*86400e3+u*1e3).toISOString()+'</time>';
+      seg.push(p+'</trkpt>');
+    }
+    if(seg.length)segs.push(seg);
+    if(!segs.length){alert('No GPS fixes in '+n+'.');return}
+    const x='<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="CRF250F Dash" '+
+      'xmlns="http://www.topografix.com/GPX/1/1"><trk><name>'+n.replace('.csv','')+'</name>'+
+      segs.map(s=>'<trkseg>'+s.join('')+'</trkseg>').join('')+'</trk></gpx>\n';
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([x],{type:'application/gpx+xml'}));
+    a.download=n.replace('.csv','.gpx');document.body.appendChild(a);a.click();a.remove();
+  }catch(e){alert('Could not export '+n+'.')}
+  finally{b.disabled=false;b.textContent=label}
 }
 $('file').onchange=()=>{$('up').disabled=!$('file').files.length;$('upmsg').textContent=''};
 $('up').onclick=()=>{
@@ -105,6 +151,7 @@ async function settings(){
   try{l=await (await fetch('/api/settings')).json()}catch(e){el.innerHTML='<span class="bad">Could not read settings.</span>';return}
   const groups={};
   l.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
+  const z=l.find(s=>s.label==='UTC offset');if(z)tz=+z.value;
   el.innerHTML='';
   for(const g in groups){
     const d=document.createElement('details');

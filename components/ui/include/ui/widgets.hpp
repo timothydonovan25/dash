@@ -6,6 +6,7 @@
 // a dashboard, because one of them means stop riding.
 #pragma once
 #include <cstdint>
+#include "core/slip/slip.hpp"
 #include "ui/widget.hpp"
 #include "ui/album_art.hpp"
 #include "core/state/vehicle.hpp"
@@ -469,6 +470,21 @@ private:
     int16_t rel_deg_ = 0;           // whole degrees: finer only redraws noise
     bool    heading_up_ = false;
     bool    valid_ = false;
+};
+
+// Wheelspin and lockup (core/slip), as a bar across the top of the screen:
+// amber for spin, red for a locked wheel, filling with how much, and named
+// in the middle. Drawn over whatever the screen has there, only while
+// there is something to show.
+class SlipBar : public Widget {
+public:
+    void set(core::slip::Kind kind, uint8_t pct);
+    bool active() const { return kind_ != core::slip::Kind::None; }
+    void render(Canvas& c) override;
+
+private:
+    core::slip::Kind kind_ = core::slip::Kind::None;
+    uint8_t          pct_  = 0;
 };
 
 class DevTag : public Widget {

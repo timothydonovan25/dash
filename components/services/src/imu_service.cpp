@@ -95,6 +95,7 @@ void imu_task(void* arg) {
     }
 
     g_imu_task = xTaskGetCurrentTaskHandle();
+    float imu_temp_c = 0.0f;
     const bool have_int = attach_data_ready();
 
     for (;;) {
@@ -138,9 +139,11 @@ void imu_task(void* arg) {
                 jumps.update(mag, batch[i].t_ms, jcfg);
             }
 
+            if (n > 0) imu_temp_c = batch[n - 1].temp_c;
             core::state::Attitude out;
             filter.publish_into(out);
             jumps.publish_into(out);
+            out.imu_temp_c = imu_temp_c;
             d.slots->attitude.publish(out);
         } else {
             d.health->report_error(core::state::Dev::Imu,

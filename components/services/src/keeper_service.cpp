@@ -11,10 +11,12 @@
 // rather than a second; the table is only republished when it changes.
 #include "services/services.hpp"
 #include "services/settings_store.hpp"
+#include "drivers/chip_temp.hpp"
 #include "drivers/pca9955b.hpp"
 #include "drivers/pod.hpp"
 #include "core/power/power.hpp"
 #include "core/sun/sun.hpp"
+#include "core/waypoint/waypoint.hpp"
 #include "bsp/pins.hpp"
 
 #include "esp_heap_caps.h"
@@ -44,8 +46,11 @@ void keeper_task(void* arg) {
     double last_saved_hours = -1.0;
 
     SettingsSaver settings_saver;
+    drivers::ChipTemp chip_temp;
+    const bool chip_temp_up = hal::ok(chip_temp.init());
     core::sun::AutoDim auto_dim;
     uint32_t pass = 0;
+    uint32_t saved_wp_gen = 0;
     TickType_t next = xTaskGetTickCount();
 
     for (;;) {
@@ -111,6 +116,21 @@ void keeper_task(void* arg) {
             // Settings that have changed since the last pass.
             settings_saver.save_changed(*d.storage, *d.settings);
 
+            // The named waypoints, when `logic` has changed one.
+            const uint32_t wp_gen = d.slots->waypoint.generation();
+            if (wp_gen != saved_wp_gen) {
+                const core::state::Waypoints w = d.slots->waypoint.get();
+                for (size_t i = 0; i < core::state::Waypoints::kCount; ++i) {
+                    const uint16_t k = static_cast<uint16_t>(hal::kKeyWaypointBase + i * 3);
+                    const core::state::Waypoint& p = w.pts[i];
+                    d.storage->write_f64(hal::kNsLife, k, p.lat);
+                    d.storage->write_f64(hal::kNsLife, static_cast<uint16_t>(k + 1), p.lon);
+                    d.storage->write_f64(hal::kNsLife, static_cast<uint16_t>(k + 2),
+                                         core::waypoint::encode_when(p));
+                }
+                saved_wp_gen = wp_gen;
+            }
+
             d.storage->commit();
         }
 
@@ -138,6 +158,10 @@ void keeper_task(void* arg) {
                 heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
             d.system->psram_free_b = static_cast<uint32_t>(
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            float c = 0.0f;
+            const bool ok = chip_temp_up && hal::ok(chip_temp.read(c));
+            if (ok) d.system->chip_temp_c = c;
+            d.system->chip_temp_ok = ok;
 
             // Bus recoveries live in the driver that performs them; the
             // DIAG bus screen is the reason they are counted at all.

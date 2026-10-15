@@ -179,7 +179,7 @@ int main() {
 
         // The replay columns, at the end where RaceRender ignores them, and
         // one cell per name.
-        CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma\n"));
+        CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt\n"));
         const auto commas = [](const char* p) {
             size_t c = 0;
             for (; *p && *p != '\n'; ++p) c += *p == ',';
@@ -189,10 +189,52 @@ int main() {
         r.front_mph = 31.25f;
         r.gps_utc_ms = 45296120;              // 12:34:56.12
         r.fused_mph = 30.5f;
+        r.alt_ft = 5280.4f;
         format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",5280\n"));                // last, whole feet
         CHECK(contains(line, ",31.25,"));
         CHECK(contains(line, ",45296.12,"));
         CHECK(contains(line, ",30.50,"));
+    }
+
+    CASE("a log is named by session until the date is known, then by local date");
+    {
+        char name[40];
+        CHECK(log_file_name(name, sizeof name, Date{}, 7) > 0);
+        CHECK(std::strcmp(name, "logs/s007.csv") == 0);
+        CHECK(log_file_name(name, sizeof name, Date{2026, 10, 13}, 7) > 0);
+        CHECK(std::strcmp(name, "logs/2026-10-13_s007.csv") == 0);
+        CHECK(log_file_name(name, 10, Date{2026, 10, 13}, 7) == 0);   // too small
+    }
+
+    CASE("the session number comes back out of either form of name");
+    {
+        CHECK(session_of("s007.csv") == 7);
+        CHECK(session_of("2026-10-13_s042.csv") == 42);
+        CHECK(session_of("notes.csv") == -1);
+        CHECK(session_of("xs007.csv") == -1);
+        CHECK(session_of("s07.csv") == -1);
+        CHECK(session_of("s007.txt") == -1);
+    }
+
+    CASE("the local date crosses midnight, months and years the right way");
+    {
+        // 02:30 UTC on 14 October is still the 13th five hours west.
+        Date d = local_date(Date{2026, 10, 14}, 9000000u, -5);
+        CHECK(d.year == 2026 && d.month == 10 && d.day == 13);
+        // ...and the 1st of a month goes back to the last of the one before.
+        d = local_date(Date{2026, 3, 1}, 3600000u, -5);
+        CHECK(d.month == 2 && d.day == 28);
+        d = local_date(Date{2024, 3, 1}, 3600000u, -5);           // leap year
+        CHECK(d.month == 2 && d.day == 29);
+        d = local_date(Date{2027, 1, 1}, 0u, -1);
+        CHECK(d.year == 2026 && d.month == 12 && d.day == 31);
+        // East of UTC late in the day is tomorrow.
+        d = local_date(Date{2026, 12, 31}, 23u * 3600000u, 2);
+        CHECK(d.year == 2027 && d.month == 1 && d.day == 1);
+        // Same day either side when nothing crosses.
+        d = local_date(Date{2026, 10, 13}, 18u * 3600000u, -5);
+        CHECK(d.day == 13);
     }
 
     CASE("a lap tag is hh:mm:ss.nn, which RaceRender parses strictly");

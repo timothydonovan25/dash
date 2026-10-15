@@ -8,12 +8,15 @@
 // `keeper` on the health table, since this board has no keeper.
 #pragma once
 #include "services/services.hpp"
+#include "state_request.hpp"
 
 namespace demo {
 
 // Starts the render task pinned to core 0 — this board has one thing to
 // do. Reuses ui::App and core::nav::InputEvent exactly as the real render
-// task does; runs until the demo is powered off.
-void start_demo_render(services::Deps& d, services::CommandQueue& q);
+// task does; runs until the demo is powered off. Answers `state` requests
+// from the serial console through `req`.
+void start_demo_render(services::Deps& d, services::CommandQueue& q,
+                       StateRequest& req);
 
 }  // namespace demo

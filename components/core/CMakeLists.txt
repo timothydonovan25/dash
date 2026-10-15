@@ -27,4 +27,7 @@ idf_component_register(
          "src/fusion_speed.cpp"
          "src/c6.cpp"
          "src/gearcal.cpp"
+         "src/battery.cpp"
+         "src/slip.cpp"
+         "src/waypoint.cpp"
     INCLUDE_DIRS "include")

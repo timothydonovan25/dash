@@ -15,6 +15,7 @@
 #include "core/geo/geo.hpp"
 #include "core/lap/lap.hpp"
 #include "core/trip/trip.hpp"
+#include "core/waypoint/waypoint.hpp"
 
 namespace services {
 
@@ -47,6 +48,11 @@ struct LogicState {
     // already been told the receiver went quiet.
     uint32_t last_lap_rx_ms = 0;
     bool     lap_told_stale = false;
+
+    // The named waypoints (core::waypoint), and whether START has been
+    // looked at yet this power-on.
+    core::state::Waypoints waypoints;
+    bool start_checked = false;
 
     // Which ticks get a blackbox row. The rate is a setting, so this is not
     // simply every tick.

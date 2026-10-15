@@ -1111,6 +1111,43 @@ void AlertOverlay::render(Canvas& c) {
 
 // --- DevTag -------------------------------------------------------------
 
+void SlipBar::set(core::slip::Kind kind, uint8_t pct) {
+    const bool a = assign_t(kind_, kind);
+    const bool b = assign_t(pct_, kind == core::slip::Kind::None ? uint8_t{0} : pct);
+    if (a || b) touch();
+}
+
+void SlipBar::render(Canvas& c) {
+    using core::slip::Kind;
+    if (kind_ == Kind::None) {
+        c.fill_rect(bounds, color::kBg);
+        return;
+    }
+    const bool lock = kind_ != Kind::Spin;
+    const Color fill = lock ? color::kAlarm : color::kWarn;
+    // Full at 100% for a lock (a stopped wheel) and at 50% for spin, which
+    // is already the rear doing half as much again as the bike.
+    const int full = lock ? 100 : 50;
+    int w = bounds.w * (pct_ < full ? pct_ : full) / full;
+    if (w < 24) w = 24;            // always visibly there while it is shown
+    c.fill_rect(bounds, color::kPanel);
+    c.fill_rect(Rect{bounds.x, bounds.y, static_cast<int16_t>(w), bounds.h}, fill);
+
+    char buf[24];
+    size_t k = 0;
+    for (const char* p = core::slip::kind_name(kind_); *p && k + 6 < sizeof buf; ++p) buf[k++] = *p;
+    buf[k++] = ' ';
+    k += core::units::fmt_value(buf + k, sizeof buf - k, pct_, 0, true);
+    if (k + 1 < sizeof buf) buf[k++] = '%';
+    buf[k] = '\0';
+    const uint8_t scale = 3;
+    // Dark on the colour once the fill reaches the words, white on the
+    // panel before it: white on amber washes out in sun.
+    const Color ink = w > bounds.w / 2 ? color::kBg : color::kWhite;
+    c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - c.text_height(scale) / 2), buf,
+                ink, scale, Align::Center);
+}
+
 void DevTag::render(Canvas& c) {
     c.fill_rect(bounds, color::kAlarm);
     c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - c.text_height(1) / 2), "DEV",

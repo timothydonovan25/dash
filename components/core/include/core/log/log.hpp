@@ -57,6 +57,12 @@ struct Record {
     uint32_t gps_utc_ms = 0;      // changes when a new fix arrives
     float    fused_mph  = 0.0f;
     float    fused_sigma= 0.0f;
+
+    // GPS altitude, above mean sea level. Feet, as everything on this dash
+    // is shown; the GPX export converts. No barometer, so it is the
+    // receiver's own figure: good to a few tens of feet, noisy between
+    // fixes, and meaningless without kFlagFix.
+    float    alt_ft     = 0.0f;
 };
 
 enum Flags : uint16_t {
@@ -192,5 +198,31 @@ size_t csv_header(char* buf, size_t n);
 // `# Lap 3: 00:02:43.08` — a measured lap time, which beats RaceRender
 // inferring one from the trace. `index` is 0-based, as its tags are.
 size_t format_lap_marker(char* buf, size_t n, uint16_t index, uint32_t lap_ms);
+
+// --- file names -----------------------------------------------------------
+// A log starts life as logs/sNNN.csv, because at key-on there is no clock:
+// no RTC on this board, and the GPS has not said what day it is. Once it
+// has, the file is renamed to the local date with the same session number,
+// logs/2026-10-13_s007.csv, so a card of rides sorts by when they were.
+
+struct Date {
+    uint16_t year  = 0;
+    uint8_t  month = 0;
+    uint8_t  day   = 0;
+};
+
+// The local calendar date at `utc_ms` into the UTC day `utc`, `tz_h` hours
+// from UTC. An evening ride in the Americas is already tomorrow in UTC.
+Date local_date(Date utc, uint32_t utc_ms, int32_t tz_h);
+
+// "logs/sNNN.csv" before the date is known, "logs/YYYY-MM-DD_sNNN.csv"
+// after; `date.year` 0 means not known. Returns the length, or 0 if it did
+// not fit.
+size_t log_file_name(char* buf, size_t n, Date date, unsigned session);
+
+// The session number in a log's file name (no directory), either form, or
+// -1 if it is not one. A new session takes one more than the highest on the
+// card: renaming frees "sNNN.csv", so a free plain name is not enough.
+int session_of(const char* name);
 
 }  // namespace core::log

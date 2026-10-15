@@ -1,5 +1,6 @@
 #include "ui/screens.hpp"
 #include "core/fusion/speed.hpp"
+#include "core/battery/battery.hpp"
 #include "core/power/power.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
@@ -198,16 +199,14 @@ void SystemScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, static_cast<float>(s->log_dropped), 0, true);
     table_.set_row(7, "Log dropped", v);
 
-    // Which supply the board is on, as `ctrl` decides it for the lamp cap.
-    const char* supply = "--";
-    switch (core::power::classify(f.elec.vbat)) {
-        case core::power::Source::Bike: supply = "bike"; break;
-        case core::power::Source::Usb:  supply = "USB";  break;
-        default: break;
-    }
-    table_.set_row(8, "Supply", supply);
-    u::fmt_value(v, sizeof v, f.elec.vbat, 1, f.elec.vbat > 0.0f);
-    table_.set_row(9, "VIN", v);
+    // How hot the dash is getting: the P4's die, and the IMU's, which is
+    // the nearest thing to a thermometer inside the case. Supply and VIN
+    // are on DIAG -> POWER with the battery.
+    temp_row(v, sizeof v, s->chip_temp_c, s->chip_temp_ok);
+    table_.set_row(8, "Chip temp", v);
+    temp_row(v, sizeof v, f.att.imu_temp_c,
+             f.health[Dev::Imu].state == core::state::DevState::Ok);
+    table_.set_row(9, "IMU temp", v);
 
     u::fmt_value(v, sizeof v, static_cast<float>(s->imu_timeouts), 0, true);
     table_.set_row(10, "IMU int miss", v);
@@ -229,7 +228,64 @@ void SystemScreen::update(const Frame& f) {
     table_.set_row_count(12);
 }
 
+void SystemScreen::temp_row(char* buf, size_t n, float c, bool valid) const {
+    const char* unit = "";
+    const float shown = u::temp_for_display(c, units(), &unit);
+    size_t k = u::fmt_value(buf, n, shown, 0, valid);
+    if (valid && k + 3 < n) {
+        buf[k++] = ' ';
+        for (const char* p = unit; *p && k + 1 < n; ++p) buf[k++] = *p;
+        buf[k] = '\0';
+    }
+}
+
 WidgetList SystemScreen::widgets() { return WidgetList{list_, 1}; }
+
+// --- PowerScreen --------------------------------------------------------
+namespace {
+constexpr Rect kPowerTable {14, 40, 452, 264};
+
+void volts(char* buf, size_t n, float v) {
+    size_t k = u::fmt_value(buf, n, v, 2, v > 0.0f);
+    if (v > 0.0f && k + 3 < n) { buf[k++] = ' '; buf[k++] = 'V'; buf[k] = '\0'; }
+}
+}  // namespace
+
+void PowerScreen::enter(Canvas&) {
+    table_.set_bounds(kPowerTable);
+    table_.configure(12, 2);
+    list_[0] = &table_;
+}
+
+void PowerScreen::update(const Frame& f) {
+    char v[24];
+
+    // Which supply the board is on, as `ctrl` decides it for the lamp cap.
+    const char* supply = "--";
+    switch (core::power::classify(f.elec.vbat)) {
+        case core::power::Source::Bike: supply = "bike"; break;
+        case core::power::Source::Usb:  supply = "USB";  break;
+        default: break;
+    }
+    table_.set_row(0, "Supply", supply);
+    volts(v, sizeof v, f.elec.vbat);
+    table_.set_row(1, "VIN", v);
+
+    // What this power-on has measured; each is "--" until its moment has
+    // come: ten seconds parked, a start, three seconds held above 3000 rpm.
+    table_.set_row(2, "Battery",
+                   core::battery::verdict_name(
+                       static_cast<core::battery::Verdict>(f.battery.verdict)));
+    volts(v, sizeof v, f.battery.rest_v);
+    table_.set_row(3, "At rest", v);
+    volts(v, sizeof v, f.battery.crank_min_v);
+    table_.set_row(4, "Cranking low", v);
+    volts(v, sizeof v, f.battery.charge_v);
+    table_.set_row(5, "Charging", v);
+    table_.set_row_count(6);
+}
+
+WidgetList PowerScreen::widgets() { return WidgetList{list_, 1}; }
 
 // --- BusScreen ----------------------------------------------------------
 namespace {

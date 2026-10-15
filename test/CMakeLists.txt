@@ -40,7 +40,10 @@ add_library(core STATIC
     ${CORE}/src/sweep.cpp
     ${CORE}/src/fusion_speed.cpp
     ${CORE}/src/gearcal.cpp
-    ${CORE}/src/c6.cpp)
+    ${CORE}/src/c6.cpp
+    ${CORE}/src/battery.cpp
+    ${CORE}/src/slip.cpp
+    ${CORE}/src/waypoint.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -69,7 +72,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert wire ui)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -94,6 +97,12 @@ add_executable(test_logic_lap test_logic_lap.cpp ${SVC}/src/logic_tick.cpp)
 target_include_directories(test_logic_lap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_logic_lap PRIVATE core ui hal)
 add_test(NAME logic_lap COMMAND test_logic_lap)
+
+# `logic`'s half of the named waypoints.
+add_executable(test_logic_waypoint test_logic_waypoint.cpp ${SVC}/src/logic_tick.cpp)
+target_include_directories(test_logic_waypoint PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_waypoint PRIVATE core ui hal)
+add_test(NAME logic_waypoint COMMAND test_logic_waypoint)
 
 foreach(t ui wire)
     target_link_libraries(test_${t} PRIVATE ui hal)

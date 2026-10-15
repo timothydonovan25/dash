@@ -60,6 +60,10 @@ struct Attitude {
     // work this out for itself: `airtime_ms` holds the figure indefinitely,
     // and a Frame is one instant with no history in it. 0 means no jump yet.
     uint32_t land_ms     = 0;
+    // The IMU's die temperature, from its FIFO packets. Its gyro bias moves
+    // with temperature, so it is worth seeing; it is also the nearest thing
+    // to an inside-the-dash thermometer. 0 until the IMU has reported.
+    float    imu_temp_c  = 0.0f;
 };
 
 struct Gnss {
@@ -77,6 +81,11 @@ struct Gnss {
     // carried one. utc_ms is time of day only, so this is what lets
     // core/sun know the season.
     uint16_t day_of_year = 0;
+    // The same RMC date as a calendar date, for naming log files. 0 until
+    // a sentence has carried one.
+    uint16_t year  = 0;
+    uint8_t  month = 0;
+    uint8_t  day   = 0;
     // The system clock (ms since boot, the clock every task's `now` comes
     // from) when this fix's first sentence finished arriving. Moves once
     // per fix, not per sentence, so it is how `logic` tells a new fix from
@@ -118,6 +127,15 @@ Lap to_published(const lap::State& s, int32_t delta_ms = 0,
 // rows that could never hold a number.
 struct Elec {
     float vbat = 0.0f;    // VIN through the sense divider; 0 = no reading
+};
+
+// Battery and charging health, from core::battery: what this power-on has
+// measured, 0 for not yet. `verdict` is a core::battery::Verdict.
+struct Battery {
+    float   rest_v      = 0.0f;
+    float   crank_min_v = 0.0f;
+    float   charge_v    = 0.0f;
+    uint8_t verdict     = 0;
 };
 
 // Written by the `ble` task, from the phone's §11.1 Feed lines through
@@ -259,14 +277,24 @@ struct GearCal {
     uint8_t  adjusted_mask = 0;    // gears it has moved this power cycle
 };
 
-// The one dropped waypoint, for CRUISE -> NAV. Written by `logic`, from the
-// fix at the moment the rider dropped it. RAM only: it does not survive a
-// power cycle.
+// One place to get back to, for CRUISE -> NAV.
 struct Waypoint {
     bool     set = false;
     double   lat = 0.0;
     double   lon = 0.0;
     uint32_t utc_ms = 0;     // when it was dropped, for "dropped 14:05"
+    // Which GPS day it was dropped on (core::waypoint::gps_day), 0 if not
+    // known. START uses it to tell today's ride from yesterday's.
+    uint32_t day = 0;
+};
+
+// The named waypoints, in core::waypoint's order: START, which `logic` sets
+// itself at the first good fix of a ride, then TRUCK, CAMP, FUEL and MARK
+// for the rider to drop. Written by `logic`; `keeper` keeps them in NVS,
+// so a lunch stop with the key off does not lose the way back.
+struct Waypoints {
+    static constexpr unsigned kCount = 5;
+    Waypoint pts[kCount];
 };
 
 // The hotspot, for the Update screen. Written by `wifi`.

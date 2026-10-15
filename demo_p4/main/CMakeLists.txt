@@ -25,12 +25,13 @@ idf_component_register(
          "../../components/services/src/wifi_page.cpp"
          "../../components/drivers/src/nvs_storage.cpp"
          "../../components/drivers/src/clock.cpp"
+         "../../components/drivers/src/chip_temp.cpp"
     INCLUDE_DIRS "."
                  "../../components/services/include"
                  "../../components/services/src"
                  "../../components/drivers/include"
     REQUIRES core dash_hal ui p4_restart_fix
-             esp_lcd esp_mm esp_driver_i2c esp_driver_gpio esp_driver_ledc
+             esp_lcd esp_mm esp_driver_tsens esp_driver_i2c esp_driver_gpio esp_driver_ledc
              esp_timer freertos esp_driver_usb_serial_jtag
              esp_hosted bt esp_partition bootloader_support
              app_update esp_app_format nvs_flash

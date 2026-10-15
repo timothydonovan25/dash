@@ -21,7 +21,7 @@ struct InputEvent {
 // How many screens each mode owns. Config always has exactly one: the
 // generated ConfigItem list.
 struct Layout {
-    uint8_t screens[kModeCount] = {6, 3, 3, 6, 1};
+    uint8_t screens[kModeCount] = {6, 3, 3, 7, 1};
 };
 
 struct State {

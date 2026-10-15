@@ -62,6 +62,7 @@ drivers::NvsStorage g_storage;   // the real driver: settings and BLE bonds   //
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
+demo::StateRequest     g_state_request;   // serial `state` -> render
 
 // DIAG -> Sensors' "MCP pod" row (and DIAG -> Bus's "I2C0 pod"). The pod is
 // optional here, so a demo that never had one shows it absent, not faulted;
@@ -158,11 +159,11 @@ extern "C" void app_main(void) {
     g_commands.begin();
 
     demo::start_ctrl_probe(g_deps);
-    demo::start_demo_render(g_deps, g_commands);
+    demo::start_demo_render(g_deps, g_commands, g_state_request);
     demo::start_demo_bike(g_deps, g_commands);
     xTaskCreatePinnedToCore(touch_input_task, "touch", 3072, nullptr, 9,
                             nullptr, 1);
-    demo::start_serial_buttons();
+    demo::start_serial_buttons(g_state_request);
 
 #ifdef DASH_CRASH_TEST
     // A dev image that dies at boot, for testing the fall back to stable:

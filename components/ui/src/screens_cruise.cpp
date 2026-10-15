@@ -2,6 +2,7 @@
 #include "core/geo/geo.hpp"
 #include "core/health/health.hpp"
 #include "core/units/units.hpp"
+#include "core/waypoint/waypoint.hpp"
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
 #include <cmath>
@@ -458,8 +459,8 @@ constexpr Rect kNavDist   {266,  50, 200,  44};
 constexpr Rect kNavUnit   {266,  98, 200,  16};
 constexpr Rect kNavBear   {266, 126, 200,  16};
 constexpr Rect kNavDrop   {266, 150, 200,  12};
-constexpr Rect kNavStatus {266, 170, 200,  12};
-constexpr Rect kNavActions{266, 214, 200,  52};
+constexpr Rect kNavStatus {266, 168, 200,  12};
+constexpr Rect kNavActions{266, 190, 200, 100};
 
 void NavScreen::enter(Canvas&) {
     arrow_.set_bounds(kNavArrow);
@@ -474,34 +475,40 @@ void NavScreen::enter(Canvas&) {
     list_[6] = &actions_;
 }
 
+namespace {
+// Feet (or metres) up close, where the last stretch is walked; miles (or
+// km) further out.
+void nav_distance(char* num, size_t n, const char** unit, double dist_ft, u::System sys) {
+    const bool metric = sys == u::System::Metric;
+    const float mi = static_cast<float>(dist_ft / 5280.0);
+    if (mi < 0.1f) {
+        const float near = metric ? static_cast<float>(dist_ft * 0.3048) : static_cast<float>(dist_ft);
+        u::fmt_value(num, n, near, 0, true);
+        *unit = metric ? "m" : "ft";
+    } else {
+        const float far = u::distance_for_display(mi, sys, unit);
+        u::fmt_value(num, n, far, far < 10.0f ? 2 : 1, true);
+    }
+}
+}  // namespace
+
 void NavScreen::update(const Frame& f) {
-    const core::state::Waypoint& w = f.waypoint;
+    const uint8_t sel = focus_ < kActions ? focus_ : 0;
+    const core::state::Waypoint& w = f.waypoint.pts[sel];
     const bool fix = f.gnss.fix;
     const bool live = w.set && fix;
+    const core::geo::LatLon here{f.gnss.lat, f.gnss.lon};
 
     core::geo::Guide g;
     if (live) {
-        g = core::geo::guide(core::geo::LatLon{f.gnss.lat, f.gnss.lon}, f.gnss.course_deg,
-                             f.gnss.speed_mph, core::geo::LatLon{w.lat, w.lon});
+        g = core::geo::guide(here, f.gnss.course_deg, f.gnss.speed_mph,
+                             core::geo::LatLon{w.lat, w.lon});
     }
     arrow_.set(static_cast<float>(g.rel_deg), g.heading_up, live);
 
-    // Feet (or metres) up close, where the last stretch is walked; miles
-    // (or km) further out.
     char num[12] = "--";
     const char* unit = "";
-    if (live) {
-        const bool metric = units() == u::System::Metric;
-        const float mi = static_cast<float>(g.dist_ft / 5280.0);
-        if (mi < 0.1f) {
-            const float near = metric ? static_cast<float>(g.dist_ft * 0.3048) : static_cast<float>(g.dist_ft);
-            u::fmt_value(num, sizeof num, near, 0, true);
-            unit = metric ? "m" : "ft";
-        } else {
-            const float far = u::distance_for_display(mi, units(), &unit);
-            u::fmt_value(num, sizeof num, far, far < 10.0f ? 2 : 1, true);
-        }
-    }
+    if (live) nav_distance(num, sizeof num, &unit, g.dist_ft, units());
     dist_.set_text(num);
     dist_unit_.set_text(unit);
 
@@ -518,33 +525,51 @@ void NavScreen::update(const Frame& f) {
         char clock[12];
         u::fmt_clock(clock, sizeof clock, w.utc_ms,
                      has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0, true);
-        std::snprintf(when, sizeof when, "dropped %s", clock);
+        std::snprintf(when, sizeof when, "%s set %s", core::waypoint::name(sel), clock);
     }
     dropped_.set_text(when);
 
     status_.set_text(!fix          ? "waiting for a GPS fix"
-                     : !w.set      ? "no waypoint yet"
+                     : !w.set      ? (sel == core::waypoint::Start ? "START sets at the first fix"
+                                                                    : "not set: E puts it here")
                      : g.heading_up ? "up = straight ahead"
                                     : "up = north (under 3 mph)");
 
-    actions_.set_row(0, w.set ? "Move here" : "Drop here", fix ? "" : "no fix");
-    actions_.set_row(1, "Clear", w.set ? "" : "none");
+    // Every waypoint and how far it is, so the list is also the answer to
+    // "how far back to the truck?" without picking it.
+    for (uint8_t i = 0; i < kActions; ++i) {
+        const core::state::Waypoint& p = f.waypoint.pts[i];
+        char right[16] = "--";
+        if (p.set && fix) {
+            char d[12];
+            const char* du = "";
+            nav_distance(d, sizeof d, &du,
+                         core::geo::distance_ft(here, core::geo::LatLon{p.lat, p.lon}), units());
+            std::snprintf(right, sizeof right, "%s %s", d, du);
+        } else if (p.set) {
+            std::snprintf(right, sizeof right, "set");
+        }
+        actions_.set_row(i, core::waypoint::name(i), right);
+    }
     actions_.set_row_count(kActions);
-    actions_.set_focus(focus_);
+    actions_.set_focus(sel);
 }
 
 bool NavScreen::handle(const core::nav::InputEvent& e) {
     using core::nav::Button;
     using core::nav::Press;
-    if (e.button != Button::E || e.press != Press::Short) return false;
+    if (e.button != Button::E) return false;
     // `logic` decides whether the fix is good enough, as for the lap line.
-    return post(core::state::Command(focus_ == 0 ? core::state::CommandId::NavDropWaypoint
-                                                 : core::state::CommandId::NavClearWaypoint));
+    const int32_t which = focus_ < kActions ? focus_ : 0;
+    return post(core::state::Command(e.press == Press::Short
+                                         ? core::state::CommandId::NavDropWaypoint
+                                         : core::state::CommandId::NavClearWaypoint,
+                                     which));
 }
 
 void NavScreen::draw_background(Canvas& c) {
-    c.draw_text(kNavActions.x, static_cast<int16_t>(kNavActions.bottom() + 8),
-                "C/D pick, E to do it", theme::secondary, 1, Align::Left);
+    c.draw_text(kNavActions.x, static_cast<int16_t>(kNavActions.bottom() + 6),
+                "C/D pick  E here  hold E clear", theme::secondary, 1, Align::Left);
 }
 
 WidgetList NavScreen::widgets() { return WidgetList{list_, 7}; }

@@ -35,8 +35,12 @@ void dump_crypto_regs() {
              (rst2 & HP_SYS_CLKRST_REG_RST_EN_CRYPTO) != 0);
 }
 
-void handle(const char* line) {
+void handle(const char* line, StateRequest& req) {
     if (std::strcmp(line, "regs") == 0) return dump_crypto_regs();
+    if (std::strcmp(line, "state") == 0) {
+        req.pending.store(true);
+        return;
+    }
     core::nav::Press press;
     if (std::strncmp(line, "btn ", 4) == 0)       press = core::nav::Press::Short;
     else if (std::strncmp(line, "long ", 5) == 0) press = core::nav::Press::Long;
@@ -48,7 +52,8 @@ void handle(const char* line) {
     ESP_LOGI(kTag, "%s %c", press == core::nav::Press::Short ? "short" : "long", c);
 }
 
-void serial_task(void*) {
+void serial_task(void* arg) {
+    StateRequest& req = *static_cast<StateRequest*>(arg);
     char line[32];
     size_t n = 0;
     for (;;) {
@@ -57,7 +62,7 @@ void serial_task(void*) {
         if (ch == '\r') continue;
         if (ch == '\n') {
             line[n] = '\0';
-            handle(line);
+            handle(line, req);
             n = 0;
         } else if (n + 1 < sizeof line) {
             line[n++] = static_cast<char>(ch);
@@ -67,14 +72,14 @@ void serial_task(void*) {
 
 }  // namespace
 
-void start_serial_buttons() {
+void start_serial_buttons(StateRequest& req) {
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     if (usb_serial_jtag_driver_install(&cfg) != ESP_OK) {
         ESP_LOGW(kTag, "no USB serial driver; serial buttons off");
         return;
     }
     dump_crypto_regs();
-    xTaskCreatePinnedToCore(serial_task, "serial_btn", 3072, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(serial_task, "serial_btn", 3072, &req, 3, nullptr, 1);
 }
 
 }  // namespace demo

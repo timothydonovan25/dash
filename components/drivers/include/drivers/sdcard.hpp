@@ -43,6 +43,11 @@ public:
     // size it had at its last sync.
     hal::Status list(const char* dir, ListFn fn, void* ctx) override;
     hal::Status remove(const char* path) override;
+    // Renames a file, closing it first if it is the one being appended to;
+    // the next append() reopens it under whatever name it is given. Fails
+    // rather than overwrite an existing `to`.
+    hal::Status rename(const char* from, const char* to);
+    bool exists(const char* path);
 
     // Reads the socket's card-detect switch. Configures the pin on first
     // use, so it works before init() and after unmount().

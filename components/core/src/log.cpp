@@ -1,4 +1,6 @@
 #include "core/log/log.hpp"
+#include <cstdio>
+#include <cstring>
 #include "core/units/units.hpp"
 
 namespace core::log {
@@ -111,7 +113,7 @@ size_t csv_header(char* buf, size_t n) {
         "# RaceRender Data\n"
         "Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,"
         "Lean,Pitch,GVert,LapTime,Sats,Flags,"
-        "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma\n";
+        "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt\n";
     return terminate(buf, n, put_str(buf, n, 0, h));
 }
 
@@ -194,8 +196,72 @@ size_t format_csv(char* buf, size_t n, const Record& r) {
     k = put_num(buf, n, k, r.fused_mph, 2);
     k = put(buf, n, k, ',');
     k = put_num(buf, n, k, r.fused_sigma, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.alt_ft, 0);
     k = put(buf, n, k, '\n');
     return terminate(buf, n, k);
+}
+
+namespace {
+bool leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
+int days_in(int y, int m) {
+    static const uint8_t kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    return kDays[m - 1] + (m == 2 && leap(y) ? 1 : 0);
+}
+}  // namespace
+
+Date local_date(Date utc, uint32_t utc_ms, int32_t tz_h) {
+    if (utc.year == 0 || utc.month < 1 || utc.month > 12 || utc.day < 1) return utc;
+    const int64_t local_ms = static_cast<int64_t>(utc_ms) + static_cast<int64_t>(tz_h) * 3600000;
+    int y = utc.year, m = utc.month, d = utc.day;
+    if (local_ms < 0) {
+        if (--d < 1) {
+            if (--m < 1) { m = 12; --y; }
+            d = days_in(y, m);
+        }
+    } else if (local_ms >= 86400000) {
+        if (++d > days_in(y, m)) {
+            d = 1;
+            if (++m > 12) { m = 1; ++y; }
+        }
+    }
+    Date out;
+    out.year = static_cast<uint16_t>(y);
+    out.month = static_cast<uint8_t>(m);
+    out.day = static_cast<uint8_t>(d);
+    return out;
+}
+
+size_t log_file_name(char* buf, size_t n, Date date, unsigned session) {
+    if (!buf || n == 0) return 0;
+    session %= 1000;
+    int len;
+    if (date.year == 0) {
+        len = std::snprintf(buf, n, "logs/s%03u.csv", session);
+    } else {
+        len = std::snprintf(buf, n, "logs/%04u-%02u-%02u_s%03u.csv",
+                            static_cast<unsigned>(date.year),
+                            static_cast<unsigned>(date.month),
+                            static_cast<unsigned>(date.day), session);
+    }
+    if (len < 0 || static_cast<size_t>(len) >= n) { buf[0] = '\0'; return 0; }
+    return static_cast<size_t>(len);
+}
+
+int session_of(const char* name) {
+    if (!name) return -1;
+    const size_t n = std::strlen(name);
+    // ...sNNN.csv, with the 's' first or after the date's '_'.
+    if (n < 8 || std::strcmp(name + n - 4, ".csv") != 0) return -1;
+    const char* s = name + n - 8;
+    if (s[0] != 's') return -1;
+    if (s != name && s[-1] != '_') return -1;
+    int v = 0;
+    for (int i = 1; i <= 3; ++i) {
+        if (s[i] < '0' || s[i] > '9') return -1;
+        v = v * 10 + (s[i] - '0');
+    }
+    return v;
 }
 
 }  // namespace core::log

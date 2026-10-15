@@ -108,11 +108,13 @@ void render_task(void* arg) {
     ctx.commands = &q;
     ctx.system = d.system;
 
-    // Static, not on the stack: App is ~10.9 kB (every screen and widget),
-    // more than this task's whole 8 kB stack, and was overflowing it on the
-    // first line. One render task, so one App; internal RAM, because every
-    // frame touches it.
-    static ui::App app(ctx);
+    // On this task's stack, which start_render sizes for it: App is ~11 kB
+    // (every screen and widget). Not a static: .bss comes out of the internal
+    // RAM the boot itself runs in, which ESP-Hosted's buffers already nearly
+    // fill, and 11 kB more there left no room to create the idle tasks. A
+    // task stack is allocated after the scheduler starts, from the larger
+    // region IDF only adds then. Internal either way: every frame touches it.
+    ui::App app(ctx);
     app.bind_settings(d.settings);
 
     TraceSource trip_src(d.trip_trace);
@@ -259,8 +261,9 @@ void start_render(Deps& d, CommandQueue& q) {
     g_render_arg = {&d, &q};
     // Core 1, with the card and the radio. The panel can afford to be late;
     // the shift lights cannot, and they are on the other core.
-    xTaskCreatePinnedToCore(render_task, "render", 8192, &g_render_arg, 6,
-                            nullptr, 1);
+    // 8 kB for the task itself plus the App that lives on its stack.
+    xTaskCreatePinnedToCore(render_task, "render", 8192 + sizeof(ui::App),
+                            &g_render_arg, 6, nullptr, 1);
 }
 
 }  // namespace services

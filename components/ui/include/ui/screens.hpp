@@ -109,8 +109,11 @@ private:
     Widget*   list_[2] = {};
 };
 
-// Drop a waypoint, then find your way back to it: an arrow, the distance,
-// and the bearing. Two rows: Drop waypoint (or move it here) and Clear.
+// Find your way back: an arrow, the distance and the bearing to one of the
+// named waypoints (core::waypoint). The list has START, which sets itself at
+// the start of a ride, then TRUCK, CAMP, FUEL and MARK; the row the cursor
+// is on is the one the arrow points at, and it opens on START. Short E puts
+// that waypoint here, long E clears it.
 class NavScreen final : public Screen {
 public:
     const char* name() const override { return "NAV"; }
@@ -123,7 +126,7 @@ public:
     void set_focus(uint8_t f) override { focus_ = f; }
 
 private:
-    static constexpr uint8_t kActions = 2;
+    static constexpr uint8_t kActions = 5;
     NavArrow arrow_;
     Label    dist_;
     Label    dist_unit_;
@@ -309,6 +312,22 @@ private:
 class SystemScreen final : public Screen {
 public:
     const char* name() const override { return "SYSTEM"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    WidgetList widgets() override;
+
+private:
+    void temp_row(char* buf, size_t n, float c, bool valid) const;
+    Table   table_;
+    Widget* list_[1] = {};
+};
+
+// Supply, VIN and battery health (core::battery): what the battery rests
+// at, how far it sagged on the last start, and what the charging system is
+// putting back.
+class PowerScreen final : public Screen {
+public:
+    const char* name() const override { return "POWER"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
     WidgetList widgets() override;

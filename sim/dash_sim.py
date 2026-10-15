@@ -139,6 +139,9 @@ SLIDERS = [
     ("tps",     "Throttle  %",    0,  100,    1,    0),
     ("coolant", "Coolant  C",     0,  130,    1,   82),
     ("vbat",    "Battery  V",     0,   15,  0.1, 12.6),
+    # Each wheel against road speed: + spinning, -100 locked (slip bar).
+    ("fslip",   "Front slip  %", -100, 60,    5,    0),
+    ("rslip",   "Rear slip  %",  -100, 60,    5,    0),
     ("sats",    "Satellites",     0,   16,    1,   11),
     # The panel's write clock. 10 is the firmware's starting value; drop it
     # to watch a repaint arrive line by line. 0 is an ideal, instant bus.

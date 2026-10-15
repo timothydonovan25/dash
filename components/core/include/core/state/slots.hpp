@@ -19,11 +19,12 @@ struct Slots {
     Published<Trip>     trip;       // logic
     Published<Lap>      lap;        // logic
     Published<Elec>     elec;       // keeper
+    Published<Battery>  battery;    // power
     Published<Media>    media;      // ble
     Published<Tpms>     tpms;       // ble, once the TPMS scan exists
     Published<Health>   health;     // keeper
     Published<BleDiag>  ble_diag;   // ble
-    Published<Waypoint> waypoint;   // logic
+    Published<Waypoints> waypoint;  // logic
     Published<Fused>    fused;      // logic
     Published<GearCal>  gear_cal;   // logic
     // Not in Frame: nothing on screen reads it, only whichever task owns
@@ -49,13 +50,14 @@ struct Frame {
     Trip     trip;
     Lap      lap;
     Elec     elec;
+    Battery  battery;
     Media    media;
     Tpms     tpms;
     Health   health;
     BleDiag  ble_diag;
     Ota      ota;
     Wifi     wifi;
-    Waypoint waypoint;
+    Waypoints waypoint;
     Fused    fused;
     GearCal  gear_cal;
     uint32_t t_ms = 0;

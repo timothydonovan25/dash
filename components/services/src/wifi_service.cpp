@@ -31,6 +31,7 @@
 #include "core/wifi/wifi.hpp"
 
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
@@ -88,8 +89,9 @@ struct Web {
 };
 Web g_web;
 // One buffer for the server's one task: uploads and downloads both pass
-// through it a chunk at a time.
-uint8_t g_buf[kChunk];
+// through it a chunk at a time. PSRAM, as ota's g_chunk: the radio is the
+// bottleneck, not the copy through IDF's bounce buffers.
+EXT_RAM_BSS_ATTR uint8_t g_buf[kChunk];
 
 // --- page handlers --------------------------------------------------------
 
