@@ -478,9 +478,12 @@ Set of widgets to start with:
 
 `Label` · `ValueBox` · `BigNumber` · `Bar` · `Sparkline` · `Table` ·
 `MapView` · `StatusDot` · `DeltaBar` · `LeanIndicator` · `LeanGauge` ·
-`ShiftStrip` · `TachBar` · `GBall` · `MediaRow` · `AlertOverlay`
+`ShiftStrip` · `TachBar` · `MediaRow` · `AlertOverlay`
 
 `ArcGauge` became `LeanGauge`, which is the only arc anything wanted.
+`GBall` went when SPEED dropped it for a bigger lean gauge; its jump face
+(airtime, landing g, for a few seconds after a landing) moved into
+`LeanGauge`, which shows it in the same place.
 `MediaStrip` became three `MediaRow`s, one per line, because a widget is
 the unit of redraw and a scrolling album title should not drag a static
 artist name down the bus with it.

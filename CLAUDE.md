@@ -276,7 +276,7 @@ the media half of step 9 is written. 39 host test suites, all passing.
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 13 widgets, all 17 screens, the render loop, laid out
+**`ui/`** — canvas, 20 widgets, all 17 screens, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each

@@ -25,6 +25,10 @@ struct Controls {
     // -100 is locked. GPS keeps telling the truth, as it would.
     float front_slip_pct = 0.0f;
     float rear_slip_pct  = 0.0f;
+    // A wheel sensor that has died: it reads 0 whatever the bike does,
+    // which core::fusion::WheelCheck faults after 5 s at speed.
+    bool  front_dead = false;
+    bool  rear_dead  = false;
     bool  neutral    = false;
     bool  ecu_online = false;   // NullEngine ships, so this is off by default
     bool  gps_fix    = true;
@@ -91,8 +95,16 @@ public:
     // say what a sensor says during a jump.
     void trigger_jump(uint32_t now_ms, uint32_t airtime_ms = 900);
 
+    // A slip that comes and goes, which a slider cannot do: real spins and
+    // locks last a fraction of a second, and the bar's 0.7 s peak hold is
+    // for exactly that. Played on top of the slip sliders.
+    enum class Slip : uint8_t { Spin, FrontLock, RearLock, Count };
+    void trigger_slip(Slip kind, uint32_t now_ms);
+
     // Where the bike is on the circuit, 0..1. The front end draws a dot.
     float lap_fraction() const { return f_; }
+    // Where the bike's speed actually is, chasing the slider.
+    float speed_mph() const { return speed_mph_; }
     double lat() const { return lat_; }
     double lon() const { return lon_; }
 
@@ -103,9 +115,12 @@ private:
     float  heading_deg_ = 0.0f;
     float  lean_deg_ = 0.0f;
 
-    float    accel_g_ = 0.0f;        // low-passed, from the speed slider
+    float    speed_mph_ = 0.0f;      // the bike's, ramping to the slider
+    float    accel_g_ = 0.0f;        // low-passed, from the speed
     float    prev_speed_mph_ = 0.0f;
     uint32_t air_until_ms_ = 0;
+    // When each slip event started; 0 is none running.
+    uint32_t slip_at_ms_[static_cast<uint8_t>(Slip::Count)] = {};
     uint32_t spike_until_ms_ = 0;
 
     core::jump::Detector jump_;

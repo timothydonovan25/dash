@@ -11,26 +11,31 @@
 //
 //   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
 //                                vbat, sats, neutral, ecu, fix, auto,
+//                                fslip, rslip (percent against road),
+//                                deadf, deadr (that wheel sensor reads 0),
 //                                duration (media track length, ms),
 //                                position (ms into the track, now),
 //                                playstate (0 stop 1 play 2 pause),
 //                                bus_mhz (panel write clock, 0 = instant)
 //        btn <A-E> down|up       real debounce and long-press timing
-//        cmd <lapline|laparm|lapclear|tripreset|jump>
+//        cmd <lapline|laparm|lapclear|tripreset|jump|spin|flock|rlock>
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
 //                                                     bare `media` clears it
 //        quit
 //
-//   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac>\n
+//   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac> key=value...\n
+//        (slip=KIND/pct, alert=TEXT, spaces as _, `-` for none)
 //        P6\n320 480\n255\n<pixels>
 #include "sim_bike.hpp"
 #include "panel_sim.hpp"
 
+#include "core/alert/alert.hpp"
 #include "core/config/config.hpp"
 #include "core/health/health.hpp"
 #include "core/input/input.hpp"
 #include "core/gear/gear.hpp"
 #include "core/shift/shift.hpp"
+#include "core/slip/slip.hpp"
 #include "core/sweep/sweep.hpp"
 #include "services/logic_tick.hpp"
 #include "ui/app.hpp"
@@ -204,6 +209,8 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "vbat")    c.vbat = v;
     else if (name == "fslip")   c.front_slip_pct = v;
     else if (name == "rslip")   c.rear_slip_pct = v;
+    else if (name == "deadf")   c.front_dead = v != 0.0f;
+    else if (name == "deadr")   c.rear_dead = v != 0.0f;
     else if (name == "sats")    c.sats = static_cast<int>(v);
     else if (name == "neutral") c.neutral = v != 0.0f;
     else if (name == "ecu")     c.ecu_online = v != 0.0f;
@@ -211,6 +218,16 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "auto")    c.auto_ride = v != 0.0f;
     else if (name == "duration") c.media_duration_ms = static_cast<uint32_t>(v);
     else if (name == "playstate") c.media_state = static_cast<uint8_t>(v);
+}
+
+// One word for the FRAME line: spaces as underscores, `-` for nothing.
+template <size_t N>
+const char* token(char (&out)[N], const char* s) {
+    if (!s || !*s) s = "-";
+    size_t i = 0;
+    for (; s[i] != '\0' && i + 1 < N; ++i) out[i] = s[i] == ' ' ? '_' : s[i];
+    out[i] = '\0';
+    return out;
 }
 
 template <size_t N>
@@ -396,6 +413,9 @@ int main() {
                 else if (std::strcmp(a, "lapclear") == 0) commands.post(Command(CommandId::LapClear));
                 else if (std::strcmp(a, "tripreset") == 0) commands.post(Command(CommandId::TripReset, int32_t{0}));
                 else if (std::strcmp(a, "jump") == 0) bike.trigger_jump(now);
+                else if (std::strcmp(a, "spin") == 0) bike.trigger_slip(sim::Bike::Slip::Spin, now);
+                else if (std::strcmp(a, "flock") == 0) bike.trigger_slip(sim::Bike::Slip::FrontLock, now);
+                else if (std::strcmp(a, "rlock") == 0) bike.trigger_slip(sim::Bike::Slip::RearLock, now);
             } else if (line.rfind("quit", 0) == 0) {
                 if (log_file) std::fclose(log_file);
                 return 0;
@@ -432,7 +452,7 @@ int main() {
             wc.duration_ms = settings.sweep_ms;
             wc.peak_rpm = settings.shift_flash_rpm;
             const float sw = core::sweep::lamp_rpm(now - system.first_frame_ms,
-                                                   controls.speed_mph, wc);
+                                                   bike.speed_mph(), wc);
             if (sw > rpm) rpm = static_cast<uint16_t>(sw);
         }
         lamp_mask = core::shift::pattern(rpm, sc, lamp_mask);
@@ -440,7 +460,7 @@ int main() {
         controls.shift_mask = lamp_mask;
         controls.shift_flash = flash;
         // What `ctrl` does: infer the gear from rpm against road speed.
-        controls.gear = core::gear::estimate(controls.rpm, controls.speed_mph,
+        controls.gear = core::gear::estimate(controls.rpm, bike.speed_mph(),
                                              controls.neutral,
                                              core::config::gear_view(settings));
 
@@ -461,6 +481,11 @@ int main() {
 
         for (uint8_t i = 0; i < core::state::kDevCount; ++i) {
             const auto dev = static_cast<core::state::Dev>(i);
+            // The wheels are `logic`'s to report (core::fusion::WheelCheck),
+            // as on the bike: an OK from here every tick drowned its fault,
+            // and a dead sensor never reached DIAG or the alert.
+            if (dev == core::state::Dev::FrontWheel ||
+                dev == core::state::Dev::RearWheel) continue;
             if (!health.is_absent(dev)) health.report_ok(dev, now);
         }
         health.tick(now, core::health::Policy{});
@@ -524,9 +549,14 @@ int main() {
         // without a screenshot: laps, the delta and whether it is believed,
         // and how far the matcher thinks the bike is from the reference.
         const core::state::Lap lapv = slots.lap.get();
+        char slip_tok[16], alert_tok[32];
+        token(slip_tok, app.slip_bar().active()
+                            ? core::slip::kind_name(app.slip_bar().kind()) : "");
+        token(alert_tok, app.alert_kind() != core::alert::Kind::None
+                             ? core::alert::text(app.alert_kind()) : "");
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
-                    "over=%u busy=%d pend=%u\n",
+                    "over=%u busy=%d pend=%u slip=%s/%u alert=%s\n",
                     lamp_mask, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
@@ -534,7 +564,8 @@ int main() {
                     static_cast<double>(cost.ms()), cost.pixels, cost.transfers,
                     static_cast<double>(wire.peak().ms()),
                     wire.total().oversized, bus_busy ? 1 : 0,
-                    panel.pending_px());
+                    panel.pending_px(), slip_tok,
+                    static_cast<unsigned>(app.slip_bar().pct()), alert_tok);
         std::printf("P6\n%d %d\n255\n", ui::kScreenW, ui::kScreenH);
         std::fwrite(rgb.data(), 1, rgb.size(), stdout);
         std::fflush(stdout);

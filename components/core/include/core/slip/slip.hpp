@@ -47,8 +47,13 @@ class Meter {
 public:
     // `road_mph` with `road_ok` false (no fusion, no GPS) leaves only the
     // wheels against each other: spin is still seen, a lock is not.
-    Reading update(float front_mph, float rear_mph, float road_mph, bool road_ok,
-                   uint32_t t_ms, const Config& c);
+    //
+    // A wheel with `_ok` false is a sensor the firmware has already called
+    // dead (core::fusion::WheelCheck): it reads 0, which is exactly what a
+    // locked wheel reads, so it is left out. Without this a dead front was
+    // a red FRONT LOCK 100 % for as long as it stayed dead.
+    Reading update(float front_mph, bool front_ok, float rear_mph, bool rear_ok,
+                   float road_mph, bool road_ok, uint32_t t_ms, const Config& c);
 
 private:
     Reading  held_;

@@ -11,6 +11,12 @@ constexpr double kPi = 3.14159265358979;
 constexpr float  kG_ftps2 = 32.174f;
 constexpr float  kFtPerSPerMph = 1.46666667f;
 
+// How fast the bike can actually change speed: 0.8 g on the throttle and
+// 1.1 g on the brakes, in mph per second. The speed slider is where the
+// rider wants to be; the bike gets there at these rates.
+constexpr float kAccelMphPerS = 17.5f;
+constexpr float kBrakeMphPerS = 24.0f;
+
 // Degrees per foot at 42N, matching the flat frame core/geo uses so the
 // simulated fixes and the finish-line geometry agree exactly.
 const double kFtLat = 1.0 / 364000.0;
@@ -54,6 +60,25 @@ void at(float s, float& x_ft, float& y_ft, float& heading_deg,
     }
 }
 
+// A slip event's shape, in percent against road speed, `t` ms in; nothing
+// once it is over. A spin builds over 150 ms to +45 %, holds, and dies
+// away by 900 ms: a rear stepping out on a throttle stab. A lock is the
+// wheel stopping within 100 ms and staying stopped: -100 % is 0 mph.
+bool slip_shape(sim::Bike::Slip kind, uint32_t t, float& pct) {
+    using Slip = sim::Bike::Slip;
+    if (kind == Slip::Spin) {
+        if (t >= 900) return false;
+        if (t < 150)       pct = 45.0f * static_cast<float>(t) / 150.0f;
+        else if (t < 600)  pct = 45.0f;
+        else               pct = 45.0f * static_cast<float>(900 - t) / 300.0f;
+        return true;
+    }
+    const uint32_t hold = kind == Slip::FrontLock ? 500 : 900;
+    if (t >= hold) return false;
+    pct = t < 100 ? -100.0f * static_cast<float>(t) / 100.0f : -100.0f;
+    return true;
+}
+
 template <size_t N>
 void copy_into(char (&dst)[N], const char* src) {
     size_t i = 0;
@@ -65,6 +90,7 @@ void copy_into(char (&dst)[N], const char* src) {
 
 void Bike::reset() {
     f_ = 0.0f;
+    speed_mph_ = 0.0f;
     lat_ = 42.500000;
     lon_ = -83.100000;
     heading_deg_ = 0.0f;
@@ -81,15 +107,31 @@ void Bike::trigger_jump(uint32_t now_ms, uint32_t airtime_ms) {
     spike_until_ms_ = air_until_ms_ + 200;
 }
 
+void Bike::trigger_slip(Slip kind, uint32_t now_ms) {
+    slip_at_ms_[static_cast<uint8_t>(kind)] = now_ms ? now_ms : 1;
+}
+
 void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
                 uint32_t dt_ms) {
     const float dt = static_cast<float>(dt_ms) / 1000.0f;
 
-    // Longitudinal g, from how fast the speed slider is being moved. Low
-    // passed hard: dragging a slider is a step change, and an unfiltered
-    // step reads as 40 g and pins the ball against the rim.
-    const float dv_ftps = (c.speed_mph - prev_speed_mph_) * kFtPerSPerMph;
-    prev_speed_mph_ = c.speed_mph;
+    // Road speed follows the slider at what a bike can do, not in one step.
+    // In one step, all three speeds jumped together while fused road speed
+    // (logic's, which gates a jump that size as implausible) caught up over
+    // a second or so, and the slip bar called both wheels locked, or both
+    // spinning, against it. Real 1 g stops do not do that; a slider did.
+    const float want = c.speed_mph;
+    if (want > speed_mph_) {
+        speed_mph_ = std::fmin(want, speed_mph_ + kAccelMphPerS * dt);
+    } else {
+        speed_mph_ = std::fmax(want, speed_mph_ - kBrakeMphPerS * dt);
+    }
+    const float v_mph = speed_mph_;
+
+    // Longitudinal g, from how fast the speed is changing. Low passed: the
+    // ramp above is a step in acceleration, and the ball should not snap.
+    const float dv_ftps = (v_mph - prev_speed_mph_) * kFtPerSPerMph;
+    prev_speed_mph_ = v_mph;
     const float raw_g = dt > 0.0f ? (dv_ftps / dt) / kG_ftps2 : 0.0f;
     accel_g_ += 0.15f * (raw_g - accel_g_);
     if (accel_g_ < -1.2f) accel_g_ = -1.2f;
@@ -98,7 +140,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     float yaw_rate_dps = 0.0f;
 
     if (c.auto_ride) {
-        const float v_ftps = c.speed_mph * kFtPerSPerMph;
+        const float v_ftps = v_mph * kFtPerSPerMph;
         f_ += (v_ftps * dt) / kLap_ft;
         while (f_ >= 1.0f) f_ -= 1.0f;
 
@@ -133,7 +175,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         // when it was the simulated bike that was parked.
         lean_deg_ = c.lean_deg;
         heading_deg_ = 0.0f;
-        lat_ += static_cast<double>(c.speed_mph * kFtPerSPerMph * dt) * kFtLat;
+        lat_ += static_cast<double>(v_mph * kFtPerSPerMph * dt) * kFtLat;
     }
 
     core::state::Engine e;
@@ -148,12 +190,27 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     slots.engine.publish(e);
 
     core::state::Motion m;
-    m.gps_mph = c.speed_mph;
-    m.front_mph = c.speed_mph * (1.0f + c.front_slip_pct / 100.0f);
-    m.rear_mph = c.speed_mph * (1.0f + c.rear_slip_pct / 100.0f);
-    if (m.front_mph < 0.0f) m.front_mph = 0.0f;
-    if (m.rear_mph < 0.0f) m.rear_mph = 0.0f;
-    m.best_mph = c.speed_mph;
+    m.gps_mph = v_mph;
+    // The sliders, with any slip event running played over them: the
+    // event wins while it lasts, whichever way it is further from zero.
+    float front_pct = c.front_slip_pct;
+    float rear_pct = c.rear_slip_pct;
+    for (uint8_t i = 0; i < static_cast<uint8_t>(Slip::Count); ++i) {
+        if (slip_at_ms_[i] == 0) continue;
+        const auto kind = static_cast<Slip>(i);
+        float pct = 0.0f;
+        if (!slip_shape(kind, now_ms - slip_at_ms_[i], pct)) {
+            slip_at_ms_[i] = 0;
+            continue;
+        }
+        float& wheel = kind == Slip::FrontLock ? front_pct : rear_pct;
+        if (std::fabs(pct) > std::fabs(wheel)) wheel = pct;
+    }
+    m.front_mph = v_mph * (1.0f + front_pct / 100.0f);
+    m.rear_mph = v_mph * (1.0f + rear_pct / 100.0f);
+    if (m.front_mph < 0.0f || c.front_dead) m.front_mph = 0.0f;
+    if (m.rear_mph < 0.0f || c.rear_dead) m.rear_mph = 0.0f;
+    m.best_mph = v_mph;
     m.accel_g = accel_g_;
     slots.motion.publish(m);
 
@@ -205,7 +262,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     // reason; a real HDOP is geometry, not a count.
     g.hdop = enough ? 9.6f / static_cast<float>(c.sats) : 99.9f;
     g.course_deg = heading_deg_;
-    g.speed_mph = c.speed_mph;
+    g.speed_mph = v_mph;
     g.utc_ms = c.utc_ms;
     g.rx_ms = now_ms;            // a new fix every step
     slots.gnss.publish(g);

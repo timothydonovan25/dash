@@ -293,50 +293,37 @@ private:
 };
 
 // The lean gauge on the speed screen: a half annulus with a marker on it and
-// the angle in the middle.
-class LeanGauge : public Widget {
-public:
-    void set(float lean_deg, bool valid);
-    void render(Canvas& c) override;
-
-private:
-    float lean_deg_ = 0.0f;
-    bool  valid_ = false;
-};
-
-// The accelerometer tile: lateral against longitudinal g as a dot in a
-// friction circle, and the last jump instead of it for a few seconds after a
-// landing.
+// the angle in the middle -- and, around a jump, the jump instead: the
+// airtime counting up while in the air, then the airtime and the landing g
+// for a few seconds after touching down.
 //
 // One widget with two faces rather than two widgets swapped in and out of a
 // screen's list, because the rectangle is the unit of redraw: two widgets
 // sharing a rectangle would each leave the other's pixels behind on a
 // partial update, which is exactly the invariant test_ui exists to hold.
-class GBall : public Widget {
+class LeanGauge : public Widget {
 public:
-    // Both in g, from the IMU: `g_lat` positive to the right, `g_lon`
-    // positive under acceleration. These are what core/attitude publishes;
-    // `motion.accel_g` is nobody's to write on this board.
-    void set(float g_lat, float g_lon, bool valid);
+    enum class Face : uint8_t { Lean, Air, Landed };
 
-    // `show` latches the jump face on. How long that lasts is the screen's
-    // business — a widget has no clock, and a Frame has no history.
-    void set_jump(uint32_t airtime_ms, float landing_g, bool show);
+    void set(float lean_deg, bool valid);
+
+    // Which face, and the jump's numbers for the other two. How long the
+    // landed face stays up is the screen's business -- a widget has no
+    // clock. In the air the airtime is shown to a tenth, so the tile is
+    // redrawn ten times a second rather than on every frame.
+    void set_jump(Face face, uint32_t airtime_ms, float landing_g);
+    Face face() const { return face_; }
 
     void render(Canvas& c) override;
 
-    // Full scale. A CRF250F on dirt will not see much past 1 g either way,
-    // and a circle scaled for a superbike leaves the dot sitting in the
-    // middle doing nothing.
-    static constexpr float kFullScaleG = 1.5f;
-
 private:
-    float    g_lat_ = 0.0f;
-    float    g_lon_ = 0.0f;
+    void render_jump(Canvas& c);
+
+    float    lean_deg_ = 0.0f;
     bool     valid_ = false;
+    Face     face_ = Face::Lean;
     uint32_t airtime_ms_ = 0;
     float    landing_g_ = 0.0f;
-    bool     jump_ = false;
 };
 
 // One line of what is playing: an icon and a name that scrolls if it is too
@@ -402,11 +389,11 @@ private:
 // The media block's progress ring: how far into the track as an arc from
 // twelve o'clock, the elapsed and total time inside it, and a play/pause
 // glyph. Sits in the one patch of the speed screen §11.1 media left empty —
-// right of the g-ball, under the clock, above the song/album/artist rows.
+// left of the song/album/artist rows, under the lean gauge.
 //
 // A widget has no clock, so it does not extrapolate `elapsed_ms` itself —
 // the screen does that from `Frame.t_ms` and `Media.position_at_ms` every
-// tick, the same way `GBall`'s jump hold works from `land_ms`. This only
+// tick, the same way the lean gauge's jump hold works from `land_ms`. This only
 // draws whatever `elapsed_ms` it was last handed, quantised to the second
 // so a 20-50 Hz update loop still only repaints the ring once a second.
 class MediaProgress : public Widget {
@@ -480,6 +467,8 @@ class SlipBar : public Widget {
 public:
     void set(core::slip::Kind kind, uint8_t pct);
     bool active() const { return kind_ != core::slip::Kind::None; }
+    core::slip::Kind kind() const { return kind_; }
+    uint8_t pct() const { return pct_; }
     void render(Canvas& c) override;
 
 private:

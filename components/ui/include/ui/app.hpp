@@ -62,6 +62,8 @@ public:
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
 
     AlertOverlay& alert() { return alert_; }
+    // Which alert the overlay is showing, None if it is down or dismissed.
+    core::alert::Kind alert_kind() const { return alert_kind_; }
     SlipBar& slip_bar() { return slip_bar_; }
 
     // Wiring for the things a screen reads but does not own.

@@ -153,6 +153,11 @@ TOGGLES = [
     ("neutral", "Neutral",          False),
     ("fix",     "GPS fix",          True),
     ("ecu",     "ECU online",       False),
+    # The sensor reads 0 whatever the wheel does. The firmware's own wheel
+    # check faults it after 5 s at speed: DIAG, the alert, and the slip bar
+    # leaving it out.
+    ("deadf",   "Front speed sensor dead", False),
+    ("deadr",   "Rear speed sensor dead",  False),
 ]
 
 # The simulator has no radio, so nothing plays the phone's part of §11.1.
@@ -183,6 +188,11 @@ COMMANDS = [
     # Drops the accelerometer to zero and then spikes it, so the firmware's
     # own jump detector decides there was a jump. Nothing tells the dash.
     ("jump",      "Jump"),
+    # A slip that comes and goes, played over the slip sliders: what the
+    # slip bar and its 0.7 s peak hold are for. Needs 6 mph or more.
+    ("spin",      "Wheelspin  (rear +45 %, 0.9 s)"),
+    ("flock",     "Front lock  (0.5 s)"),
+    ("rlock",     "Rear lock  (0.9 s)"),
 ]
 
 

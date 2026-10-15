@@ -48,8 +48,12 @@ constexpr Rect kShiftStrip{136,   2,  72,  20};
 // is read on a moving dirt bike, where a g-ball's dot was detail nobody
 // could take in. Centred across the screen, between the top tiles (which
 // end at y=90) and the fault line and media ring (from y=222). The clock
-// sits at the right edge, level with the number.
+// sits at the right edge, level with the number. Around a jump the gauge
+// shows the jump instead (LeanGauge's other face, kJumpShowMs below).
 constexpr Rect kLean      {116,  94, 248, 126};
+// How long the lean gauge shows the last jump after landing (LeanGauge's
+// landed face) before it goes back to lean.
+constexpr uint32_t kJumpShowMs = 4000;
 constexpr Rect kFault     { 28, 222, 120,  16};
 constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
@@ -57,7 +61,7 @@ constexpr Rect kHdop      { 28, 286, 120,  10};
 // Right-aligned at the screen edge, and only as wide as it needs to be:
 // fmt_clock is always five characters, 58 px at scale 2. Widget bounds are
 // what gets cleared on a repaint, so a clock reserving the whole right half
-// of the row would erase the g-ball's edge every minute.
+// of the row would erase the lean gauge's edge every minute.
 constexpr Rect kClock     {410, 186,  62,  16};
 // The media block along the bottom: the progress ring, then song, album and
 // artist beside it. The ring shares the rows' bottom edge and rises to
@@ -204,6 +208,18 @@ void SpeedScreen::update(const Frame& f) {
 
     const bool imu_ok = f.health.ok(Dev::Imu);
     lean_.set(f.att.lean_deg, imu_ok);
+    // The jump takes the gauge's place: counting in the air, then the
+    // result for a few seconds after the landing. core/jump owns the
+    // detection; `land_ms` is what lets a Frame, which has no history, know
+    // how long ago that was. A dead IMU shows lean as `--`, not a jump.
+    using Face = LeanGauge::Face;
+    Face face = Face::Lean;
+    if (imu_ok && f.att.airborne) {
+        face = Face::Air;
+    } else if (imu_ok && f.att.land_ms != 0 && f.t_ms - f.att.land_ms < kJumpShowMs) {
+        face = Face::Landed;
+    }
+    lean_.set_jump(face, f.att.airtime_ms, f.att.last_land_g);
 
     // The fault line. Blank when everything fitted is healthy, which means
     // the space costs nothing on a normal ride and the screen stops

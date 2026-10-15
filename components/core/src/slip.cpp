@@ -21,16 +21,17 @@ const char* kind_name(Kind k) {
     return "";
 }
 
-Reading Meter::update(float front_mph, float rear_mph, float road_mph, bool road_ok,
-                      uint32_t t_ms, const Config& c) {
+Reading Meter::update(float front_mph, bool front_ok, float rear_mph, bool rear_ok,
+                      float road_mph, bool road_ok, uint32_t t_ms, const Config& c) {
     Reading now;
     // Without road speed, the front is the best stand-in for spin: it is
     // not driven. A lock cannot be told from a stop that way.
+    const bool have_ref = road_ok || front_ok;
     const float ref = road_ok ? road_mph : front_mph;
-    if (ref >= c.min_mph) {
-        const float spin = (rear_mph - ref) / ref;
-        const float front_lock = road_ok ? (ref - front_mph) / ref : 0.0f;
-        const float rear_lock = road_ok ? (ref - rear_mph) / ref : 0.0f;
+    if (have_ref && ref >= c.min_mph) {
+        const float spin = rear_ok ? (rear_mph - ref) / ref : 0.0f;
+        const float front_lock = road_ok && front_ok ? (ref - front_mph) / ref : 0.0f;
+        const float rear_lock = road_ok && rear_ok ? (ref - rear_mph) / ref : 0.0f;
         // A lock outranks a spin: it is the one that puts the bike down.
         if (front_lock >= c.lock_start && front_lock >= rear_lock) {
             now.kind = Kind::LockFront;

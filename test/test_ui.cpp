@@ -1500,6 +1500,84 @@ int main() {
         CHECK(!fx.app.slip_bar().active());
     }
 
+    CASE("a jump takes the lean gauge's place on the speed screen, then hands it back");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 partial;
+        fx.app.begin(partial.canvas);
+        go_to(fx.app, partial.canvas, Mode::Cruise, 0);
+        LeanGauge* lean = nullptr;
+        const WidgetList wl = fx.app.current().widgets();
+        for (size_t i = 0; i < wl.count; ++i) {
+            if (std::strcmp(fx.app.current().widget_name(i), "lean") == 0) {
+                lean = static_cast<LeanGauge*>(wl.items[i]);
+            }
+        }
+        CHECK(lean != nullptr);
+        if (lean) {
+            using Face = LeanGauge::Face;
+            Frame a = busy_frame();                       // riding, no jump yet
+            fx.app.update(a);
+            fx.app.render(partial.canvas, true);
+            fx.app.clear_full_repaint();
+            CHECK(lean->face() == Face::Lean);
+
+            // Every face change goes out as a partial update and lands the
+            // same pixels as a full repaint.
+            auto same_as_whole = [&]() {
+                send_damage(fx.app, partial.px);
+                Screen320x480 whole;
+                fx.app.render(whole.canvas, true);
+                size_t differing = 0;
+                for (size_t i = 0; i < partial.px.size(); ++i) {
+                    if (partial.px[i] != whole.px[i]) ++differing;
+                }
+                return differing == 0;
+            };
+
+            Frame air = a;                                 // off the lip
+            air.t_ms += 300;
+            air.att.airborne = true;
+            air.att.airtime_ms = 640;
+            fx.app.update(air);
+            CHECK(lean->face() == Face::Air);
+            CHECK(!fx.app.needs_full_repaint());
+            CHECK(same_as_whole());
+
+            Frame air2 = air;                              // a tenth is a redraw,
+            air2.t_ms += 17;
+            air2.att.airtime_ms = 655;                     // a few ms is not
+            fx.app.update(air2);
+            CHECK(!lean->dirty);
+
+            Frame down = air;                              // landed
+            down.t_ms += 700;
+            down.att.airborne = false;
+            down.att.airtime_ms = 1240;
+            down.att.last_land_g = 4.6f;
+            down.att.land_ms = down.t_ms;
+            fx.app.update(down);
+            CHECK(lean->face() == Face::Landed);
+            CHECK(same_as_whole());
+
+            Frame later = down;                            // still up just before...
+            later.t_ms = down.att.land_ms + 3999;
+            fx.app.update(later);
+            CHECK(lean->face() == Face::Landed);
+            later.t_ms = down.att.land_ms + 4000;          // ...and gone at 4 s
+            fx.app.update(later);
+            CHECK(lean->face() == Face::Lean);
+            CHECK(same_as_whole());
+
+            Frame dead = air;                              // no IMU, no jump face
+            dead.t_ms = later.t_ms + 17;
+            dead.health[Dev::Imu].state = DevState::Fault;
+            fx.app.update(dead);
+            CHECK(lean->face() == Face::Lean);
+        }
+    }
+
     CASE("a table sends only the rows that changed");
     {
         Table t;

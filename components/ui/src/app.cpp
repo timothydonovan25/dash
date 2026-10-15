@@ -152,8 +152,15 @@ void App::update_slip(const core::state::Frame& f) {
     if (on && !splash_on_ && sweep_done_) {
         const bool fused = f.fused.speed_valid;
         const float road = fused ? f.fused.speed_mph : f.gnss.speed_mph;
-        r = slip_meter_.update(f.motion.front_mph, f.motion.rear_mph, road,
-                               fused || f.gnss.fix, f.t_ms, core::slip::Config{});
+        // A wheel sensor the firmware has faulted reads 0; leave it out
+        // rather than call it a lock (core::slip::Meter::update).
+        const bool front_ok = f.health[core::state::Dev::FrontWheel].state !=
+                              core::state::DevState::Fault;
+        const bool rear_ok = f.health[core::state::Dev::RearWheel].state !=
+                             core::state::DevState::Fault;
+        r = slip_meter_.update(f.motion.front_mph, front_ok, f.motion.rear_mph,
+                               rear_ok, road, fused || f.gnss.fix, f.t_ms,
+                               core::slip::Config{});
     }
     const bool was = slip_bar_.active();
     slip_bar_.set(r.kind, r.pct);
