@@ -337,14 +337,14 @@ scheduler starts, the only internal heap is from `_heap_start` up to
 0x4FF3AFC0 plus 18 kB; the 384 kB region at 0x4FF40000 is added after.
 ESP-Hosted's constructor took ~87 kB of it for SDIO buffers, so with
 `_heap_start` at 0x4FF21280 the demo could not create its idle tasks and
-boot-looped (`vApplicationGetIdleTaskMemory` assert). Those buffers now ask
-for PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`), but ESP-Hosted
-silently falls back to internal RAM if that fails, and that they really
-landed in PSRAM is not yet measured. Count only on `_heap_start`: check
-`nm build/dash.elf | grep _heap_start` after adding statics. The bike is at
-0x4FF1E450, 11.8 kB below the line the demo failed at. Big buffers go on a
-task stack (allocated later) or in PSRAM with `EXT_RAM_BSS_ATTR`, never in
-a plain static.
+boot-looped (`vApplicationGetIdleTaskMemory` assert). Those buffers are now
+in PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`; measured on the demo,
+2026-10-14: 38 kB internal allocated at constructor time instead of ~125 kB,
+131 kB free). ESP-Hosted falls back to internal RAM silently if PSRAM
+fails, so if this ever boot-loops again, check that first. Check
+`nm build/dash.elf | grep _heap_start` after adding statics; the bike is at
+0x4FF1E450. Big buffers go on a task stack (allocated later) or in PSRAM
+with `EXT_RAM_BSS_ATTR`, never in a plain static.
 
 **CRUISE → NAV** guides back to one of five named waypoints:
 `core::geo::guide` gives distance and bearing, heading-up above 3 mph and
