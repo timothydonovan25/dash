@@ -15,7 +15,9 @@ guessed at confidently. In particular:
 
 - the IMU axis mapping has never been checked against a real part;
 - the tach refractory window is a starting number, not a measured one;
-- I2C bus recovery does not yet clock a stuck slave off the bus.
+- I2C bus recovery (`ButtonPod::recover_bus`: up to nine SCL clocks by
+  hand, then a STOP) is written but has never freed a real stuck slave;
+  DIAG -> Bus counts its recoveries and the ones that left SDA low.
 
 `tach_capture` and `hall_capture` from the architecture sketch are one
 `engine_sense` here — they are the same three edge counters behind one
