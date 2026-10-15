@@ -38,10 +38,10 @@ int main() {
     {
         Monitor m;
         uint32_t t = hold(m, c, 0, 12000, 12.6f, 0.0f);
-        t = hold(m, c, t, 300, 10.1f, 0.0f);              // starter, no edge yet
+        t = hold(m, c, t, 600, 10.1f, 0.0f);              // starter, no edge yet
         t = hold(m, c, t, 300, 10.6f, 350.0f);            // turning over
         t = hold(m, c, t, 5000, 13.8f, 1600.0f);          // running
-        CHECK_NEAR(m.report().crank_min_v, 10.1, 0.01);
+        CHECK_NEAR(m.report().crank_min_v, 10.1, 0.02);
         CHECK(m.report().verdict == Verdict::Good);
     }
 
@@ -49,10 +49,25 @@ int main() {
     {
         Monitor m;
         uint32_t t = hold(m, c, 0, 12000, 12.6f, 0.0f);
-        t = hold(m, c, t, 200, 8.9f + 0.2f, 0.0f);       // 9.1 V
+        t = hold(m, c, t, 700, 9.1f, 0.0f);              // sags for the whole crank
         t = hold(m, c, t, 5000, 13.8f, 1600.0f);
-        CHECK_NEAR(m.report().crank_min_v, 9.1, 0.01);
+        CHECK_NEAR(m.report().crank_min_v, 9.1, 0.02);
         CHECK(m.report().verdict == Verdict::Weak);
+    }
+
+    CASE("the starter's inrush is not the crank voltage");
+    {
+        // A healthy battery: 50 ms of inrush to 9.0 V, then 10.2 V held
+        // while it turns over. Read raw, that was 9.0 and weak.
+        Monitor m;
+        uint32_t t = hold(m, c, 0, 12000, 12.6f, 0.0f);
+        t = hold(m, c, t, 50, 9.0f, 0.0f);
+        t = hold(m, c, t, 300, 10.2f, 0.0f);
+        t = hold(m, c, t, 500, 10.2f, 300.0f);
+        t = hold(m, c, t, 5000, 13.8f, 1600.0f);
+        CHECK(m.report().crank_min_v > 10.0f);
+        CHECK(m.report().crank_min_v < 10.4f);
+        CHECK(m.report().verdict == Verdict::Good);
     }
 
     CASE("charging is read only held above the charge rpm");

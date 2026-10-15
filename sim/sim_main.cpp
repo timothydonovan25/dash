@@ -13,18 +13,26 @@
 //                                vbat, sats, neutral, ecu, fix, auto,
 //                                fslip, rslip (percent against road),
 //                                deadf, deadr (that wheel sensor reads 0),
+//                                down (on its side), temp (inside the dash, C),
+//                                shift (hours added to the host clock),
+//                                phone (a bonded phone connected),
+//                                wclient (a phone using the Wi-Fi page),
 //                                duration (media track length, ms),
 //                                position (ms into the track, now),
 //                                playstate (0 stop 1 play 2 pause),
 //                                bus_mhz (panel write clock, 0 = instant)
 //        btn <A-E> down|up       real debounce and long-press timing
-//        cmd <lapline|laparm|lapclear|tripreset|jump|spin|flock|rlock>
+//        cmd <lapline|laparm|lapclear|tripreset|jump|spin|flock|rlock|crank>
+//        dev <imu|gnss|lamps|pod|sd|display> <ok|fail|absent>
+//                                a device working, failing every report, or
+//                                not there (for sd: the card pulled)
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
 //                                                     bare `media` clears it
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac> key=value...\n
-//        (slip=KIND/pct, alert=TEXT, spaces as _, `-` for none)
+//        (slip=KIND/pct, alert=TEXT, spaces as _, `-` for none;
+//        bl=backlight percent, which the front end dims the picture by)
 //        P6\n320 480\n255\n<pixels>
 #include "sim_bike.hpp"
 #include "panel_sim.hpp"
@@ -36,6 +44,8 @@
 #include "core/gear/gear.hpp"
 #include "core/shift/shift.hpp"
 #include "core/slip/slip.hpp"
+#include "core/sun/sun.hpp"
+#include "core/wifi/wifi.hpp"
 #include "core/sweep/sweep.hpp"
 #include "services/logic_tick.hpp"
 #include "ui/app.hpp"
@@ -113,13 +123,181 @@ bool poll_line(std::string& out) {
     }
 }
 
-// The host's time of day, standing in for the GPS's UTC field.
-uint32_t host_utc_ms_of_day() {
+// The host's clock, standing in for the GPS's UTC time and RMC date, moved
+// by `shift_h` hours so that night can be had in the afternoon.
+void host_utc(int shift_h, sim::Controls& c) {
     using namespace std::chrono;
-    const auto ms = duration_cast<milliseconds>(
-        system_clock::now().time_since_epoch()).count();
-    return static_cast<uint32_t>(ms % (24LL * 60 * 60 * 1000));
+    const long long ms = duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()).count() +
+        static_cast<long long>(shift_h) * 3600000LL;
+    const std::time_t secs = static_cast<std::time_t>(ms / 1000);
+    std::tm u{};
+    gmtime_r(&secs, &u);
+    c.utc_ms = static_cast<uint32_t>(ms % (24LL * 60 * 60 * 1000));
+    c.year = static_cast<uint16_t>(1900 + u.tm_year);
+    c.month = static_cast<uint8_t>(u.tm_mon + 1);
+    c.day = static_cast<uint8_t>(u.tm_mday);
+    c.day_of_year = static_cast<uint16_t>(u.tm_yday + 1);
 }
+
+// The devices the front end can break, by the name `dev` takes. The wheels
+// are not here: `logic` reports them (core::fusion::WheelCheck), and the
+// dead-sensor toggles are how to break one. Nor the phone, which FakeBle
+// owns, nor the ECU and TPMS, which this board does not have.
+enum class DevMode : uint8_t { Ok, Failing, Absent };
+struct NamedDev {
+    const char*       name;
+    core::state::Dev  dev;
+};
+constexpr NamedDev kNamedDevs[] = {
+    {"imu", core::state::Dev::Imu},          {"gnss", core::state::Dev::Gnss},
+    {"lamps", core::state::Dev::LedDriver},  {"pod", core::state::Dev::McpPod},
+    {"sd", core::state::Dev::Sd},            {"display", core::state::Dev::Display},
+};
+
+// `storage`'s part: CONFIG -> SD card -> Eject, answered as the card task
+// would. The card stays out of the health table until it is pulled (`dev
+// sd absent`) and put back, which is the only way out on the bike too.
+struct FakeStorage {
+    uint32_t gen = 0;
+    bool     ejected = false;
+
+    void begin(core::state::Slots& slots) { gen = slots.storage_request.generation(); }
+
+    void step(core::state::Slots& slots, core::health::Tracker& health,
+              ui::SystemInfo& system, bool card_in) {
+        const uint32_t g = slots.storage_request.generation();
+        if (g != gen) {
+            gen = g;
+            if (slots.storage_request.get().op == core::state::StorageRequest::Eject &&
+                card_in && !ejected) {
+                ejected = true;
+                health.set_absent(core::state::Dev::Sd);
+                system.sd_ejected = true;
+            }
+        }
+        if (!card_in && ejected) {
+            ejected = false;
+            system.sd_ejected = false;
+        }
+    }
+};
+
+// `wifi`'s part, minus the radio: the hotspot starts, gets a new password,
+// counts down its idle timer and goes off when the bike moves, by
+// core::wifi's own rules. `in_use` is a phone on the page, which is what
+// keeps it alive on the bike.
+struct FakeWifi {
+    core::state::Wifi w;
+    uint32_t gen = 0;
+    uint32_t started_ms = 0;
+    uint32_t last_use_ms = 0;
+    uint32_t rng = 0x2545F491u;
+
+    uint32_t next() {
+        rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+        return rng;
+    }
+
+    void begin(core::state::Slots& slots, uint32_t seed) {
+        rng ^= seed;
+        gen = slots.wifi_request.generation();
+        slots.wifi.publish(w);
+    }
+
+    void step(core::state::Slots& slots, uint32_t now, float speed_mph, bool in_use) {
+        using core::wifi::State;
+        const core::state::Wifi before = w;
+        const uint32_t g = slots.wifi_request.generation();
+        if (g != gen) {
+            gen = g;
+            const uint8_t op = slots.wifi_request.get().op;
+            const bool off = w.state == State::Off || w.state == State::Failed;
+            if (op == core::state::WifiRequest::Toggle && off) {
+                w.state = State::Starting;
+                started_ms = now;
+                core::wifi::make_password(next(), next(), w.pass);
+            } else if (op != core::state::WifiRequest::None) {
+                w = core::state::Wifi{};
+            }
+        }
+        // The C6 takes a moment to bring the access point up.
+        if (w.state == State::Starting && now - started_ms >= 400) {
+            w.state = State::On;
+            last_use_ms = now;
+        }
+        if (w.state == State::On) {
+            if (in_use) last_use_ms = now;
+            w.clients = in_use ? 1 : 0;
+            if (core::wifi::should_stop(now, last_use_ms, speed_mph)) {
+                w = core::state::Wifi{};
+            } else {
+                w.off_in_s = static_cast<uint16_t>(core::wifi::off_in_s(now, last_use_ms));
+            }
+        }
+        if (std::memcmp(&before, &w, sizeof w) != 0) slots.wifi.publish(w);
+    }
+};
+
+// `ble`'s part: one bonded phone that connects when the front end says so,
+// and CONFIG's Phone actions. Forget drops the bond, after which the phone
+// only gets back in during a pairing window, as core/ble decides on the
+// bike. Fills DIAG -> Radio and the Phone row of the health table.
+struct FakeBle {
+    core::state::BleDiag b;
+    uint32_t gen = 0;
+    uint32_t pair_until_ms = 0;
+    bool     connected = false;
+
+    void begin(core::state::Slots& slots) {
+        b.bonds = 1;
+        std::snprintf(b.c6_fw, sizeof b.c6_fw, "sim");
+        gen = slots.ble_request.generation();
+        slots.ble_diag.publish(b);
+    }
+
+    void step(core::state::Slots& slots, core::health::Tracker& health, uint32_t now,
+              bool phone_on) {
+        const core::state::BleDiag before = b;
+        const uint32_t g = slots.ble_request.generation();
+        if (g != gen) {
+            gen = g;
+            const uint8_t op = slots.ble_request.get().op;
+            if (op == core::state::BleRequest::ForgetPhone) {
+                b.bonds = 0;
+                connected = false;
+            } else if (op == core::state::BleRequest::PairingMode) {
+                pair_until_ms = now + 60000;
+            }
+        }
+        const bool window = static_cast<int32_t>(pair_until_ms - now) > 0;
+        b.pairing_s = window ? static_cast<uint8_t>((pair_until_ms - now + 999) / 1000) : 0;
+        if (!phone_on) {
+            connected = false;
+        } else if (!connected && (b.bonds > 0 || window)) {
+            connected = true;
+            if (b.bonds == 0) b.bonds = 1;   // bonded in the window
+        }
+        b.encrypted = connected;
+        b.ctrl_subscribed = connected;
+        if (connected) {
+            b.has_rssi = true;
+            // A phone in a jacket pocket a metre away, moving a little.
+            b.rssi_dbm = static_cast<int16_t>(-58 - static_cast<int>((now / 1000) % 5));
+            const core::state::Media m = slots.media.get();
+            b.last_tag = m.updated_ms != 0 ? 'P' : 0;
+        }
+        if (std::memcmp(&before, &b, sizeof b) != 0) slots.ble_diag.publish(b);
+
+        constexpr auto kPhone = core::state::Dev::Phone;
+        if (connected) {
+            if (health.is_absent(kPhone)) health.begin_init(kPhone, now);
+            health.report_ok(kPhone, now);
+        } else if (!health.is_absent(kPhone)) {
+            health.set_absent(kPhone);
+        }
+    }
+};
 
 // The host's UTC offset in whole hours, which is all the dash's setting
 // holds. Half-hour zones round toward zero.
@@ -211,6 +389,8 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "rslip")   c.rear_slip_pct = v;
     else if (name == "deadf")   c.front_dead = v != 0.0f;
     else if (name == "deadr")   c.rear_dead = v != 0.0f;
+    else if (name == "down")    c.down = v != 0.0f;
+    else if (name == "temp")    c.dash_temp_c = v;
     else if (name == "sats")    c.sats = static_cast<int>(v);
     else if (name == "neutral") c.neutral = v != 0.0f;
     else if (name == "ecu")     c.ecu_online = v != 0.0f;
@@ -290,12 +470,17 @@ int main() {
     // on this board, so the screens show what they will show on the bike.
     const uint32_t boot = 0;
     for (uint8_t i = 0; i < core::state::kDevCount; ++i) {
-        health.begin_init(static_cast<core::state::Dev>(i), boot);
-        health.report_ok(static_cast<core::state::Dev>(i), boot);
+        const auto dev = static_cast<core::state::Dev>(i);
+        // Not the wheels: on the bike they stay absent until `logic`'s wheel
+        // check has judged them, which needs the bike moving. Brought in
+        // here, nothing reported them while parked and the tracker faulted
+        // both as stale two seconds later.
+        if (dev == core::state::Dev::FrontWheel || dev == core::state::Dev::RearWheel) continue;
+        health.begin_init(dev, boot);
+        health.report_ok(dev, boot);
     }
     health.set_absent(core::state::Dev::Ecu);
-    health.set_absent(core::state::Dev::BleHost);
-    health.set_absent(core::state::Dev::Phone);
+    health.set_absent(core::state::Dev::Phone);   // until FakeBle connects one
     health.set_absent(core::state::Dev::TpmsF);
     health.set_absent(core::state::Dev::TpmsR);
 
@@ -363,6 +548,24 @@ int main() {
     uint32_t last_frame = 0;
     FakeOta fake_ota;
     fake_ota.begin(slots);
+    FakeStorage fake_storage;
+    fake_storage.begin(slots);
+    FakeWifi fake_wifi;
+    fake_wifi.begin(slots, static_cast<uint32_t>(std::time(nullptr)));
+    FakeBle fake_ble;
+    fake_ble.begin(slots);
+
+    DevMode dev_mode[core::state::kDevCount] = {};   // all Ok
+    int  clock_shift_h = 0;
+    bool phone_on = false;
+    bool wifi_in_use = false;
+
+    // `keeper`'s backlight: the CONFIG brightness, dimmed after dark by the
+    // same core::sun::AutoDim, once a second. The sim has no backlight, so
+    // the front end darkens the picture by it instead.
+    core::sun::AutoDim auto_dim;
+    uint8_t  backlight_pct = settings.brightness_pct;
+    uint32_t last_backlight_ms = 0;
     std::vector<unsigned char> rgb(static_cast<size_t>(ui::kScreenW) *
                                    ui::kScreenH * 3);
 
@@ -391,6 +594,12 @@ int main() {
                 // cannot go through apply_set with the plain controls.
                 if (std::strcmp(a, "bus_mhz") == 0) {
                     panel.set_clock_hz(v > 0.0f ? static_cast<uint32_t>(v * 1e6f) : 0u);
+                } else if (std::strcmp(a, "shift") == 0) {
+                    clock_shift_h = static_cast<int>(v);
+                } else if (std::strcmp(a, "phone") == 0) {
+                    phone_on = v != 0.0f;
+                } else if (std::strcmp(a, "wclient") == 0) {
+                    wifi_in_use = v != 0.0f;
                 } else if (std::strcmp(a, "position") == 0) {
                     controls.media_position_known = true;
                     controls.media_position_ms = v > 0.0f ? static_cast<uint32_t>(v) : 0;
@@ -405,6 +614,14 @@ int main() {
                     if (std::strcmp(b, "down") == 0) button_mask |= bit;
                     else button_mask = static_cast<uint8_t>(button_mask & ~bit);
                 }
+            } else if (std::sscanf(line.c_str(), "dev %31s %31s", a, b) == 2) {
+                for (const NamedDev& nd : kNamedDevs) {
+                    if (std::strcmp(a, nd.name) != 0) continue;
+                    DevMode& m = dev_mode[static_cast<uint8_t>(nd.dev)];
+                    if (std::strcmp(b, "ok") == 0) m = DevMode::Ok;
+                    else if (std::strcmp(b, "fail") == 0) m = DevMode::Failing;
+                    else if (std::strcmp(b, "absent") == 0) m = DevMode::Absent;
+                }
             } else if (std::sscanf(line.c_str(), "cmd %31s", a) == 1) {
                 using core::state::Command;
                 using core::state::CommandId;
@@ -416,6 +633,7 @@ int main() {
                 else if (std::strcmp(a, "spin") == 0) bike.trigger_slip(sim::Bike::Slip::Spin, now);
                 else if (std::strcmp(a, "flock") == 0) bike.trigger_slip(sim::Bike::Slip::FrontLock, now);
                 else if (std::strcmp(a, "rlock") == 0) bike.trigger_slip(sim::Bike::Slip::RearLock, now);
+                else if (std::strcmp(a, "crank") == 0) bike.trigger_crank(now, controls.vbat);
             } else if (line.rfind("quit", 0) == 0) {
                 if (log_file) std::fclose(log_file);
                 return 0;
@@ -424,9 +642,13 @@ int main() {
 
         // --- one tick of the bike and the firmware ----------------------
         now += kTickMs;
-        controls.utc_ms = host_utc_ms_of_day();
+        host_utc(clock_shift_h, controls);
         bike.step(slots, controls, now, kTickMs);
         fake_ota.step(slots);
+        fake_storage.step(slots, health, system,
+                          dev_mode[static_cast<uint8_t>(core::state::Dev::Sd)] != DevMode::Absent);
+        fake_wifi.step(slots, now, bike.speed_mph(), wifi_in_use);
+        fake_ble.step(slots, health, now, phone_on);
 
         // What `input` does: poll the pod, debounce, hand events to the UI.
         core::nav::InputEvent ev[core::input::kButtonCount];
@@ -444,7 +666,7 @@ int main() {
         sc.span_rpm = sv.span_rpm;
         sc.hysteresis_rpm = sv.hysteresis_rpm;
         sc.flash_rpm = sv.flash_rpm;
-        uint16_t rpm = static_cast<uint16_t>(controls.rpm);
+        uint16_t rpm = static_cast<uint16_t>(bike.rpm());
         // ...including the start-up sweep, timed from the first frame.
         if (system.first_frame_ms != 0) {
             core::sweep::Config wc;
@@ -460,7 +682,7 @@ int main() {
         controls.shift_mask = lamp_mask;
         controls.shift_flash = flash;
         // What `ctrl` does: infer the gear from rpm against road speed.
-        controls.gear = core::gear::estimate(controls.rpm, bike.speed_mph(),
+        controls.gear = core::gear::estimate(bike.rpm(), bike.speed_mph(),
                                              controls.neutral,
                                              core::config::gear_view(settings));
 
@@ -483,14 +705,46 @@ int main() {
             const auto dev = static_cast<core::state::Dev>(i);
             // The wheels are `logic`'s to report (core::fusion::WheelCheck),
             // as on the bike: an OK from here every tick drowned its fault,
-            // and a dead sensor never reached DIAG or the alert.
+            // and a dead sensor never reached DIAG or the alert. The phone
+            // is FakeBle's.
             if (dev == core::state::Dev::FrontWheel ||
-                dev == core::state::Dev::RearWheel) continue;
-            if (!health.is_absent(dev)) health.report_ok(dev, now);
+                dev == core::state::Dev::RearWheel ||
+                dev == core::state::Dev::Phone) continue;
+            // An ejected card stays out until it is pulled and put back.
+            if (dev == core::state::Dev::Sd && fake_storage.ejected) continue;
+            switch (dev_mode[i]) {
+                case DevMode::Absent:
+                    if (!health.is_absent(dev)) health.set_absent(dev);
+                    break;
+                case DevMode::Failing:
+                case DevMode::Ok:
+                    // Coming back (or arriving): the driver's init first, as
+                    // on the bike, or its reports are ignored. Not the ECU or
+                    // TPMS, which this board has not got.
+                    if (health.is_absent(dev)) {
+                        if (dev == core::state::Dev::Ecu || dev == core::state::Dev::TpmsF ||
+                            dev == core::state::Dev::TpmsR) break;
+                        health.begin_init(dev, now);
+                    }
+                    if (dev_mode[i] == DevMode::Ok) health.report_ok(dev, now);
+                    else health.report_error(dev, -1, now);
+                    break;
+            }
         }
         health.tick(now, core::health::Policy{});
         health.publish_if_changed(slots.health, now);
         system.uptime_s = now / 1000;
+        system.chip_temp_c = controls.dash_temp_c;
+        system.chip_temp_ok = true;
+
+        if (now - last_backlight_ms >= 1000) {
+            last_backlight_ms = now;
+            const core::state::Gnss g = slots.gnss.get();
+            const uint8_t dim = auto_dim.update(g.fix && g.day_of_year != 0, g.day_of_year,
+                                                g.utc_ms, g.lat, g.lon,
+                                                settings.dim_at_night);
+            backlight_pct = core::sun::apply_dim(settings.brightness_pct, dim);
+        }
 
         // The bus runs whether or not a frame is due.
         panel.advance(static_cast<uint64_t>(kTickMs) * 1000000ull);
@@ -556,7 +810,7 @@ int main() {
                              ? core::alert::text(app.alert_kind()) : "");
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
-                    "over=%u busy=%d pend=%u slip=%s/%u alert=%s\n",
+                    "over=%u busy=%d pend=%u slip=%s/%u alert=%s bl=%u\n",
                     lamp_mask, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
@@ -565,7 +819,8 @@ int main() {
                     static_cast<double>(wire.peak().ms()),
                     wire.total().oversized, bus_busy ? 1 : 0,
                     panel.pending_px(), slip_tok,
-                    static_cast<unsigned>(app.slip_bar().pct()), alert_tok);
+                    static_cast<unsigned>(app.slip_bar().pct()), alert_tok,
+                    static_cast<unsigned>(backlight_pct));
         std::printf("P6\n%d %d\n255\n", ui::kScreenW, ui::kScreenH);
         std::fwrite(rgb.data(), 1, rgb.size(), stdout);
         std::fflush(stdout);

@@ -29,6 +29,12 @@ struct Controls {
     // which core::fusion::WheelCheck faults after 5 s at speed.
     bool  front_dead = false;
     bool  rear_dead  = false;
+    // On its side: lean goes over to 88 degrees and the bike brakes to a
+    // stop, which is what core/alert's bike-down rule looks for. The lean
+    // slider stops at 55, a hard corner, not a crash.
+    bool  down       = false;
+    // Inside the dash, for DIAG -> System's chip and IMU rows.
+    float dash_temp_c = 38.0f;
     bool  neutral    = false;
     bool  ecu_online = false;   // NullEngine ships, so this is off by default
     bool  gps_fix    = true;
@@ -63,7 +69,13 @@ struct Controls {
 
     // Milliseconds since UTC midnight, from the host clock, so the dash
     // clock reads the time of day rather than how long the sim has run.
+    // The date with it, as RMC carries it: sun elevation, night dimming,
+    // the START waypoint and dated logs all need one.
     uint32_t utc_ms = 0;
+    uint16_t year = 0;
+    uint8_t  month = 0;
+    uint8_t  day = 0;
+    uint16_t day_of_year = 0;
 
     // Drives the bike round a synthetic circuit at `speed_mph`, so the lap
     // timer, the delta matcher and the map screens have something real to
@@ -101,6 +113,18 @@ public:
     enum class Slip : uint8_t { Spin, FrontLock, RearLock, Count };
     void trigger_slip(Slip kind, uint32_t now_ms);
 
+    // The starter: a second of cranking at ~280 rpm with the battery
+    // pulled down under it (deepest in the first 60 ms, the motor's inrush),
+    // which is the dip core::battery measures and no slider is fast enough
+    // to make. What the engine does once it catches is the rpm and battery
+    // sliders, which the front end moves when it sends this.
+    void trigger_crank(uint32_t now_ms, float rest_v);
+
+    // What the engine and battery are doing right now: the sliders, or the
+    // starter while it runs.
+    float rpm() const { return rpm_; }
+    float vbat() const { return vbat_; }
+
     // Where the bike is on the circuit, 0..1. The front end draws a dot.
     float lap_fraction() const { return f_; }
     // Where the bike's speed actually is, chasing the slider.
@@ -121,6 +145,10 @@ private:
     uint32_t air_until_ms_ = 0;
     // When each slip event started; 0 is none running.
     uint32_t slip_at_ms_[static_cast<uint8_t>(Slip::Count)] = {};
+    uint32_t crank_at_ms_ = 0;       // 0: not cranking
+    float    crank_rest_v_ = 12.6f;
+    float    rpm_ = 0.0f;
+    float    vbat_ = 12.6f;
     uint32_t spike_until_ms_ = 0;
 
     core::jump::Detector jump_;

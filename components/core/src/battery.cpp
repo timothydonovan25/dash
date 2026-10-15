@@ -37,17 +37,30 @@ void Monitor::update(float vin_v, float rpm, uint32_t t_ms, const Config& c) {
         started_ = true;
         running_ = rpm > 0.0f;
         state_since_ms_ = t_ms;
+        load_v_ = vin_v;
+        last_ms_ = t_ms;
         bucket_[0] = bucket_[1] = vin_v;
         bucket_ms_ = t_ms;
     }
 
+    // Smoothed by time, not by sample, so it means the same at any rate.
+    // Coming down from the resting level, a short inrush pulls this only a
+    // fraction of the way; a battery that sags for the whole crank pulls it
+    // all the way.
+    const uint32_t dt = t_ms - last_ms_;
+    last_ms_ = t_ms;
+    const float a = c.crank_avg_ms == 0
+                        ? 1.0f
+                        : static_cast<float>(dt) / static_cast<float>(c.crank_avg_ms + dt);
+    load_v_ += a * (vin_v - load_v_);
+
     // The last second's low, in half-second buckets.
     if (t_ms - bucket_ms_ >= 500) {
         bucket_[1] = bucket_[0];
-        bucket_[0] = vin_v;
+        bucket_[0] = load_v_;
         bucket_ms_ = t_ms;
-    } else if (vin_v < bucket_[0]) {
-        bucket_[0] = vin_v;
+    } else if (load_v_ < bucket_[0]) {
+        bucket_[0] = load_v_;
     }
 
     const bool running = rpm > 0.0f;
@@ -65,7 +78,7 @@ void Monitor::update(float vin_v, float rpm, uint32_t t_ms, const Config& c) {
     }
 
     if (cranking_) {
-        if (vin_v < crank_min_) crank_min_ = vin_v;
+        if (load_v_ < crank_min_) crank_min_ = load_v_;
         if (t_ms - crank_start_ms_ >= c.crank_window_ms) {
             cranking_ = false;
             out_.crank_min_v = crank_min_;      // this start's, not the lowest ever

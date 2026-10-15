@@ -28,6 +28,11 @@ struct Config {
     float    charge_rpm       = 3000.0f;
     uint32_t charge_settle_ms = 3000;     // above charge_rpm this long first
     uint32_t crank_window_ms  = 4000;     // after the first rpm is seen
+    // The crank dip is read through this much smoothing. The 9.6 V line is
+    // for the voltage the battery holds while the starter turns, not for
+    // the first few tens of milliseconds of the motor's inrush, which dip a
+    // healthy battery well below it: read raw, nearly every start was weak.
+    uint32_t crank_avg_ms     = 100;
     float    weak_rest_v      = 12.2f;    // about half charged
     float    weak_crank_v     = 9.6f;     // the usual load-test line
     float    charge_low_v     = 13.2f;
@@ -64,8 +69,11 @@ private:
     bool     started_ = false;
     bool     running_ = false;
     uint32_t state_since_ms_ = 0;     // when the engine last went on or off
-    // The lowest VIN of the last ~second, in two half-second buckets, so
-    // the dip from a starter that turns before the first tach edge counts.
+    // VIN smoothed over crank_avg_ms, and the time of the last sample.
+    float    load_v_ = 0.0f;
+    uint32_t last_ms_ = 0;
+    // The lowest of that over the last ~second, in two half-second buckets,
+    // so the dip from a starter that turns before the first tach edge counts.
     float    bucket_[2] = {0.0f, 0.0f};
     uint32_t bucket_ms_ = 0;
     bool     cranking_ = false;

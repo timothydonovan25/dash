@@ -50,7 +50,15 @@ It runs the firmware's own `ui::App`, screens, widgets, `logic_tick`,
 button debounce and `shift::pattern()` against a fake bike, so what the
 window shows is what the panel will show. Sliders for speed, rpm, lean and
 the rest; the five buttons send down/up separately so the real debounce and
-long-press timing decide what a press was. `build-sim/dash_sim` also speaks
+long-press timing decide what a press was. Buttons for events no slider can
+make (a jump, wheelspin and locks, a crank), and stand-ins that answer what
+the firmware asks of tasks the sim does not run (ota, storage's eject, the
+Wi-Fi hotspot, a BLE phone), so every alert and every DIAG state is
+reachable: each device can be set ok, failing or absent, a wheel sensor
+killed, the bike laid on its side, the GPS clock shifted to night (the
+window dims by the backlight `keeper` would set). The bike reaches the
+speed slider at 0.8 g / 1.1 g, never in one step. The FRAME line carries
+the slip bar, the alert and the backlight for scripts. `build-sim/dash_sim` also speaks
 a plain text protocol on stdin and emits PPM frames on stdout, so it can be
 scripted and piped into ffmpeg.
 
@@ -364,7 +372,7 @@ and the IMU's, from its FIFO packets.
 **Startup** shows a 1.5 s splash before the gauge sweep (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
-shows "ejected, safe to pull" until the card comes out. One lock in
+shows "safe to pull" until the card comes out. One lock in
 `drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
 `wifi`.
 

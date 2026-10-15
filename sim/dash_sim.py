@@ -33,7 +33,7 @@ import termios
 import threading
 import tkinter as tk
 
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
@@ -138,11 +138,17 @@ SLIDERS = [
     ("pitch",   "Pitch  deg",   -30,   30,    1,    0),
     ("tps",     "Throttle  %",    0,  100,    1,    0),
     ("coolant", "Coolant  C",     0,  130,    1,   82),
-    ("vbat",    "Battery  V",     0,   15,  0.1, 12.6),
+    # To 17: over 16 is the overcharging alert (a dead regulator).
+    ("vbat",    "Battery  V",     0,   17,  0.1, 12.6),
     # Each wheel against road speed: + spinning, -100 locked (slip bar).
     ("fslip",   "Front slip  %", -100, 60,    5,    0),
     ("rslip",   "Rear slip  %",  -100, 60,    5,    0),
     ("sats",    "Satellites",     0,   16,    1,   11),
+    # Inside the dash: DIAG -> System's chip and IMU temperature rows.
+    ("temp",    "Dash temp  C",   0,   90,    1,   38),
+    # Moves the GPS clock and date off the host's, to reach night (CONFIG ->
+    # Display -> Dim at night) or another day (the START waypoint moves).
+    ("shift",   "Clock shift  h", -12, 12,    1,    0),
     # The panel's write clock. 10 is the firmware's starting value; drop it
     # to watch a repaint arrive line by line. 0 is an ideal, instant bus.
     ("bus_mhz", "Panel bus  MHz  (0 = instant)", 0, 20, 0.5, 10),
@@ -159,6 +165,32 @@ TOGGLES = [
     ("deadf",   "Front speed sensor dead", False),
     ("deadr",   "Rear speed sensor dead",  False),
 ]
+
+# The third column: the bike and its radios rather than its sensors.
+BIKE_TOGGLES = [
+    # Lean to 88 degrees and brake to a stop: the bike-down alert, after 2 s.
+    ("down",    "Bike on its side",        False),
+    # A bonded phone in range: DIAG -> Radio, the Phone health row. CONFIG ->
+    # Phone -> Forget drops the bond; Pairing mode lets it back in.
+    ("phone",   "Phone connected",         False),
+    # Someone on the update page, which keeps the hotspot from idling off.
+    # Turn the hotspot on from DIAG -> Update.
+    ("wclient", "Phone using the Wi-Fi page", False),
+]
+
+# Devices the health table can be told about: working, failing every
+# report (degraded, then fault, then the alert), or not there. For the SD
+# card, absent is pulled: after CONFIG -> SD card -> Eject, pull it and put
+# it back to have it mounted again.
+DEVICES = [
+    ("imu",     "IMU"),
+    ("gnss",    "GPS"),
+    ("lamps",   "Shift lamps / backlight"),
+    ("pod",     "Button pod"),
+    ("sd",      "SD card"),
+    ("display", "Display"),
+]
+DEV_MODES = ["ok", "fail", "absent"]
 
 # The simulator has no radio, so nothing plays the phone's part of §11.1.
 # Instead it uses whatever is actually
@@ -414,6 +446,7 @@ class App:
         right = tk.Frame(root, bg="#0d0f14")
         right.grid(row=0, column=1, padx=12, pady=12, sticky="n")
 
+        self.sliders = {}
         for name, label, lo, hi, res, default in SLIDERS:
             tk.Label(right, text=label, fg="#788496", bg="#0d0f14",
                      anchor="w").pack(fill="x")
@@ -424,6 +457,7 @@ class App:
                          command=lambda v, n=name: self.sim.send(f"set {n} {v}"))
             s.set(default)
             s.pack(fill="x", pady=(0, 4))
+            self.sliders[name] = s
 
         for name, label, default in TOGGLES:
             var = tk.IntVar(value=1 if default else 0)
@@ -461,8 +495,57 @@ class App:
                       command=lambda c=cmd: self.sim.send(f"cmd {c}")).pack(
                           fill="x", pady=2)
 
+        # --- the bike, its radios, its devices ----------------------------
+        third = tk.Frame(root, bg="#0d0f14")
+        third.grid(row=0, column=2, padx=12, pady=12, sticky="n")
+        for name, label, default in BIKE_TOGGLES:
+            var = tk.IntVar(value=1 if default else 0)
+            tk.Checkbutton(
+                third, text=label, variable=var, fg="#e2e8f0", bg="#0d0f14",
+                selectcolor="#161a22", activebackground="#0d0f14",
+                activeforeground="#e2e8f0", anchor="w",
+                command=lambda n=name, v=var: self.sim.send(f"set {n} {v.get()}")).pack(fill="x")
+            self.sim.send(f"set {name} {var.get()}")
+
+        # The starter. Cranking is the sim's (a dip too short for a slider);
+        # what the engine does once it catches is the sliders, set here.
+        tk.Label(third, text="", bg="#0d0f14").pack()
+        tk.Button(third, text="Start engine  (crank, then idle charging)",
+                  bg="#161a22", fg="#e2e8f0", highlightbackground="#2c3440",
+                  command=self.start_engine).pack(fill="x", pady=2)
+        tk.Button(third, text="Stop engine", bg="#161a22", fg="#e2e8f0",
+                  highlightbackground="#2c3440",
+                  command=self.stop_engine).pack(fill="x", pady=2)
+
+        tk.Label(third, text="", bg="#0d0f14").pack()
+        tk.Label(third, text="Devices", fg="#788496", bg="#0d0f14",
+                 anchor="w").pack(fill="x")
+        for dev, label in DEVICES:
+            row = tk.Frame(third, bg="#0d0f14")
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=label, fg="#e2e8f0", bg="#0d0f14", width=22,
+                     anchor="w").pack(side="left")
+            var = tk.StringVar(value="ok")
+            om = tk.OptionMenu(row, var, *DEV_MODES,
+                               command=lambda m, d=dev: self.sim.send(f"dev {d} {m}"))
+            om.configure(bg="#161a22", fg="#e2e8f0", highlightthickness=0,
+                         activebackground="#38aaff", width=6)
+            om.pack(side="left")
+
         root.protocol("WM_DELETE_WINDOW", self.quit)
         self.pump()
+
+    def start_engine(self):
+        """Crank from the battery's resting voltage, then idle at 1600 with
+        the charging system up. The sliders move to the running state now;
+        the sim plays the second of cranking over them."""
+        self.sim.send("cmd crank")
+        self.sliders["rpm"].set(1600)
+        self.sliders["vbat"].set(14.1)
+
+    def stop_engine(self):
+        self.sliders["rpm"].set(0)
+        self.sliders["vbat"].set(12.6)
 
     def on_key_press(self, event):
         letter = KEYS.get(event.keysym)
@@ -570,6 +653,11 @@ class App:
             self._resize_to = (tw, th)
             self.canvas.config(width=tw, height=th)
         frame = frame.resize(self._resize_to, Image.LANCZOS)
+        # The backlight the firmware asked for (CONFIG brightness, dimmed
+        # at night), since a laptop screen will not dim one window.
+        bl = int(tail.get("bl", 100))
+        if bl < 100:
+            frame = ImageEnhance.Brightness(frame).enhance(max(bl, 0) / 100.0)
         # tk.PhotoImage over ImageTk: the latter needs the separate
         # python3-pil.imagetk package, and re-encoding to PPM is cheap at
         # this resolution.

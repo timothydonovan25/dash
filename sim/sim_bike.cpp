@@ -111,6 +111,11 @@ void Bike::trigger_slip(Slip kind, uint32_t now_ms) {
     slip_at_ms_[static_cast<uint8_t>(kind)] = now_ms ? now_ms : 1;
 }
 
+void Bike::trigger_crank(uint32_t now_ms, float rest_v) {
+    crank_at_ms_ = now_ms ? now_ms : 1;
+    crank_rest_v_ = rest_v;
+}
+
 void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
                 uint32_t dt_ms) {
     const float dt = static_cast<float>(dt_ms) / 1000.0f;
@@ -120,7 +125,7 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     // (logic's, which gates a jump that size as implausible) caught up over
     // a second or so, and the slip bar called both wheels locked, or both
     // spinning, against it. Real 1 g stops do not do that; a slider did.
-    const float want = c.speed_mph;
+    const float want = c.down ? 0.0f : c.speed_mph;
     if (want > speed_mph_) {
         speed_mph_ = std::fmin(want, speed_mph_ + kAccelMphPerS * dt);
     } else {
@@ -178,11 +183,29 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
         lat_ += static_cast<double>(v_mph * kFtPerSPerMph * dt) * kFtLat;
     }
 
+    // The starter, while it turns: 60 ms of inrush, then what the battery
+    // holds under the load. A healthy one at 12.6 V holds about 10.2 V; one
+    // that is partly flat has less in it and sags further (at 12.3 V it is
+    // under the 9.6 V load-test line), which is what core::battery reads.
+    rpm_ = c.rpm;
+    vbat_ = c.vbat;
+    if (crank_at_ms_ != 0) {
+        const uint32_t t = now_ms - crank_at_ms_;
+        if (t < 1000) {
+            rpm_ = t < 80 ? 0.0f : 280.0f;
+            const float flat = crank_rest_v_ < 12.6f ? 12.6f - crank_rest_v_ : 0.0f;
+            const float sag = 2.4f + 4.0f * flat;
+            vbat_ = crank_rest_v_ - (t < 60 ? sag + 1.2f : sag);
+        } else {
+            crank_at_ms_ = 0;
+        }
+    }
+
     core::state::Engine e;
     e.shift_mask = c.shift_mask;
     e.shift_flash = c.shift_flash;
     e.gear = c.gear;
-    e.rpm = c.rpm;
+    e.rpm = rpm_;
     e.neutral = c.neutral;
     e.coolant_c = c.coolant_c;
     e.tps_pct = c.tps_pct;
@@ -219,10 +242,12 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     // it already has its own tests. Everything the screens do with these
     // numbers is real.
     core::state::Attitude a;
-    a.lean_deg = lean_deg_;
+    // Over on its side, whichever side the slider last leaned it.
+    a.lean_deg = c.down ? (c.lean_deg < 0.0f ? -88.0f : 88.0f) : lean_deg_;
+    a.imu_temp_c = c.dash_temp_c - 3.0f;   // the IMU runs a little cooler than the P4
     a.pitch_deg = c.pitch_deg;
     a.yaw_rate_dps = yaw_rate_dps;
-    const float lean_rad = lean_deg_ * static_cast<float>(kPi) / 180.0f;
+    const float lean_rad = a.lean_deg * static_cast<float>(kPi) / 180.0f;
     a.g_lat = std::sin(lean_rad);
     a.g_vert = std::cos(lean_rad);
     a.g_lon = accel_g_;
@@ -264,6 +289,10 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     g.course_deg = heading_deg_;
     g.speed_mph = v_mph;
     g.utc_ms = c.utc_ms;
+    g.year = c.year;
+    g.month = c.month;
+    g.day = c.day;
+    g.day_of_year = c.day_of_year;
     g.rx_ms = now_ms;            // a new fix every step
     slots.gnss.publish(g);
 
@@ -305,10 +334,10 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     slots.media.publish(md);
 
     core::state::Elec el;
-    el.vbat = c.vbat;
+    el.vbat = vbat_;
     slots.elec.publish(el);
 
-    battery_.update(c.vbat, c.rpm, now_ms, core::battery::Config{});
+    battery_.update(vbat_, rpm_, now_ms, core::battery::Config{});
     const core::battery::Report& br = battery_.report();
     core::state::Battery b;
     b.rest_v = br.rest_v;

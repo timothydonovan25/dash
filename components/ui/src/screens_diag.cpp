@@ -222,7 +222,9 @@ void SystemScreen::update(const Frame& f) {
         case core::state::DevState::Degraded: sd = "degraded"; break;
         case core::state::DevState::Fault:    sd = "FAULT";    break;
     }
-    if (s->sd_ejected) sd = "ejected, safe to pull";
+    // The value column holds 13 characters; "ejected, safe to pull" lost
+    // the half that matters.
+    if (s->sd_ejected) sd = "safe to pull";
     table_.set_row(11, "SD card", sd);
 
     table_.set_row_count(12);
