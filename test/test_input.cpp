@@ -121,6 +121,20 @@ int main() {
         CHECK(p.shorts[4] == 1);
     }
 
+    CASE("a press settles on its second read, 10 ms after the edge");
+    {
+        Decoder d;
+        Config c;
+        core::nav::InputEvent ev[core::input::kButtonCount];
+        CHECK(d.update(0x01, 1000, c, ev, core::input::kButtonCount) == 0);
+        CHECK(!d.held(core::nav::Button::A));
+        d.update(0x01, 1010, c, ev, core::input::kButtonCount);
+        CHECK(d.held(core::nav::Button::A));
+        // And the release the same way: a short press out on its second read.
+        CHECK(d.update(0x00, 1100, c, ev, core::input::kButtonCount) == 0);
+        CHECK(d.update(0x00, 1110, c, ev, core::input::kButtonCount) == 1);
+    }
+
     CASE("a spike shorter than the debounce window is not a press");
     {
         Pod p;

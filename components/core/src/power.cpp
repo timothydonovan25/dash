@@ -30,6 +30,7 @@ FailDetector::Event FailDetector::feed(float v) {
             run_ = v < cfg_.trip_v ? static_cast<uint16_t>(run_ + 1) : 0;
             if (run_ >= cfg_.trip_n) {
                 state_ = State::Tripped;
+                low_run_ = run_;
                 run_ = 0;
                 since_trip_ = 0;
                 return Event::Tripped;
@@ -37,6 +38,8 @@ FailDetector::Event FailDetector::feed(float v) {
             return Event::None;
 
         case State::Tripped:
+            if (!(v < cfg_.trip_v)) low_run_ = 0;
+            else if (low_run_ < 0xFFFF) ++low_run_;
             run_ = v >= cfg_.ok_v ? static_cast<uint16_t>(run_ + 1) : 0;
             if (run_ >= cfg_.ok_n) {
                 state_ = State::Armed;

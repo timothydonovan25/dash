@@ -59,6 +59,13 @@ struct Config {
     // Gyro readings below this are treated as zero, so a bike on the stand
     // does not slowly roll over. Set from the measured noise floor.
     float gyro_deadband_dps = 0.15f;
+
+    // The published g vector is low-passed with this time constant (about
+    // a 10 Hz corner). Raw, it was whichever single 200 Hz sample came last,
+    // and `logic` reads it at 50 Hz for the fused speed: engine vibration
+    // (25-170 Hz) folded straight into the speed estimate. The lean filter
+    // still works from the raw samples.
+    float g_tau_ms = 16.0f;
 };
 
 struct Sample {
@@ -111,6 +118,7 @@ private:
     float bias_gx_ = 0.0f, bias_gy_ = 0.0f, bias_gz_ = 0.0f;
 
     float ax_ = 0.0f, ay_ = 0.0f, az_ = 1.0f;
+    float lx_ = 0.0f, ly_ = 0.0f, lz_ = 1.0f;     // ax_.. low-passed, published
     float yaw_rate_dps_ = 0.0f;
 
     uint32_t last_ms_ = 0;

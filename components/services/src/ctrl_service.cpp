@@ -1,9 +1,10 @@
 // `ctrl` — core 0, priority 18, 500 Hz.
 //
 // The only latency-critical task on the bike. Tach edge to shift lamp has to
-// stay under about 3 ms: one 500 Hz tick is 2 ms worst case, and one I2C
-// write to the LED driver is about 0.1 ms at 1 MHz. Everything else here is
-// bookkeeping that happens to share the loop.
+// stay under about 3 ms. The tach ISR wakes this task at the edge, so the
+// lamps are decided then rather than at the next 500 Hz tick (which was up
+// to 2 ms of the budget on its own); one I2C write to the LED driver is
+// about 0.1 ms at 1 MHz. Everything else here is bookkeeping on the tick.
 //
 // Nothing in this file is allowed to block, allocate, touch the filesystem
 // or log. If a line here can wait, it belongs in `logic`.
@@ -14,6 +15,8 @@
 #include "core/power/power.hpp"
 #include "core/sweep/sweep.hpp"
 #include "bsp/pins.hpp"
+#include "drivers/engine_sense.hpp"
+#include "drivers/pca9955b.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -47,6 +50,11 @@ void ctrl_task(void* arg) {
     uint8_t prev_mask = 0;
     uint8_t lit_mask = 0;
     uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
+    uint8_t backlight_sent = 0xFF;   // likewise
+    // The backlight and the configuration registers are not hal::IShiftLamps
+    // business; they are this driver's. Every write to I2C1 is made from this
+    // task, so the bus has one user and the lamps never queue behind another.
+    auto* leds = static_cast<drivers::Pca9955b*>(d.lamps);
     uint32_t ticks = 0;
     uint32_t retry_tick = 0;
     // The start-up sweep (core/sweep): the lamps follow the screen's tach up
@@ -58,38 +66,33 @@ void ctrl_task(void* arg) {
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
 
-    for (;;) {
-        hal::IEngineSense::Counts c;
-        const hal::Status s = d.sense ? d.sense->read(c) : hal::Status::NotPresent;
+    // Woken by the tach ISR on every edge past its refractory window.
+    drivers::EngineSense::notify_on_tach(xTaskGetCurrentTaskHandle());
 
+    auto tach_config = [&] {
         core::tach::Config tc;
         tc.pulses_per_rev = 1;
-        core::tach::WheelConfig fc;
-        fc.circumference_mm = d.settings->front_circumference_mm;
-        fc.pulses_per_rev   = d.settings->front_pulses_per_rev;
-        core::tach::WheelConfig rc;
-        rc.circumference_mm = d.settings->rear_circumference_mm;
-        rc.pulses_per_rev   = d.settings->rear_pulses_per_rev;
+        tc.revs_per_pulse = d.settings->tach_revs_per_pulse;
+        return tc;
+    };
 
-        tach.update(c.tach_pulses, c.tach_edge_us, c.t_us, tc);
-        front.update(c.front_pulses, c.front_edge_us, c.t_us, fc);
-        rear.update(c.rear_pulses, c.rear_edge_us, c.t_us, rc);
-
-        // Lamps first, before publishing anything. The rider's shift point
-        // does not wait on a struct copy.
-        //
-        // The raw rpm drives the lamps, not the smoothed one: smoothing is
-        // for a needle a human reads, and putting it in this path would add
-        // lag to the one number that must not have any.
+    // What the lamps should show now, from the tach as last updated. The
+    // tick and an edge wake both come through here, so they cannot disagree.
+    //
+    // The raw rpm drives the lamps, not the smoothed one: smoothing is
+    // for a needle a human reads, and putting it in this path would add
+    // lag to the one number that must not have any.
+    core::shift::Config sc;
+    uint16_t lamp_rpm = 0;
+    auto decide_mask = [&]() -> uint8_t {
         const core::config::ShiftView sv = core::config::shift_view(*d.settings);
-        core::shift::Config sc;
         sc.base_rpm = sv.base_rpm;
         sc.span_rpm = sv.span_rpm;
         sc.hysteresis_rpm = sv.hysteresis_rpm;
         sc.flash_rpm = sv.flash_rpm;
 
         const uint16_t rpm = static_cast<uint16_t>(tach.raw_rpm());
-        uint16_t lamp_rpm = rpm;
+        lamp_rpm = rpm;
         if (!sweep_done) {
             const uint32_t now = d.clock->now_ms();
             const uint32_t first = d.system ? d.system->first_frame_ms : 0;
@@ -106,16 +109,71 @@ void ctrl_task(void* arg) {
                 sweep_done = true;
             }
         }
-        const uint8_t mask = core::shift::pattern(lamp_rpm, sc, prev_mask);
-        prev_mask = mask;
-        const bool resend = ++ticks % kResendTicks == 0;
-        const bool may_try = static_cast<int32_t>(ticks - retry_tick) >= 0;
+        const uint8_t m = core::shift::pattern(lamp_rpm, sc, prev_mask);
+        prev_mask = m;
+        return m;
+    };
+
+    // After a failed lamp write, the next attempt waits kRetryTicks.
+    auto may_try = [&] {
+        return d.lamps && static_cast<int32_t>(ticks - retry_tick) >= 0;
+    };
+
+    for (;;) {
+        hal::IEngineSense::Counts c;
+        const hal::Status s = d.sense ? d.sense->read(c) : hal::Status::NotPresent;
+
+        core::tach::WheelConfig fc;
+        fc.circumference_mm = d.settings->front_circumference_mm;
+        fc.pulses_per_rev   = d.settings->front_pulses_per_rev;
+        core::tach::WheelConfig rc;
+        rc.circumference_mm = d.settings->rear_circumference_mm;
+        rc.pulses_per_rev   = d.settings->rear_pulses_per_rev;
+
+        tach.update(c.tach_pulses, c.tach_edge_us, c.t_us, tach_config());
+        front.update(c.front_pulses, c.front_edge_us, c.t_us, fc);
+        rear.update(c.rear_pulses, c.rear_edge_us, c.t_us, rc);
+
+        // Lamps first, before publishing anything. The rider's shift point
+        // does not wait on a struct copy.
+        const uint8_t mask = decide_mask();
+        ++ticks;
+        // The once-a-second jobs are spread over different ticks, so no tick
+        // carries more than one of them on top of the lamps.
+        const uint32_t phase = ticks % kResendTicks;
+        const bool resend = phase == 0;
         hal::Status lamp_status = hal::Status::Ok;
         bool wrote = false;
-        if (((mask != lit_mask && may_try) || resend) && d.lamps) {
-            lamp_status = d.lamps->set_mask(mask);
-            if (hal::ok(lamp_status)) lit_mask = mask;
-            else retry_tick = ticks + kRetryTicks;
+        // One failed write ends this tick's I2C: each one can cost a 2 ms
+        // timeout and a bus reset, and a second in the same tick doubled
+        // that. The once-a-second resend obeys the hold too.
+        auto failed = [&](hal::Status st) {
+            retry_tick = ticks + kRetryTicks;
+            if (hal::ok(lamp_status)) lamp_status = st;
+        };
+
+        // A re-init `keeper` asked for after the LED driver faulted. Done
+        // here because this is the task that writes the part: from keeper,
+        // on core 1, it raced the lamp writes and zeroed the master duty
+        // behind this loop's back, which left the lamps dark for good.
+        if (take_retry(d, core::state::Dev::LedDriver) && d.lamps) {
+            const hal::Status is = d.lamps->init();
+            wrote = true;
+            if (hal::ok(is)) {
+                // init() leaves every output at zero: send everything again.
+                lit_mask = static_cast<uint8_t>(~mask);
+                last_master = 0xFF;
+                backlight_sent = 0xFF;
+                retry_tick = ticks;
+            } else {
+                failed(is);
+            }
+        }
+
+        if (may_try() && (mask != lit_mask || resend)) {
+            const hal::Status ms = d.lamps->set_mask(mask);
+            if (hal::ok(ms)) lit_mask = mask;
+            else failed(ms);
             wrote = true;
         }
 
@@ -135,11 +193,34 @@ void ctrl_task(void* arg) {
             : core::power::lamp_master_pct(
                   full, d.settings->shift_brightness_pct,
                   static_cast<uint8_t>(bsp::kShiftDutyUsbMax * 100 / 255));
-        if (master != last_master && may_try && d.lamps) {
+        if (may_try() && master != last_master) {
             const hal::Status ms = d.lamps->set_master(master);
             if (hal::ok(ms)) last_master = master;
-            else retry_tick = ticks + kRetryTicks;
-            if (hal::ok(lamp_status)) lamp_status = ms;
+            else failed(ms);
+            wrote = true;
+        }
+
+        // The backlight, which `keeper` decides and this task sends: on
+        // change, and once a second regardless, which is what restores it
+        // after an LED-driver brown-out. Dark at once while the supply is
+        // failing, without waiting for keeper's next pass.
+        const uint8_t backlight = d.power_fail.load(std::memory_order_relaxed)
+            ? 0
+            : d.backlight_pct.load(std::memory_order_relaxed);
+        if (leds && may_try() &&
+            (backlight != backlight_sent || phase == kResendTicks / 3)) {
+            const hal::Status bs = leds->set_backlight(backlight);
+            if (hal::ok(bs)) backlight_sent = backlight;
+            else failed(bs);
+            wrote = true;
+        }
+
+        // A browned-out LED driver acknowledges with every IREF at zero and
+        // looks alive. Its configuration goes again once a second, whether
+        // or not it has complained (about 0.3 ms of I2C).
+        if (leds && may_try() && phase == 2 * kResendTicks / 3) {
+            const hal::Status cs = leds->refresh_config();
+            if (!hal::ok(cs)) failed(cs);
             wrote = true;
         }
 
@@ -196,16 +277,45 @@ void ctrl_task(void* arg) {
             }
         }
 
+        // Until the next tick, every tach edge wakes this loop to decide the
+        // lamps again from the new interval: the edge is when the rpm
+        // changes, so it is when the lamps should. Only the lamps: the rest
+        // is the tick's, and an edge wake costs a counter read, the pattern
+        // and (only when it changed) one 10-byte write.
+        const TickType_t due = next + kPeriod;
+        for (;;) {
+            const int32_t left = static_cast<int32_t>(due - xTaskGetTickCount());
+            if (left <= 0) break;
+            if (ulTaskNotifyTake(pdTRUE, static_cast<TickType_t>(left)) == 0) break;
+
+            hal::IEngineSense::Counts ec;
+            if (!d.sense || !hal::ok(d.sense->read(ec))) continue;
+            tach.update(ec.tach_pulses, ec.tach_edge_us, ec.t_us, tach_config());
+            const uint8_t em = decide_mask();
+            if (em != lit_mask && may_try()) {
+                const hal::Status es = d.lamps->set_mask(em);
+                const uint32_t t = d.clock->now_ms();
+                if (hal::ok(es)) {
+                    lit_mask = em;
+                    d.health->report_ok(core::state::Dev::LedDriver, t);
+                } else {
+                    retry_tick = ticks + kRetryTicks;
+                    d.health->report_error(core::state::Dev::LedDriver,
+                                           static_cast<int32_t>(es), t);
+                }
+            }
+        }
+
         // Missing a deadline here is the one timing failure on this bike that
         // a rider would feel, so it is counted and shown on DIAG → System
         // rather than logged where nobody looks.
         //
         // Lateness against the schedule, not the length of the sleep: a tick
         // that overran (a stuck I2C write, a flash write freezing the core)
-        // makes vTaskDelayUntil return at once, and timing the sleep counted
-        // that as zero. After an overrun the schedule restarts from now
-        // instead of running the missed ticks back to back.
-        vTaskDelayUntil(&next, kPeriod);
+        // finds its deadline already past and does not wait. After an
+        // overrun the schedule restarts from now instead of running the
+        // missed ticks back to back.
+        next = due;
         const TickType_t woke = xTaskGetTickCount();
         if (woke - next > 1) {
             if (d.system) d.system->ctrl_late = static_cast<uint16_t>(++late);

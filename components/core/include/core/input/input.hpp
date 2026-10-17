@@ -41,8 +41,12 @@ struct Config {
     // here, not a theoretical one. Requiring the reading twice costs one
     // poll and removes that whole class.
     //
-    // 25 ms was simply more conservative than a switch needs.
-    uint16_t debounce_ms = 12;
+    // 25 ms was simply more conservative than a switch needs, and 12 was
+    // three reads, not two: the edge at t, t+10 still short of 12, t+20.
+    // 8 makes the second read, 10 ms after the edge, the one that settles
+    // it, with room for a poll that lands a millisecond early. A spike seen
+    // by one read alone is still never a press.
+    uint16_t debounce_ms = 8;
 
     // Held for this long is a long press, and it fires there rather than on
     // release: a rider holding E to set the finish line wants to know it

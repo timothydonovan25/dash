@@ -677,13 +677,14 @@ class App:
             lamp.configure(bg=LAMP_COLOURS[i] if on else LAMP_OFF)
 
         # What this frame would have cost the real panel. The laptop will
-        # repaint anything at any rate; the bike will not, and 16.7 ms is
-        # the whole of a 60 Hz frame. Amber past that, red past a full
-        # repaint's worth (about 31 ms on the 8080 bus at 10 MHz).
+        # repaint anything at any rate; the bike will not, and 8.3 ms is
+        # the whole of a 120 Hz frame (render_service's kFrameHz). Amber past
+        # that, red past a full repaint's worth (about 31 ms on the 8080 bus
+        # at 10 MHz).
         ms = float(tail.get("wire", 0.0))
         over = int(tail.get("over", 0))
         colour = "#788496"
-        if ms > 16.7:
+        if ms > 8.33:
             colour = "#ffb020"
         if ms > 31.0 or over:
             colour = "#ff4038"

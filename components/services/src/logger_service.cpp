@@ -1,10 +1,17 @@
-// `logger` — core 1, priority 5.
+// `logger` — core 1, priority 2.
 //
 // Drains the blackbox ring to the card in big batches. It is on core 1, at a
 // low priority, behind a ring buffer, for one reason: an SD card can stall
 // for hundreds of milliseconds without warning, and nothing on core 0 may
 // ever wait on that. A dropped record is a cost the ring counts; a late
 // shift light is not a cost at all, it is a bug.
+//
+// Priority 2, below keeper, ble, storage and wifi: IDF's SD-over-SPI driver
+// waits out a card's busy time by spinning, not sleeping, so whatever this
+// task is above is starved for as long as the card is busy -- tens of ms,
+// hundreds on a slow card -- and at 5 that was keeper's 20 Hz health table
+// among others. The ring holds ten seconds; this only needs the average
+// rate, which the idle time on core 1 has plenty of.
 #include "services/services.hpp"
 #include "core/log/log.hpp"
 #include "drivers/sdcard.hpp"
@@ -145,7 +152,13 @@ void logger_task(void* arg) {
             }
             len += core::log::format_csv(line + len, sizeof line - len, batch[i]);
             if (used + len >= sizeof block) {
-                const hal::Status s = card->append(path, block, used);
+                // Busy is another task holding the card lock past the 3 s
+                // wait, not a dead card: try again rather than throw 8 kB of
+                // ride away. The blackbox ring holds ten seconds meanwhile.
+                hal::Status s = card->append(path, block, used);
+                for (int retry = 0; s == hal::Status::Busy && retry < 2; ++retry) {
+                    s = card->append(path, block, used);
+                }
                 used = 0;
                 if (hal::ok(s)) {
                     d.health->report_ok(core::state::Dev::Sd, d.clock->now_ms());
@@ -168,8 +181,8 @@ void logger_task(void* arg) {
             // Idle: push out whatever is buffered so a log never lags the
             // ride by more than a moment, then sleep.
             if (used > 0) {
-                card->append(path, block, used);
-                used = 0;
+                // Kept for the next pass if the card was only busy.
+                if (card->append(path, block, used) != hal::Status::Busy) used = 0;
             }
             card->sync();
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -182,7 +195,7 @@ void logger_task(void* arg) {
 }  // namespace
 
 void start_logger(Deps& d) {
-    xTaskCreatePinnedToCore(logger_task, "logger", 6144, &d, 5, nullptr, 1);
+    xTaskCreatePinnedToCore(logger_task, "logger", 6144, &d, 2, nullptr, 1);
 }
 
 }  // namespace services

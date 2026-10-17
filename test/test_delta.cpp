@@ -229,6 +229,36 @@ int main() {
         CHECK(!t.delta_ms(d));
     }
 
+    CASE("between two reference points, the delta is read along the line");
+    {
+        // A straight reference at 100 ft per 100 ms. A rider at exactly the
+        // same pace, sampled half way between the reference points, is level:
+        // matching the nearest stored point read +-50 ms, which quantised to
+        // a tenth either way.
+        Tracker t;
+        Config cfg;
+        cfg.quantum_ms = 1;                  // see the raw figure
+        t.start_lap();
+        for (int i = 0; i < 40; ++i) {
+            t.sample(static_cast<float>(i) * 100.0f, 0.0f,
+                     static_cast<uint32_t>(i * 100), cfg);
+        }
+        t.finish_lap(true);
+        t.start_lap();
+        int32_t d = 0;
+        for (int i = 0; i < 30; ++i) {
+            t.sample(static_cast<float>(i) * 100.0f + 50.0f, 3.0f,
+                     static_cast<uint32_t>(i * 100 + 50), cfg);
+            CHECK(t.delta_ms(d));
+            CHECK(std::abs(d) <= 1);
+        }
+        // And 20% slower over the same ground reads +20% of elapsed time.
+        t.start_lap();
+        t.sample(1050.0f, 0.0f, 1260, cfg);  // reference passed 1050 ft at 1050 ms
+        CHECK(t.delta_ms(d));
+        CHECK(std::abs(d - 210) <= 1);
+    }
+
     CASE("a lap longer than the buffer cannot become the reference");
     {
         // A wrong-sized buffer must fail by refusing the reference, not by

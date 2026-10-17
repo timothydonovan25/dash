@@ -42,7 +42,7 @@ struct LogicState {
 
     core::geo::LatLon origin{};
     bool     have_origin = false;
-    uint32_t last_trace_ms = 0;
+    uint32_t last_trace_ms = 0;     // rx_ms of the fix behind the last trace point
 
     // The last fix handed to the lap timer (Gnss::rx_ms), and whether it has
     // already been told the receiver went quiet.
@@ -70,10 +70,23 @@ struct LogicState {
     core::gearcal::Learner learner;
 };
 
-// Call at 50 Hz. Drains commands, advances the trip computer and the lap
-// timer, feeds the delta matcher and the traces, and publishes the Trip and
-// Lap slots.
-void logic_tick(Deps& d, LogicState& s, ICommandSource& commands, uint32_t now_ms);
+// Why this pass is running. `logic` ticks on a fixed 50 Hz schedule and is
+// also woken between ticks when a producer has something for it (a new fix,
+// a command), so the rider sees it without waiting for the schedule.
+//
+// Everything that integrates over time (trip, fusion, the lap clock) takes
+// the real `now_ms` and does not care which kind of pass it is. What needs an
+// even cadence runs on Scheduled passes only: blackbox rows, whose rates are
+// divisors of the 50 Hz tick (core/log), and the gear calibration's
+// windows, which average samples and must not weight the moments a fix
+// arrived over the rest.
+enum class LogicPass : uint8_t { Scheduled, Event };
+
+// Drains commands, advances the trip computer and the lap timer, feeds the
+// delta matcher and the traces, and publishes the Trip and Lap slots. Call
+// with Scheduled at 50 Hz, and with Event as often as there is news.
+void logic_tick(Deps& d, LogicState& s, ICommandSource& commands, uint32_t now_ms,
+                LogicPass pass = LogicPass::Scheduled);
 
 // Restore the odometer and engine hours from NVS. Called once, before the
 // first tick.

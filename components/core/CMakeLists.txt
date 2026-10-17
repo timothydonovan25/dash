@@ -30,4 +30,5 @@ idf_component_register(
          "src/battery.cpp"
          "src/slip.cpp"
          "src/waypoint.cpp"
+         "src/flash.cpp"
     INCLUDE_DIRS "include")

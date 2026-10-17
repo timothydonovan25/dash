@@ -109,6 +109,11 @@ hal::Status Pca9955b::set_master(uint8_t percent) {
     return set_mask(mask_);
 }
 
+hal::Status Pca9955b::blank_lamps() {
+    const uint8_t zero[bsp::kLedLampCount] = {};
+    return write(static_cast<uint8_t>(kPwm0 + bsp::kLedLamp0), zero, sizeof zero);
+}
+
 hal::Status Pca9955b::set_backlight(uint8_t percent) {
     const uint8_t d = duty_of(percent);
     uint8_t pwm[bsp::kLedBacklightCount];

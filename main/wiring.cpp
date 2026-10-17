@@ -93,7 +93,9 @@ services::Deps& build() {
     //    returns, so the lamps are live before the panel has woken up. The
     //    driver comes up dark, every duty at zero.
     bring_up(core::state::Dev::LedDriver, g_leds.init());
-    g_sense.init();
+    // No health slot of its own: a failed init makes every read() say
+    // NotPresent, so `ctrl` drops the wheels out of the speedo.
+    if (!hal::ok(g_sense.init())) ESP_LOGE(kTag, "engine sense: tach and wheel inputs not hooked up");
     // VIN sense has no health slot: a failed init leaves `rails` reading
     // nothing, which ctrl and the screens already treat as "unknown supply".
     if (!hal::ok(g_vin.init())) ESP_LOGW(kTag, "VIN sense: no ADC");

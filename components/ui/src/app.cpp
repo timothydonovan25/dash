@@ -103,7 +103,7 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
             alerter_.acknowledge();
             alert_kind_ = core::alert::Kind::None;
             alert_.dismiss();
-            needs_full_ = true;
+            restore(kAlertBox);
             return;
         }
     }
@@ -136,9 +136,10 @@ void App::update_alert(const core::state::Frame& f) {
     if (k == alert_kind_) return;
     alert_kind_ = k;
     if (k == Kind::None) {
-        // Whatever it covered has to be painted back.
+        // Whatever it covered has to be painted back: that box, not the
+        // whole screen.
         alert_.dismiss();
-        needs_full_ = true;
+        restore(kAlertBox);
     } else {
         const bool grave = k == Kind::BikeDown || k == Kind::BatteryHigh;
         alert_.show(core::alert::text(k), grave ? color::kAlarm : color::kWarn);
@@ -165,8 +166,10 @@ void App::update_slip(const core::state::Frame& f) {
     const bool was = slip_bar_.active();
     slip_bar_.set(r.kind, r.pct);
     // The bar covered the top of the screen, which is title and chrome, not
-    // widgets: putting it back is a full repaint, as for a dismissed alert.
-    if (was && !slip_bar_.active()) needs_full_ = true;
+    // only widgets: put that strip back, from the ground up. On a dirt bike
+    // this happens every time a spin or a lock ends, so a whole frame (two
+    // frame periods of wire) each time was a stutter the rider could see.
+    if (was && !slip_bar_.active()) restore(kSlipBar);
 }
 
 void App::update(const core::state::Frame& f) {
@@ -268,6 +271,30 @@ void App::render_splash(Canvas& c) {
     }
 }
 
+void App::restore(const Rect& r) {
+    for (int i = 0; i < restore_n_; ++i) {
+        if (restore_[i].x == r.x && restore_[i].y == r.y &&
+            restore_[i].w == r.w && restore_[i].h == r.h) return;
+    }
+    if (restore_n_ < kMaxRestore) restore_[restore_n_++] = r;
+    else needs_full_ = true;
+}
+
+void App::paint_region(Canvas& c) {
+    // What render(c, true) draws, for whatever part of the screen the
+    // canvas is windowed onto, without touching any widget's dirty state:
+    // this is one rectangle among the frame's damage, not a new frame.
+    c.fill(color::kBg);
+    if (current().wants_title()) chrome::title(c, mode_name(), current().name());
+    current().draw_background(c);
+    for (Widget* w : current().widgets()) {
+        if (w && c.intersects(w->bounds)) w->render(c);
+    }
+    if (slip_bar_.active() && c.intersects(slip_bar_.bounds)) slip_bar_.render(c);
+    if (alert_.active() && c.intersects(alert_.bounds)) alert_.render(c);
+    if (dev_running_ && c.intersects(dev_tag_.bounds)) dev_tag_.render(c);
+}
+
 void App::render(Canvas& c, bool full) {
     if (!entered_) return;
     if (cal_swap_) {
@@ -293,6 +320,7 @@ void App::render(Canvas& c, bool full) {
         // everything has to be redrawn, not just what changed.
         for (Widget* w : current().widgets()) if (w) w->touch();
         needs_full_ = false;
+        restore_n_ = 0;
     }
 
     // A widget outside the canvas's band is still cleared: on a band-by-band
@@ -328,6 +356,15 @@ size_t App::damage(Damage* out, size_t max) {
         return n;
     }
 
+    // Uncovered patches first; a widget inside one is drawn again by its own
+    // damage below, the same pixels twice rather than a missing one.
+    for (int i = 0; i < restore_n_ && n < max; ++i) {
+        Damage dm;
+        dm.r = restore_[i];
+        dm.region = true;
+        out[n++] = dm;
+    }
+
     for (Widget* w : current().widgets()) {
         if (!w || !w->dirty) continue;
         Rect rs[kMaxPerWidget];
@@ -348,6 +385,10 @@ size_t App::damage(Damage* out, size_t max) {
 }
 
 void App::draw_damage(Canvas& c, const Damage& d) {
+    if (d.region) {
+        paint_region(c);
+        return;
+    }
     if (!d.w) {
         render_splash(c);
         return;
@@ -365,6 +406,7 @@ void App::draw_damage(Canvas& c, const Damage& d) {
 
 void App::clear_damage() {
     splash_bar_dirty_ = false;
+    restore_n_ = 0;
     for (Widget* w : current().widgets()) if (w) w->clear_dirty();
     slip_bar_.clear_dirty();
     alert_.clear_dirty();

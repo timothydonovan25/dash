@@ -43,7 +43,8 @@ add_library(core STATIC
     ${CORE}/src/c6.cpp
     ${CORE}/src/battery.cpp
     ${CORE}/src/slip.cpp
-    ${CORE}/src/waypoint.cpp)
+    ${CORE}/src/waypoint.cpp
+    ${CORE}/src/flash.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -72,7 +73,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint wire ui)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

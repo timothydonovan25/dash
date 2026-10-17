@@ -60,6 +60,8 @@ namespace {
 // the other two tasks with it, so a caller that cannot get the lock in
 // time gets Busy and tries again on its own schedule.
 constexpr TickType_t kLockWait = pdMS_TO_TICKS(3000);
+// unmount() waits up to this many kLockWaits.
+constexpr int kUnmountLockTries = 5;
 
 class Hold {
 public:
@@ -110,10 +112,22 @@ hal::Status SdCard::init() {
     return hal::Status::Ok;
 }
 
-void SdCard::unmount() {
-    // Unmounting without the lock is still better than not unmounting: by
-    // then the card is gone or the rider has been told it is safe to pull.
-    const Hold hold(lock_);
+bool SdCard::unmount() {
+    // Under the lock, waiting for it longer than the other calls do. It
+    // used to go ahead without it after 3 s, and closed the file and the
+    // volume under whichever task held it, mid-call. Every holder finishes
+    // a call in well under this, a pulled card included (its I/O fails
+    // fast), so waiting is safe; and if it ever does not come, unmounting
+    // under a live call is the one thing worse than not unmounting.
+    bool held = false;
+    for (int i = 0; i < kUnmountLockTries && !held; ++i) {
+        held = xSemaphoreTake(lock_, kLockWait) == pdTRUE;
+    }
+    if (!held) return false;
+    struct Give {
+        SemaphoreHandle_t l;
+        ~Give() { xSemaphoreGive(l); }
+    } give{lock_};
     if (open_file_) {
         std::fclose(static_cast<FILE*>(open_file_));
         open_file_ = nullptr;
@@ -124,6 +138,7 @@ void SdCard::unmount() {
         mounted_ = false;
         card_ = nullptr;
     }
+    return true;
 }
 
 hal::Status SdCard::append(const char* path, const void* data, size_t len) {

@@ -172,20 +172,37 @@ esp_err_t fw_get(httpd_req_t* r) {
     return httpd_resp_send_chunk(r, nullptr, 0);
 }
 
-// The log list as JSON, built straight into the response in pieces.
+// The log list as JSON. Built into g_buf while the card lock is held and
+// sent after it is released: sending from inside the listing held the card
+// lock for as long as the phone took to read the response, and the logger,
+// which gives up on the lock after 3 s, lost a block of rows each time.
+// A directory bigger than the buffer goes in pages, one listing each.
 struct ListCtx {
-    httpd_req_t* r;
-    bool first;
+    char*  buf;
+    size_t cap;
+    size_t len = 0;
+    size_t skip = 0;      // valid entries already sent by earlier pages
+    size_t seen = 0;
+    size_t taken = 0;
+    bool   full = false;
+    bool   first = true;  // no entry sent yet, so no leading comma
 };
 
 void list_one(const char* name, size_t size, void* vctx) {
     auto* c = static_cast<ListCtx*>(vctx);
-    if (!core::wifi::valid_log_name(name)) return;
+    if (!core::wifi::valid_log_name(name) || c->full) return;
+    if (c->seen++ < c->skip) return;
     char item[96];
     const int n = std::snprintf(item, sizeof item, "%s{\"name\":\"%s\",\"size\":%u}",
                                 c->first ? "" : ",", name, static_cast<unsigned>(size));
+    if (n <= 0 || c->len + static_cast<size_t>(n) > c->cap) {
+        c->full = true;
+        return;
+    }
+    std::memcpy(c->buf + c->len, item, static_cast<size_t>(n));
+    c->len += static_cast<size_t>(n);
     c->first = false;
-    httpd_resp_send_chunk(c->r, item, n);
+    ++c->taken;
 }
 
 esp_err_t logs_list_get(httpd_req_t* r) {
@@ -195,8 +212,22 @@ esp_err_t logs_list_get(httpd_req_t* r) {
     httpd_resp_set_hdr(r, "Cache-Control", "no-store");
     httpd_resp_send_chunk(r, "[", 1);
     if (card && card->present()) {
-        ListCtx ctx{r, true};
-        card->list("logs", list_one, &ctx);
+        size_t skip = 0;
+        bool first = true;
+        // A page is ~90 entries; 64 pages is more logs than a card holds.
+        for (int page = 0; page < 64; ++page) {
+            ListCtx ctx;
+            ctx.buf = reinterpret_cast<char*>(g_buf);
+            ctx.cap = kChunk;
+            ctx.skip = skip;
+            ctx.first = first;
+            card->list("logs", list_one, &ctx);
+            if (ctx.len) httpd_resp_send_chunk(r, ctx.buf, static_cast<ssize_t>(ctx.len));
+            g_web.touch();
+            skip += ctx.taken;
+            first = ctx.first;
+            if (!ctx.full || ctx.taken == 0) break;
+        }
     }
     httpd_resp_send_chunk(r, "]", 1);
     return httpd_resp_send_chunk(r, nullptr, 0);
@@ -583,6 +614,10 @@ private:
         esp_err_t e = esp_wifi_set_mode(WIFI_MODE_AP);
         if (e == ESP_OK) e = esp_wifi_set_config(WIFI_IF_AP, &ap);
         if (e == ESP_OK) e = esp_wifi_start();
+        // The event loop above, and whatever esp_wifi_init made on the
+        // hosted side, come in above ctrl; take them down at once rather
+        // than at ble's next once-a-second pass.
+        demote_radio_tasks(false);
         if (e != ESP_OK) ESP_LOGW(kTag, "hotspot did not start: %s", esp_err_to_name(e));
         return e;
     }

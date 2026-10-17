@@ -23,6 +23,9 @@ namespace core::tach {
 
 struct Config {
     uint8_t  pulses_per_rev = 1;
+    // For an ignition that sparks only every other revolution: each pulse
+    // is this many revolutions. Settings::tach_revs_per_pulse.
+    uint8_t  revs_per_pulse = 1;
 
     // No pulse for this long and the engine is not running. One revolution
     // at 300 rpm takes 200 ms, so 500 ms is comfortably below any idle.
@@ -38,7 +41,10 @@ struct WheelConfig {
     uint16_t circumference_mm = 2130;
     uint8_t  pulses_per_rev   = 6;      // spoke magnets, or sprocket bolts
     uint32_t stall_ms         = 1500;   // a wheel can legitimately be slow
-    float    smoothing        = 0.4f;
+    // Smoothing as a time constant, not a fraction per pulse. Per pulse, the
+    // lag grew as the wheel slowed: ~1.5 pulse intervals, 240 ms at 5 mph
+    // and 20 ms at 60. In time, it is about this long at any speed.
+    uint32_t tau_ms           = 50;
 };
 
 // One conversion, exposed because it is the thing worth testing on its own.
@@ -68,17 +74,24 @@ private:
     bool     started_ = false;
 };
 
+// Between pulses the reading cannot be higher than one pulse's distance
+// over the time since the last edge (with 10% slack for uneven magnet
+// spacing), so a wheel that is slowing reads slower as soon as its next
+// pulse is late, rather than holding its last speed until the next one or
+// until `stall_ms`. That bound shapes the output only; the smoothed speed
+// underneath is untouched, so the next pulse picks up where it left off.
 class WheelMeter {
 public:
     void update(uint32_t total, uint64_t edge_us, uint64_t now_us,
                 const WheelConfig& c);
-    float mph() const { return mph_; }
+    float mph() const { return out_; }
     void  reset();
 
 private:
     uint32_t last_total_ = 0;
     uint64_t last_edge_us_ = 0;
-    float    mph_ = 0.0f;
+    float    mph_ = 0.0f;      // smoothed, updated on pulses
+    float    out_ = 0.0f;      // mph_, bounded by the time since the last edge
     bool     started_ = false;
 };
 

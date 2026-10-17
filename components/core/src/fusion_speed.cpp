@@ -91,6 +91,7 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
     if (dt > 0.0f) {
         const float a = in.accel_ok ? in.accel_g : b_;   // no IMU: no change
         v_ += (a - b_) * kMphPerSecPerG * dt;
+        if (in.accel_ok) ref_dv_ += (in.accel_g - ref_b_) * kMphPerSecPerG * dt;
         // F = [[1, -kG dt], [0, 1]]
         const float f = -kMphPerSecPerG * dt;
         const float p00 = p_[0][0], p01 = p_[0][1], p10 = p_[1][0], p11 = p_[1][1];
@@ -110,22 +111,32 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
         track(kSrcGps, ok, true, now, cfg);
         if (ok) {
             ref_mph_ = in.gps_mph;
+            ref_dv_ = 0.0f;
+            ref_b_ = b_;
             ref_t_ = now;
             have_ref_ = true;
         }
     }
     const bool refereed = have_ref_ && now - ref_t_ <= cfg.referee_ms;
+    // Carried down with the IMU, never up. A wheel lies high under power
+    // (spin) and low under braking (lock). Under braking a stale referee
+    // sits above the truth and threw out good wheels; carried down, it does
+    // not. Under power a stale referee sits below the truth, which is what
+    // catches a spinning rear: carried up, it let a spin of under a quarter
+    // through and the filter followed it away from GPS.
+    float ref_now = ref_mph_ + (ref_dv_ < 0.0f ? ref_dv_ : 0.0f);
+    if (ref_now < 0.0f) ref_now = 0.0f;
     const auto plausible = [&](float w) {
         if (!refereed) return true;
-        const float allow = ref_mph_ * 0.25f > cfg.wheel_gps_mph ? ref_mph_ * 0.25f
-                                                                  : cfg.wheel_gps_mph;
-        return std::fabs(w - ref_mph_) <= allow;
+        const float allow = ref_now * 0.25f > cfg.wheel_gps_mph ? ref_now * 0.25f
+                                                                 : cfg.wheel_gps_mph;
+        return std::fabs(w - ref_now) <= allow;
     };
     bool use_front = in.front_ok && plausible(in.front_mph);
     bool use_rear = in.rear_ok && plausible(in.rear_mph);
     if (use_front && use_rear && std::fabs(in.front_mph - in.rear_mph) > cfg.wheel_split_mph) {
         // Nearer the referee if there is one, else nearer the filter.
-        const float ref = refereed ? ref_mph_ : v_;
+        const float ref = refereed ? ref_now : v_;
         if (std::fabs(in.front_mph - ref) <= std::fabs(in.rear_mph - ref)) use_rear = false;
         else use_front = false;
     }

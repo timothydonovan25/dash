@@ -56,12 +56,15 @@ void storage_task(void* arg) {
             if (d.slots->storage_request.get().op ==
                     core::state::StorageRequest::Eject && inserted) {
                 // Closing the log file flushes it. The logger sees the card
-                // gone on its next pass and stops writing.
-                card->unmount();
-                was_present = false;
-                ejected = true;
-                d.health->set_absent(core::state::Dev::Sd);
-                if (d.system) d.system->sd_ejected = true;
+                // gone on its next pass and stops writing. "Safe to pull"
+                // only once it really is unmounted; if the card lock never
+                // came free, nothing changed and CONFIG's Eject can go again.
+                if (card->unmount()) {
+                    was_present = false;
+                    ejected = true;
+                    d.health->set_absent(core::state::Dev::Sd);
+                    if (d.system) d.system->sd_ejected = true;
+                }
             }
         }
 
@@ -74,9 +77,11 @@ void storage_task(void* arg) {
                 // Pulled. Unmount so the FAT structures are not left half
                 // written, and let the logger discover there is nowhere to
                 // write rather than telling it.
-                card->unmount();
-                was_present = false;
-                d.health->set_absent(core::state::Dev::Sd);
+                // Retried next pass if the lock did not come free.
+                if (card->unmount()) {
+                    was_present = false;
+                    d.health->set_absent(core::state::Dev::Sd);
+                }
             }
         } else if (ejected) {
             // Pulled and put back is the only way out of this.

@@ -32,6 +32,12 @@ void gnss_task(void* arg) {
     }
 
     for (;;) {
+        // A re-init `keeper` asked for. Here, because it changes the UART's
+        // baud rate: from another task it did so under this loop's reads.
+        // A sentence cut in half by it fails its checksum and the parser
+        // picks up again at the next '$'.
+        if (take_retry(d, core::state::Dev::Gnss) && d.gnss) d.gnss->init();
+
         char buf[256];
         size_t n = 0;
         const hal::Status s = d.gnss ? d.gnss->read(buf, sizeof buf, n)
@@ -51,6 +57,9 @@ void gnss_task(void* arg) {
             }
             if (updated) {
                 d.slots->gnss.publish(fix);
+                // The lap timer, the traces and NAV act on a fix the moment
+                // it lands, not up to 20 ms later at logic's next tick.
+                wake_logic(d);
                 last_fix_ms = now;
                 d.health->report_ok(core::state::Dev::Gnss, now);
             }

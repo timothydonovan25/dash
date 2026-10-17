@@ -87,6 +87,23 @@ Verdict judge(bool known, size_t peers, bool window_open);
 // times would push the rider's own phone out of the store.
 bool may_evict(size_t peers, bool window_open);
 
+// May NimBLE's bond store write to (or delete from) flash now? Every write
+// to that store is an NVS write, which freezes core 0 (core/flash), and
+// NimBLE makes them on its own: a bond as pairing finishes, a subscription
+// on every reconnect. So:
+//   - nothing while the bike is not `still` (core::flash::still);
+//   - nothing about a phone that is not bonded unless a new phone is
+//     `welcome` (judge would Keep it). A stranger pairing outside the
+//     window used to be written and then deleted again: two flash writes,
+//     as often as anyone in the car park cared to try.
+// `unbonded_peer` is whether the record belongs to a peer the store holds
+// no bond for (false for records with no peer, like our own IRK).
+bool may_store(bool still, bool unbonded_peer, bool welcome);
+
+// Whether a new phone may bond now: the same rule `judge` applies to an
+// unknown peer once its link has encrypted.
+bool new_phone_welcome(size_t peers, bool window_open);
+
 // True when a connected link has gone kEncryptTimeoutMs without encrypting.
 bool encrypt_overdue(uint32_t connected_ms, uint32_t now_ms, bool encrypted);
 

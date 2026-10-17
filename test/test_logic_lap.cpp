@@ -145,5 +145,110 @@ int main() {
         CHECK(slots.lap.get().best_ms == 0);            // gapped: not a best
     }
 
+    CASE("every fix makes a trace point, whatever the tick phase");
+    {
+        // Fixes 100 ms apart, stamped with the gnss task's 5 ms poll jitter
+        // (alternately 95 and 105 ms apart), and drifting against the 20 ms
+        // logic tick the way two free-running clocks do. Where the phase is
+        // wrong, the ticks that see two fixes are 80 ms apart, and a gate
+        // on the tick time dropped the second of them.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        NoCommands             none;
+        auto* trace = new core::state::TrackBuffer<core::state::TrackPoint, 4096>();
+        deps.slots = &slots;
+        deps.settings = &settings;
+        deps.trip_trace = trace;
+
+        const Track track;
+        core::state::Gnss g;
+        uint32_t next_fix = 0;
+        int fixes = 0;
+        for (uint32_t now = 10000; now < 20000; now += 20) {
+            const uint32_t k = next_fix / 100;
+            const uint32_t arrive = 10000 + next_fix + (k % 2) * 5 + (k * 3) / 10;
+            if (arrive <= now) {
+                const core::geo::LatLon p = track.pos(next_fix);
+                g.fix = true;
+                g.lat = p.lat;
+                g.lon = p.lon;
+                g.speed_mph = static_cast<float>(track.mph);
+                g.utc_ms = next_fix;
+                g.rx_ms = arrive;
+                slots.gnss.publish(g);
+                next_fix += 100;
+                ++fixes;
+            }
+            services::logic_tick(deps, state, none, now);
+        }
+        CHECK(fixes > 90);
+        CHECK(trace->size() + 1 >= static_cast<size_t>(fixes));
+        delete trace;
+    }
+
+    CASE("a fix is acted on in the pass it wakes; blackbox rows keep the tick grid");
+    {
+        // The firmware's `logic`: Scheduled ticks every 20 ms, and an Event
+        // pass when the gnss task publishes a fix, out of phase with them.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        NoCommands             none;
+        auto* trace = new core::state::TrackBuffer<core::state::TrackPoint, 4096>();
+        auto* box = new core::log::Ring<core::log::Record, 512>();
+        settings.log_rate = static_cast<uint8_t>(core::log::Rate::Hz10);
+        deps.slots = &slots;
+        deps.settings = &settings;
+        deps.trip_trace = trace;
+        deps.blackbox = box;
+
+        const Track track;
+        core::state::Gnss g;
+        int ticks = 0;
+        int rows = 0;
+        int off_grid = 0;
+        int traced_late = 0;
+        constexpr uint32_t kStart = 10000;
+        for (uint32_t t = 0; t < 10000; t += 20) {
+            const uint32_t now = kStart + t;
+            services::logic_tick(deps, state, none, now,
+                                 services::LogicPass::Scheduled);
+            ++ticks;
+            // A fix landing 2 ms before every 10 Hz row is due, woken at
+            // once: inside the decimator's slack, so an Event pass allowed
+            // to log would take the row and pull the grid onto the fixes.
+            if (t % 100 == 80) {
+                const uint32_t arrive = now + 18;
+                const core::geo::LatLon p = track.pos(t);
+                g.fix = true;
+                g.lat = p.lat;
+                g.lon = p.lon;
+                g.speed_mph = static_cast<float>(track.mph);
+                g.utc_ms = t;
+                g.rx_ms = arrive;
+                slots.gnss.publish(g);
+                const size_t before = trace->size();
+                services::logic_tick(deps, state, none, arrive,
+                                     services::LogicPass::Event);
+                // In the wake's own pass, not at the next tick.
+                if (t > 100 && trace->size() != before + 1) ++traced_late;
+            }
+            core::log::Record r;
+            while (box->pop(r)) {
+                ++rows;
+                if ((r.t_ms - kStart) % 100 != 0 && r.lap_done_ms == 0) ++off_grid;
+            }
+        }
+        CHECK(traced_late == 0);
+        CHECK(off_grid == 0);
+        // One row per fifth tick at 10 Hz, give or take a lap tag.
+        CHECK(rows >= ticks / 5 - 1 && rows <= ticks / 5 + 2);
+        delete box;
+        delete trace;
+    }
+
     return check::report("logic_lap");
 }

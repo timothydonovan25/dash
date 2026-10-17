@@ -294,9 +294,19 @@ void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
     if (align == Align::Center) pen = static_cast<int16_t>(x - w / 2);
     else if (align == Align::Right) pen = static_cast<int16_t>(x - w);
 
+    // A glyph wholly outside the window (or the clip) is skipped whole,
+    // rather than as 35 pixel tests that each find nothing to draw: a strip
+    // of a big number or a table goes past most of the text in the widget.
+    Rect vis{ox_, oy_, w_, h_};
+    if (clipped_) vis = vis.clipped_to(clip_);
+    const int16_t gw = static_cast<int16_t>(f.width * scale);
+    const int16_t gh = static_cast<int16_t>(f.height * scale);
+    if (!vis.intersects(Rect{pen, y, static_cast<int16_t>(w > 0 ? w : 1), gh})) return;
+
     for (const char* ch = text; *ch; ++ch) {
         const uint8_t code = static_cast<uint8_t>(*ch);
-        if (code >= f.first && code <= f.last) {
+        if (code >= f.first && code <= f.last &&
+            vis.intersects(Rect{pen, y, gw, gh})) {
             const uint8_t* glyph = f.glyphs + (code - f.first) * f.width;
             for (uint8_t col = 0; col < f.width; ++col) {
                 const uint8_t bits = glyph[col];

@@ -2,6 +2,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 
 namespace services {
 namespace {
@@ -27,6 +28,9 @@ bool CommandQueue::post(const core::state::Command& c) {
         ++dropped_;
         return false;
     }
+    if (void* t = consumer_.load(std::memory_order_relaxed)) {
+        xTaskNotifyGive(static_cast<TaskHandle_t>(t));
+    }
     return true;
 }
 
@@ -35,6 +39,11 @@ bool CommandQueue::post_from_isr(const core::state::Command& c) {
     BaseType_t woke = pdFALSE;
     const BaseType_t ok =
         xQueueSendFromISR(static_cast<QueueHandle_t>(q_), &c, &woke);
+    if (ok == pdTRUE) {
+        if (void* t = consumer_.load(std::memory_order_relaxed)) {
+            vTaskNotifyGiveFromISR(static_cast<TaskHandle_t>(t), &woke);
+        }
+    }
     if (woke) portYIELD_FROM_ISR();
     if (ok != pdTRUE) ++dropped_;
     return ok == pdTRUE;

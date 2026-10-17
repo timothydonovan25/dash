@@ -83,7 +83,8 @@ void logic_restore(Deps& d, LogicState& s) {
 }
 
 void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
-                uint32_t now) {
+                uint32_t now, LogicPass pass) {
+    const bool scheduled = pass == LogicPass::Scheduled;
     const core::state::Gnss   g = d.slots->gnss.get();
     const core::state::Motion m = d.slots->motion.get();
     const core::state::Engine e = d.slots->engine.get();
@@ -293,7 +294,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // The guided run while it is open; otherwise the learner, if it is on.
     // The learner's window resumes from nothing after a run (the gap in its
     // samples throws the old one away), so the two never share evidence.
-    if (d.settings) {
+    // Scheduled passes only: its windows are means over samples, and an
+    // extra sample at every fix would weight those moments over the rest.
+    if (d.settings && scheduled) {
         core::gearcal::Sample gs;
         gs.t_ms = now;
         gs.rpm = e.rpm;
@@ -353,9 +356,10 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     uint32_t lap_done_ms = 0;
     uint16_t lap_done_index = 0;
 
-    // Once per new fix, at the time it was taken. This tick runs at 50 Hz
-    // and fixes come at 10: handing the timer the same fix five times made
-    // every segment look 20 ms long, so each line crossing was interpolated
+    // Once per new fix, at the time it was taken. The gnss task wakes this
+    // pass when a fix lands, and the 50 Hz ticks see the same fix again
+    // between them: handing the timer the same fix five times made every
+    // segment look 20 ms long, so each line crossing was interpolated
     // over a fifth of the real interval and landed up to ~80 ms off.
     //
     // A receiver that stops talking leaves `fix` set on its last sentence;
@@ -412,8 +416,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
 
     // --- traces ---------------------------------------------------------
     // One point per fix, at most 10 Hz (the sim makes a fix every tick).
-    if (g.fix && new_fix && now - s.last_trace_ms >= 90) {
-        s.last_trace_ms = now;
+    // Spaced by the fixes' own times, not by this tick's: fixes 100 ms
+    // apart land on a 20 ms tick grid, so two can reach here 80 ms apart,
+    // and a gate on `now` dropped the second one -- a 200 ms hole in the
+    // trace and the delta, for minutes at a time as the two clocks drifted.
+    if (g.fix && new_fix && g.rx_ms - s.last_trace_ms >= 90) {
+        s.last_trace_ms = g.rx_ms;
         if (!s.have_origin) {
             s.origin = core::geo::LatLon{g.lat, g.lon};
             s.have_origin = true;
@@ -425,7 +433,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         if (d.trip_trace) d.trip_trace->push(p);
         if (d.lap_trace) d.lap_trace->push(p);
         if (d.delta && s.lap.state().phase == core::lap::Phase::Timing) {
-            d.delta->sample(p.x_ft, p.y_ft, s.lap.state().current_ms, s.delta_cfg);
+            // Lap time at the fix, not at this pass: the position is the
+            // fix's, and the pass runs a little after it (the gnss poll, or
+            // a whole tick if the fix arrived with no wake).
+            const uint32_t cur = s.lap.state().current_ms;
+            const uint32_t age = now - g.rx_ms;
+            d.delta->sample(p.x_ft, p.y_ft, cur > age ? cur - age : 0, s.delta_cfg);
         }
     }
 
@@ -436,11 +449,14 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     //
     // Not every tick: the rate is a setting (§13), and the decimator decides.
     // A lap event forces a row through whatever the rate, because the marker
-    // rides in the record and this is the only tick that carries it.
+    // rides in the record and this is the only pass that carries it. Other
+    // than that, Scheduled passes only, so the rows keep the tick's cadence
+    // however many fixes and commands woke `logic` in between.
     const uint8_t log_rate = d.settings
         ? d.settings->log_rate
         : static_cast<uint8_t>(core::log::kDefaultRate);
-    if (d.blackbox && s.log_gate.due(log_rate, now, lap_event)) {
+    if (d.blackbox && (scheduled || lap_event) &&
+        s.log_gate.due(log_rate, now, lap_event)) {
         const core::state::Attitude& a = att;
         core::log::Record rec;
         rec.front_mph = m.front_mph;

@@ -1,9 +1,10 @@
 // `keeper` — core 1, priority 3. Health at 20 Hz, everything else at 1 Hz.
 //
 // The slow, boring, important one: it writes the odometer to NVS, it ticks
-// the health tracker, and it retries whatever is faulted. That last job is
-// what turns a loose GH1.25 connector into a self-healing problem instead of
-// a dead sensor for the rest of the ride (§12).
+// the health tracker, and it decides when whatever is faulted is retried
+// (the owning task does the retry; see Deps::retry_requests). That last job
+// is what turns a loose GH1.25 connector into a self-healing problem instead
+// of a dead sensor for the rest of the ride (§12).
 //
 // It is the one task that turns health reports into states and publishes
 // them, which is what makes the health table single-writer (rule 2). It
@@ -12,7 +13,6 @@
 #include "services/services.hpp"
 #include "services/settings_store.hpp"
 #include "drivers/chip_temp.hpp"
-#include "drivers/pca9955b.hpp"
 #include "drivers/pod.hpp"
 #include "core/power/power.hpp"
 #include "core/sun/sun.hpp"
@@ -31,9 +31,6 @@ namespace {
 // copes with a write per second for the life of the bike; it does not need
 // to be asked to.
 constexpr double kOdoWriteThresholdMi = 0.01;
-
-// The same threshold OTA uses for "not moving" (core::ota::may_write).
-constexpr float kStoppedMph = 0.5f;
 
 constexpr uint32_t kHealthPeriodMs = 50;
 constexpr uint32_t kSlowEvery = 1000 / kHealthPeriodMs;   // passes per second
@@ -61,22 +58,15 @@ void keeper_task(void* arg) {
         // error, which is the failure mode the pod actually has.
         d.health->tick(now, policy);
 
-        // One retry per faulted device per interval. Each re-init is a few
-        // milliseconds on a task nothing waits for.
-        if (d.health->claim_retry(core::state::Dev::Imu, now, policy) && d.imu) {
-            d.imu->init();
-        }
-        if (d.health->claim_retry(core::state::Dev::Gnss, now, policy) && d.gnss) {
-            d.gnss->init();
-        }
-        if (d.health->claim_retry(core::state::Dev::McpPod, now, policy)) {
-            if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) pod->recover_bus();
-        }
-        if (d.health->claim_retry(core::state::Dev::LedDriver, now, policy) && d.lamps) {
-            d.lamps->init();
-        }
-        if (d.health->claim_retry(core::state::Dev::Display, now, policy) && d.panel) {
-            d.panel->init();
+        // One retry per faulted device per interval. The keeper decides when
+        // and the device's own task does it, between its own transactions
+        // (Deps::retry_requests): imu, gnss, input (the pod's bus), ctrl
+        // (the LED driver) and render (the panel).
+        static constexpr core::state::Dev kOwned[] = {
+            core::state::Dev::Imu, core::state::Dev::Gnss, core::state::Dev::McpPod,
+            core::state::Dev::LedDriver, core::state::Dev::Display};
+        for (const core::state::Dev dev : kOwned) {
+            if (d.health->claim_retry(dev, now, policy)) request_retry(d, dev);
         }
 
         d.health->publish_if_changed(d.slots->health, now);
@@ -84,24 +74,20 @@ void keeper_task(void* arg) {
         if (++pass < kSlowEvery) continue;
         pass = 0;
 
-        // An LED driver that browned out comes back with every output at
-        // zero current and looks alive. Re-write its configuration whether
-        // or not it has complained; `ctrl` re-sends the lamp duty and the
-        // backlight duty is re-sent below.
-        if (auto* leds = static_cast<drivers::Pca9955b*>(d.lamps)) leds->refresh_config();
-
         // --- life data --------------------------------------------------
-        // Only while stopped. A flash write suspends core 0 for its whole
-        // length -- up to ~20 ms when NVS erases a page, every couple of
-        // minutes at speed -- and `ctrl` cannot run through it: the shift
-        // lights would stall mid-pull. P4 has no flash auto-suspend (IDF
-        // v6.0). Stopped with the engine idling is fine: the lamps are dark
-        // there, and a setting changed in the garage must not wait for the
-        // engine to go off, since `power` saves only the totals at key-off.
-        // Miles covered are saved here the first second the bike stops.
+        // Only while still (core::flash::still). A flash write suspends
+        // core 0 for its whole length -- up to ~20 ms when NVS erases a
+        // page, every couple of minutes at speed -- and `ctrl` cannot run
+        // through it: the shift lights would stall mid-pull. P4 has no flash
+        // auto-suspend (IDF v6.0). Stopped with the engine idling is fine:
+        // the lamps are dark there, and a setting changed in the garage must
+        // not wait for the engine to go off, since `power` saves only the
+        // totals at key-off. Revving is not, and neither is a bike whose
+        // speedo reads 0 because its wheel sensor is dead: every speed
+        // source has to agree. Miles covered are saved here the first
+        // second the bike stops.
         const core::state::Trip t = d.slots->trip.get();
-        const bool stopped = d.slots->motion.get().best_mph < kStoppedMph;
-        if (d.storage && stopped) {
+        if (d.storage && still_for_flash(d)) {
             const double odo = t.odo_mi;
             const double hours = t.eng_hours;
             if (last_saved_odo < 0.0 ||
@@ -173,20 +159,17 @@ void keeper_task(void* arg) {
 
         // Backlight follows the config setting, turned down after dark when
         // "Dim at night" is on. The sun comes from the GPS clock and
-        // position (core/sun), since the board has no light sensor. Sent
-        // every second rather than on change, which is also what restores it
-        // after an LED-driver brown-out.
-        if (d.panel) {
+        // position (core/sun), since the board has no light sensor. Decided
+        // here and sent by `ctrl`, the one writer of the LED driver, which
+        // also keeps it dark while the supply is failing and re-sends it
+        // once a second to undo a brown-out.
+        {
             const core::state::Gnss g = d.slots->gnss.get();
             const uint8_t dim = auto_dim.update(g.fix && g.day_of_year != 0, g.day_of_year,
                                                 g.utc_ms, g.lat, g.lon,
                                                 d.settings->dim_at_night);
-            // Dark while the supply is failing, so a slow `keeper` pass
-            // cannot undo what `power` just did.
-            d.panel->set_backlight(
-                d.power_fail.load(std::memory_order_relaxed)
-                    ? 0
-                    : core::sun::apply_dim(d.settings->brightness_pct, dim));
+            d.backlight_pct.store(core::sun::apply_dim(d.settings->brightness_pct, dim),
+                                  std::memory_order_relaxed);
         }
 
     }

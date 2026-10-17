@@ -84,12 +84,19 @@ public:
     bool tripped() const { return state_ == State::Tripped; }
     bool armed() const { return state_ == State::Armed; }
 
+    // While tripped: samples in a row that the rail has stayed below
+    // `trip_v`, counting the ones that tripped it. A real cut only goes on
+    // falling; a glitch at speed comes back. `power` waits on this before a
+    // flash write it would otherwise make with the bike moving.
+    uint16_t low_run() const { return state_ == State::Tripped ? low_run_ : 0; }
+
 private:
     enum class State : uint8_t { Idle, Armed, Tripped };
     Config   cfg_;
     State    state_ = State::Idle;
     uint16_t run_ = 0;       // consecutive samples of whatever is being waited on
     uint16_t since_trip_ = 0;
+    uint16_t low_run_ = 0;
 };
 
 }  // namespace core::power

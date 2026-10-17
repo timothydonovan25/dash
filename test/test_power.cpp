@@ -143,5 +143,22 @@ int main() {
         CHECK(d.armed());
     }
 
+    CASE("low_run counts the samples the rail has stayed down since the trip");
+    {
+        FailDetector d;
+        CHECK(d.low_run() == 0);
+        run(d, 13.8f, 50);
+        CHECK(run(d, 6.0f, 2) == E::Tripped);
+        CHECK(d.low_run() == 2);                        // the two that tripped it
+        run(d, 5.0f, 3);
+        CHECK(d.low_run() == 5);
+        d.feed(9.5f);                                   // a glitch back up
+        CHECK(d.low_run() == 0);
+        d.feed(4.0f);
+        CHECK(d.low_run() == 1);
+        CHECK(run(d, 12.0f, 60) == E::Recovered);
+        CHECK(d.low_run() == 0);                        // not tripped: always 0
+    }
+
     return check::report("power");
 }

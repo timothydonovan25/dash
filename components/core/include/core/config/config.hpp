@@ -79,6 +79,10 @@ struct Settings {
     uint16_t shift_flash_rpm = 8800;
     // The lamps' brightness. On USB it is also capped (core::power).
     uint8_t  shift_brightness_pct = 100;
+    // Engine revolutions per tach pulse: 1 if the ignition sparks every
+    // revolution, 2 if only on the compression stroke. BRINGUP: compare the
+    // dash with a known idle; reading half is 1 where it should be 2.
+    uint8_t  tach_revs_per_pulse = 1;
 
     // Lap timer — mirrors core::lap::Config
     float    lap_half_width_ft = 50.0f;

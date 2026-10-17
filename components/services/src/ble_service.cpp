@@ -71,10 +71,14 @@ constexpr uint32_t kIdleWaitMs = 50;
 // (input, the lowest, is 9) and above render (6), so the radio still beats
 // the panel on core 1. Unpinned, they can still use core 0's idle time, but
 // any real-time task preempts them at once.
+//
+// "sys_evt" is IDF's default event loop, which ESP-Hosted and `wifi` both
+// need. IDF pins it to core 0 at priority 20, above ctrl, and every Wi-Fi
+// and netif handler runs on it; it cannot be moved, so it is lowered too.
 constexpr UBaseType_t kHostedPrio = 8;
 constexpr const char* kHostedTasks[] = {
     "sdio_rx_buf", "sdio_read", "sdio_process_rx", "sdio_write",
-    "rpc_rx", "rpc_tx", "rpc_supp_cb",
+    "rpc_rx", "rpc_tx", "rpc_supp_cb", "sys_evt",
 };
 
 // §11.1. BLE_UUID128_INIT takes the bytes in reverse of the string form.
@@ -115,6 +119,20 @@ struct Ctx {
     // Written by the `ble` task, read by store_status() on the host task:
     // whether a new bond may push the oldest out of a full store.
     std::atomic<bool> may_evict{true};
+    // Written by the `ble` task, read by the store gate on the host task
+    // (core::ble::may_store): whether the bike is still enough to write
+    // flash, and whether a new phone may bond.
+    std::atomic<bool> still{false};
+    std::atomic<bool> welcome{false};
+    // A bonded phone that asked to pair again (REPEAT_PAIRING): its old
+    // bond is deleted first, and its new one must not then be refused as a
+    // stranger's. Host task only, like the store calls that read it.
+    ble_addr_t rebond{};
+    bool       rebond_valid = false;
+    // NimBLE's own NVS-backed store, which the gate wraps.
+    int (*store_read)(int, const ble_store_key*, ble_store_value*) = nullptr;
+    int (*store_write)(int, const ble_store_value*) = nullptr;
+    int (*store_delete)(int, const ble_store_key*) = nullptr;
 };
 Ctx g_ctx;
 
@@ -275,8 +293,14 @@ int gap_event(ble_gap_event* ev, void*) {
         case BLE_GAP_EVENT_REPEAT_PAIRING: {
             // The phone forgot the bond and wants to pair again. Drop ours
             // and let it, rather than locking out the one phone this is for.
+            // Not while moving: the old bond could be deleted but the new
+            // one not written, and the phone would be locked out instead.
+            // It asks again on its next connection.
+            if (!g_ctx.still.load()) return BLE_GAP_REPEAT_PAIRING_IGNORE;
             ble_gap_conn_desc desc;
             if (ble_gap_conn_find(ev->repeat_pairing.conn_handle, &desc) == 0) {
+                g_ctx.rebond = desc.peer_id_addr;
+                g_ctx.rebond_valid = true;
                 ble_store_util_delete_peer(&desc.peer_id_addr);
             }
             return BLE_GAP_REPEAT_PAIRING_RETRY;
@@ -309,6 +333,50 @@ int store_status(ble_store_status_event* ev, void* arg) {
     return ble_store_util_status_rr(ev, arg);
 }
 
+// The bond store, gated (core::ble::may_store). NimBLE calls these with its
+// host lock held, on its host task, for every record it would persist; the
+// config store writes each one to NVS at once, and an NVS write freezes
+// core 0. Refusing is safe: NimBLE logs a failed store write and carries
+// on, and the link stays up and encrypted for this connection either way.
+
+// Whether `addr` has no bond in the store. Read straight from the config
+// store's RAM table: the host lock is already held here.
+bool unbonded(const ble_addr_t& addr) {
+    if (g_ctx.rebond_valid && ble_addr_cmp(&addr, &g_ctx.rebond) == 0) return false;
+    ble_store_key k{};
+    k.sec.peer_addr = addr;
+    k.sec.idx = 0;
+    ble_store_value v;
+    return g_ctx.store_read(BLE_STORE_OBJ_TYPE_PEER_SEC, &k, &v) != 0;
+}
+
+int gated_store_write(int type, const ble_store_value* val) {
+    bool stranger = false;
+    switch (type) {
+        case BLE_STORE_OBJ_TYPE_OUR_SEC:
+        case BLE_STORE_OBJ_TYPE_PEER_SEC: stranger = unbonded(val->sec.peer_addr); break;
+        case BLE_STORE_OBJ_TYPE_CCCD:     stranger = unbonded(val->cccd.peer_addr); break;
+        case BLE_STORE_OBJ_TYPE_CSFC:     stranger = unbonded(val->csfc.peer_addr); break;
+        case BLE_STORE_OBJ_TYPE_PEER_ADDR: stranger = unbonded(val->rpa_rec.peer_addr); break;
+        default: break;
+    }
+    if (!core::ble::may_store(g_ctx.still.load(), stranger, g_ctx.welcome.load())) {
+        return BLE_HS_ESTORE_FAIL;
+    }
+    const int rc = g_ctx.store_write(type, val);
+    // The re-pairing phone's new bond is in: it is an ordinary peer again.
+    if (rc == 0 && type == BLE_STORE_OBJ_TYPE_PEER_SEC && g_ctx.rebond_valid &&
+        ble_addr_cmp(&val->sec.peer_addr, &g_ctx.rebond) == 0) {
+        g_ctx.rebond_valid = false;
+    }
+    return rc;
+}
+
+int gated_store_delete(int type, const ble_store_key* key) {
+    if (!core::ble::may_store(g_ctx.still.load(), false, true)) return BLE_HS_ESTORE_FAIL;
+    return g_ctx.store_delete(type, key);
+}
+
 void on_reset(int reason) {
     Event e{};
     e.kind = Event::Reset;
@@ -323,7 +391,16 @@ void host_task(void*) {
 
 // --- this task's side ----------------------------------------------------
 
-void demote_hosted_tasks() {
+}  // namespace
+
+// Lowers whichever of ESP-Hosted's tasks exist now. Called by main before
+// `ctrl` starts (the constructor has already made the SDIO ones by then),
+// by `ble` once the RPC tasks exist, by `wifi` after it starts Wi-Fi, and
+// once a second from `ble`'s loop, because a C6 reset makes the transport
+// and RPC tasks again, at 23. Quiet unless it lowered something, except
+// when asked to report: a newer esp_hosted that renamed its tasks shows in
+// that report as "0 found".
+void demote_radio_tasks(bool report) {
     int found = 0, lowered = 0;
     for (const char* name : kHostedTasks) {
         if (TaskHandle_t t = xTaskGetHandle(name)) {
@@ -334,11 +411,13 @@ void demote_hosted_tasks() {
             }
         }
     }
-    // The bring-up check that this is still doing its job: a newer
-    // esp_hosted that renames its tasks shows here as "0 of 0".
-    ESP_LOGI(kTag, "esp_hosted tasks: %d found, %d lowered to %u",
-             found, lowered, static_cast<unsigned>(kHostedPrio));
+    if (report || lowered) {
+        ESP_LOGI(kTag, "esp_hosted tasks: %d found, %d lowered to %u",
+                 found, lowered, static_cast<unsigned>(kHostedPrio));
+    }
 }
+
+namespace {
 
 // The radio, from the SDIO link up. Every failure is logged, reported and
 // returned from; the dash carries on without Bluetooth (§11.8).
@@ -401,6 +480,13 @@ bool bring_up(Deps& d, char* c6_fw, size_t c6_fw_len) {
     }
     ble_svc_gap_device_name_set(kDeviceName);
     ble_store_config_init();
+    // Wrap the store ble_store_config_init just installed, so nothing it
+    // persists reaches flash while the bike moves (gated_store_write).
+    g_ctx.store_read = ble_hs_cfg.store_read_cb;
+    g_ctx.store_write = ble_hs_cfg.store_write_cb;
+    g_ctx.store_delete = ble_hs_cfg.store_delete_cb;
+    ble_hs_cfg.store_write_cb = gated_store_write;
+    ble_hs_cfg.store_delete_cb = gated_store_delete;
 
     // Pinned to core 1 by CONFIG_BT_NIMBLE_PINNED_TO_CORE_1; main.cpp
     // fails the build if that ever comes undone.
@@ -417,13 +503,6 @@ void send_ctrl(uint16_t conn, uint8_t cmd) {
     if (ble_gatts_notify_custom(conn, g_ctx.ctrl_val_handle, om) != 0) {
         ESP_LOGW(kTag, "ctrl notify failed");
     }
-}
-
-ble_addr_t to_ble_addr(const core::ble::PeerId& p) {
-    ble_addr_t a{};
-    a.type = p.type;
-    std::memcpy(a.val, p.addr, sizeof(a.val));
-    return a;
 }
 
 // The bonded peers, read back from NimBLE's store. Called whenever this task
@@ -452,7 +531,9 @@ void ble_task(void* arg) {
     using core::state::Dev;
     Deps& d = *static_cast<Deps*>(arg);
 
-    demote_hosted_tasks();
+    demote_radio_tasks(true);
+    // Before NimBLE starts: its store loads, and may write, at sync.
+    g_ctx.still.store(still_for_flash(d));
     core::state::BleDiag diag;
     if (!bring_up(d, diag.c6_fw, sizeof diag.c6_fw)) {
         d.slots->ble_diag.publish(diag);   // whatever was learned before it failed
@@ -462,7 +543,7 @@ void ble_task(void* arg) {
         return;
     }
     // The RPC tasks only exist once the link is up.
-    demote_hosted_tasks();
+    demote_radio_tasks(true);
 
     core::state::Media media;
     uint16_t conn = BLE_HS_CONN_HANDLE_NONE;
@@ -477,6 +558,7 @@ void ble_task(void* arg) {
     core::ble::PairingWindow window;
     bool     encrypted = false;
     bool     dropping = false;      // terminate sent, waiting for Disconnect
+    bool     forget_pending = false;  // Forget phone, waiting for the bike to stop
     uint32_t connected_ms = 0;
     uint32_t last_diag_ms = 0;
     uint32_t dropped_seen = 0;
@@ -543,19 +625,31 @@ void ble_task(void* arg) {
                     const bool open = window.is_open(now);
                     switch (core::ble::judge(known, peers.size(), open)) {
                         case core::ble::Verdict::Keep:
-                            encrypted = true;
                             if (!known) {
+                                load_peers(peers);
+                                if (!peers.contains(e.peer)) {
+                                    // Welcome, but the store gate held the
+                                    // bond back (the bike was moving). The
+                                    // phone thinks it is bonded and the
+                                    // dash does not; drop it, keep the
+                                    // window, and let it pair again parked.
+                                    ESP_LOGW(kTag, "new phone paired while moving, bond not saved; pair again when stopped");
+                                    drop(conn, BLE_ERR_AUTH_FAIL);
+                                    dropping = true;
+                                    break;
+                                }
+                                encrypted = true;
                                 ESP_LOGI(kTag, "new phone bonded");
                                 window.close();   // one phone per window
-                                load_peers(peers);
                             } else {
+                                encrypted = true;
                                 ESP_LOGI(kTag, "bonded phone back");
                             }
                             break;
                         case core::ble::Verdict::Reject: {
+                            // The store gate never wrote its bond, so there
+                            // is nothing to delete (and so no flash write).
                             ESP_LOGW(kTag, "unknown phone outside pairing mode, refused");
-                            const ble_addr_t a = to_ble_addr(e.peer);
-                            ble_store_util_delete_peer(&a);
                             load_peers(peers);
                             drop(conn, BLE_ERR_AUTH_FAIL);
                             dropping = true;
@@ -618,10 +712,11 @@ void ble_task(void* arg) {
                     // Every bond, and the link: the next phone pairs freely.
                     // The phone keeps its half of the bond until the rider
                     // forgets the dash in Android's Bluetooth settings too.
+                    // The clear itself is a flash write, so it waits for
+                    // the bike to be still (below); the link goes now.
                     ESP_LOGI(kTag, "forgetting every bonded phone");
                     window.close();
-                    if (ble_store_clear() != 0) ESP_LOGW(kTag, "bond store clear failed");
-                    load_peers(peers);
+                    forget_pending = true;
                     if (conn != BLE_HS_CONN_HANDLE_NONE && !dropping) {
                         drop(conn, BLE_ERR_REM_USER_CONN_TERM);
                         dropping = true;
@@ -654,8 +749,18 @@ void ble_task(void* arg) {
             dropping = true;
         }
 
+        // Still enough to write flash? The store gate asks on the host task.
+        const bool still = still_for_flash(d);
+        g_ctx.still.store(still);
+        if (forget_pending && still) {
+            forget_pending = false;
+            if (ble_store_clear() != 0) ESP_LOGW(kTag, "bond store clear failed");
+            load_peers(peers);
+        }
+
         const bool open = window.is_open(now);
         g_ctx.may_evict.store(core::ble::may_evict(peers.size(), open));
+        g_ctx.welcome.store(!forget_pending && core::ble::new_phone_welcome(peers.size(), open));
         const uint8_t pairing_s = static_cast<uint8_t>(window.remaining_s(now));
         const uint8_t bonds = static_cast<uint8_t>(peers.size());
         if (pairing_s != diag.pairing_s || bonds != diag.bonds) {
@@ -677,6 +782,7 @@ void ble_task(void* arg) {
 
         if (now - last_diag_ms >= kDiagPeriodMs) {
             last_diag_ms = now;
+            demote_radio_tasks(false);
             if (conn != BLE_HS_CONN_HANDLE_NONE) {
                 int8_t rssi = 0;
                 if (ble_gap_conn_rssi(conn, &rssi) == 0) {

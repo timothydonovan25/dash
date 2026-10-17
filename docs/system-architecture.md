@@ -319,15 +319,15 @@ core 0 is yours.
 
 | Task | Core | Prio | Rate | Owns |
 |---|---|---|---|---|
-| `ctrl` | 0 | 18 | 500 Hz | tach math, wheel speed, shift-light output |
+| `ctrl` | 0 | 18 | 500 Hz + every tach edge | tach math, wheel speed, shift-light output; every PCA9955B write (lamps, backlight, config, re-init) |
 | `imu` | 0 | 15 | 200 Hz, INT1 | ICM-42688-P FIFO, attitude filter, jumps |
 | `gnss` | 0 | 12 | 20 ms poll | NMEA parse, position |
-| `logic` | 0 | 10 | 50 Hz | lap timer, trip, fuel, command drain |
-| `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue |
-| `render` | 1 | 6 | 60 Hz | frame snapshot, widgets, 8080 panel bus |
-| `logger` | 1 | 5 | drain | ring buffer to SD |
+| `logic` | 0 | 10 | 50 Hz + on demand | lap timer, trip, fuel, command drain; woken by a new fix or a command |
+| `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue, pod bus recovery |
+| `render` | 1 | 6 | 120 Hz | frame snapshot, widgets, 8080 panel bus |
+| `logger` | 1 | 2 | drain | ring buffer to SD (below the rest: IDF's SD driver spins through card busy time) |
 | `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
-| `keeper` | 1 | 3 | 1 Hz | NVS save, health retry, backlight |
+| `keeper` | 1 | 3 | 1 Hz | NVS save (only when `core::flash::still`), health retry policy (the owning task re-inits), backlight level |
 | `ble` | 1 | 4 | event | media Feed and Ctrl characteristics (§11); TPMS scan not written |
 | `ota` | 1 | 2 | event | the stable/dev slots, the only writer of the dev slot (§11.7) |
 | `wifi` | 1 | 3 | 4 Hz | the update hotspot and its web server, off until asked (§11.7.1) |
@@ -950,8 +950,8 @@ here. Do not copy its `sdkconfig`.
 
 Core 0 stays a clean real-time island: `ctrl`, `imu`, `gnss`, `logic`,
 `input`. Core 1 absorbs the radio alongside `render`, `logger`, `keeper`.
-The render task will be preempted sometimes and drop a frame. At 60 Hz
-with a 16.7 ms budget, that is invisible.
+The render task will be preempted sometimes and drop a frame. At 120 Hz
+with an 8.3 ms period, that is invisible.
 
 Your V1 build already pinned NimBLE to core 1 for exactly this reason.
 That decision was correct. Keep it.

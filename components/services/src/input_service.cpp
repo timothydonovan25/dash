@@ -29,6 +29,7 @@ void input_task(void* arg) {
     core::input::Config  cfg;
     int      consecutive_errors = 0;
     uint32_t last_refresh = 0;
+    TickType_t next = xTaskGetTickCount();
 
     for (;;) {
         const uint32_t now = d.clock->now_ms();
@@ -55,7 +56,11 @@ void input_task(void* arg) {
         }
 
         if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) {
-            if (consecutive_errors >= kNacksBeforeRecover) {
+            // This task is the only one that recovers the pod's bus, on its
+            // own run of NACKs or when `keeper` asks: recovery deletes the
+            // I2C driver, and from another core it did that under a read.
+            const bool asked = take_retry(d, core::state::Dev::McpPod);
+            if (consecutive_errors >= kNacksBeforeRecover || asked) {
                 consecutive_errors = 0;
                 pod->recover_bus();
             } else if (now - last_refresh >= kRefreshEveryMs) {
@@ -70,7 +75,15 @@ void input_task(void* arg) {
         // rate is a board fact and core::input's windows are specified in
         // milliseconds so that changing it here does not silently change
         // what counts as a long press.
-        vTaskDelay(pdMS_TO_TICKS(1000 / bsp::kPodPollHz));
+        //
+        // Paced from a fixed schedule, not "10 ms after this pass": the
+        // debounce counts on reads being one period apart.
+        // After an overrun (a dead pod is 10 ms of timeout per read) start
+        // again from now rather than catching up with a burst of reads.
+        constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
+        vTaskDelayUntil(&next, kPeriod);
+        const TickType_t woke = xTaskGetTickCount();
+        if (woke - next > kPeriod) next = woke;
     }
 }
 

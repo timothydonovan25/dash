@@ -213,7 +213,9 @@ constexpr Rect kTrkDelta{314, 232, 152,  72};
 
 void TrackMapScreen::enter(Canvas&) {
     map_.set_bounds(kTrkMap);
-    lap_.set_bounds(Rect{322, 70, 136, 24});
+    // "--:--.--" at scale 3 is 141 px. At 136 wide its last digit drew past
+    // the bounds, where no partial update ever reaches, and went stale.
+    lap_.set_bounds(Rect{320, 70, 144, 24});
     lap_.configure("--:--.--", color::kText, 3, Align::Left);
     to_line_.set_bounds(kTrkLine.inset(7));
     to_line_.configure("TO LINE", "ft", 0, 3);

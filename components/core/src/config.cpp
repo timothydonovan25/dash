@@ -80,6 +80,7 @@ const ConfigItem kItems[] = {
     num(0x0303, "Hysteresis",  "Shift", Kind::Int,    0,   500,  10, "rpm", FIELD(shift_hyst_rpm)),
     num(0x0304, "Flash above", "Shift", Kind::Int, 3000, 14000, 100, "rpm", FIELD(shift_flash_rpm)),
     num(0x0305, "Brightness",  "Shift", Kind::Int,    5,   100,   5, "%",   FIELD(shift_brightness_pct)),
+    num(0x0306, "Revs/spark",  "Shift", Kind::Int,    1,     2,   1, "",    FIELD(tach_revs_per_pulse)),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),

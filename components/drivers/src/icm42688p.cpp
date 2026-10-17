@@ -156,9 +156,13 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
     hal::Status s = read_regs(kFifoCountH, hdr, 2);
     if (!hal::ok(s)) return s;
 
-    size_t packets = ((static_cast<size_t>(hdr[0]) << 8) | hdr[1]) / kPacketBytes;
-    if (packets == 0) return hal::Status::Ok;
-    if (packets > max) packets = max;
+    // `depth` is everything waiting; this read takes the oldest `batch` of
+    // it. After a stall (the SD card holds SPI2 through its busy time, and
+    // the IMU waits behind it) there can be far more than one batch; the
+    // service reads again until it is drained.
+    const size_t depth = ((static_cast<size_t>(hdr[0]) << 8) | hdr[1]) / kPacketBytes;
+    if (depth == 0) return hal::Status::Ok;
+    size_t packets = depth > max ? max : depth;
 
     uint8_t buf[kPacketBytes * 16];
     const size_t batch = packets > 16 ? 16 : packets;
@@ -170,6 +174,11 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
     // drops those — so the whole 200 Hz stream collapsed to the poll rate
     // and aliased the vibration in between. See core::attitude::sample_time_ms,
     // which is where the arithmetic lives so it can be host-tested.
+    //
+    // Dated by their place in the whole FIFO, not in this batch: the newest
+    // sample waiting is "now", and this batch is the oldest of them. Dating
+    // by the batch alone stamped the oldest samples of a deep FIFO as the
+    // newest, and the next read's overlapped them and went backwards.
     const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
     for (size_t i = 0; i < batch; ++i) {
         const uint8_t* p = buf + i * kPacketBytes;
@@ -195,8 +204,16 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         sm.gy_dps = gy - bias_[1];
         sm.gz_dps = gz - bias_[2];
         sm.temp_c = static_cast<int8_t>(p[13]) / 2.07f + 25.0f;
-        sm.t_ms = core::attitude::sample_time_ms(now_ms, i, batch,
-                                                 kSamplePeriodMs);
+        uint32_t t = core::attitude::sample_time_ms(now_ms, i, depth, kSamplePeriodMs);
+        // Belt and braces: never at or before the previous sample, and never
+        // in the future for it.
+        if (have_last_ && static_cast<int32_t>(t - last_t_ms_) <= 0) {
+            t = last_t_ms_ + 1;
+            if (static_cast<int32_t>(t - now_ms) > 0) continue;
+        }
+        last_t_ms_ = t;
+        have_last_ = true;
+        sm.t_ms = t;
         out[count++] = sm;
     }
     return hal::Status::Ok;

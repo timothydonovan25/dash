@@ -36,8 +36,9 @@ public:
                         size_t len, size_t& got) override;
 
     // Closes the log file, which flushes it, and unmounts. Safe to call
-    // with nothing mounted.
-    void unmount();
+    // with nothing mounted. False if the card lock never came free, in
+    // which case nothing was touched and the caller tries again.
+    bool unmount();
 
     // Holds the lock for the whole walk. The logger's own file shows the
     // size it had at its last sync.

@@ -29,15 +29,24 @@ public:
     void render(Canvas& c, bool full = false);
 
     // True while a whole-screen repaint is outstanding: the first frame, a
-    // screen change, or an alert being dismissed. The render task asks, and
-    // clears it once it has actually pushed a full frame.
+    // screen change, a dev image starting. The render task asks, and clears
+    // it once it has actually pushed a full frame. A dismissed alert or a
+    // cleared slip bar is not one: that is a region in damage().
     bool needs_full_repaint() const { return needs_full_; }
+
+    // The panel's contents are no longer known (it was reset): the next
+    // frame goes out whole.
+    void invalidate() { needs_full_ = true; }
 
     // A partial update, for when no full repaint is due. One rectangle that
     // has to go to the panel, and what draws it (null: the splash).
     struct Damage {
         Widget* w = nullptr;
         Rect    r;
+        // A patch of screen whose contents are unknown, painted from the
+        // ground up: background, chrome, every widget under it, overlays.
+        // What an overlay that has just gone away leaves behind.
+        bool    region = false;
     };
     static constexpr size_t kMaxDamage = 64;
 
@@ -55,7 +64,11 @@ public:
     // The name card at key-on, before the sweep. Whole milliseconds.
     static constexpr uint32_t kSplashMs = 1500;
     bool splashing() const { return splash_on_; }
-    void clear_full_repaint() { needs_full_ = false; splash_bar_dirty_ = false; }
+    void clear_full_repaint() {
+        needs_full_ = false;
+        splash_bar_dirty_ = false;
+        restore_n_ = 0;
+    }
 
     Screen& current();
     const core::nav::State& nav_state() const { return nav_; }
@@ -136,6 +149,15 @@ private:
     bool             splash_bar_dirty_ = false;
     char             splash_ver_[32] = {};
     void             render_splash(Canvas& c);
+
+    // Patches of screen an overlay has just uncovered (the slip bar, an
+    // alert), repainted as damage rather than as a whole frame: the slip bar
+    // is 2.9 ms of wire and the alert box 6.7, a full repaint 31.
+    static constexpr int kMaxRestore = 2;
+    Rect             restore_[kMaxRestore] = {};
+    int              restore_n_ = 0;
+    void             restore(const Rect& r);
+    void             paint_region(Canvas& c);
 
     bool             sweep_started_ = false;
     bool             sweep_done_ = false;

@@ -130,7 +130,7 @@ hal::Status ButtonPod::recover_bus() {
     if (!freed && stuck_ != UINT16_MAX) ++stuck_;
 
     // Hand the pins back to the peripheral.
-    if (!bsp::init_buses().i2c0) return hal::Status::IoError;
+    if (!bsp::init_pod_bus()) return hal::Status::IoError;
     const hal::Status s = init();
 
     // A bus still held low is a failure even when the re-init went fine.

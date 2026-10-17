@@ -1,4 +1,5 @@
 #include "check.hpp"
+#include <algorithm>
 #include "core/tach/tach.hpp"
 
 using namespace core::tach;
@@ -102,6 +103,15 @@ int main() {
         CHECK_NEAR(x.m.rpm(), 4000.0, 100.0);
     }
 
+    CASE("a spark every other revolution reads double per pulse");
+    {
+        // The same pulse train as 2000 rpm at one spark a revolution.
+        Ctrl x;
+        x.c.revs_per_pulse = 2;
+        x.run(2000.0f, 2000);
+        CHECK_NEAR(x.m.raw_rpm(), 4000.0, 50.0);
+    }
+
     CASE("wheel speed from circumference and magnet count");
     {
         WheelConfig w;
@@ -130,6 +140,81 @@ int main() {
             wm.update(total, edge, t, w);
         }
         CHECK_NEAR(wm.mph(), 0.0, 1e-6);
+    }
+
+    // A wheel turning at `mph` for `ms`, polled every 2 ms like `ctrl`.
+    struct Wheel {
+        WheelConfig c;
+        WheelMeter m;
+        uint32_t total = 0;
+        uint64_t t = 0, edge = 0;
+        double next_edge = 0;
+        void run(float mph, int ms) {
+            const double per_pulse_mm = double(c.circumference_mm) / c.pulses_per_rev;
+            const double mm_per_us = mph * 1609344.0 / 3600e6;
+            for (int i = 0; i < ms / 2; ++i) {
+                t += 2000;
+                if (mph > 0) {
+                    while (next_edge <= double(t)) {
+                        ++total;
+                        edge = static_cast<uint64_t>(next_edge);
+                        next_edge += per_pulse_mm / mm_per_us;
+                    }
+                } else {
+                    next_edge = double(t) + 1e12;
+                }
+                m.update(total, edge, t, c);
+            }
+        }
+    };
+
+    CASE("wheel smoothing lags by about tau at any speed, not by pulses");
+    {
+        // At 5 mph a pulse is ~160 ms apart. Per pulse, 1.5 pulses of lag was
+        // ~240 ms; in time, a step is mostly followed within two pulses.
+        Wheel w;
+        w.next_edge = 1000;
+        w.run(5.0f, 3000);
+        CHECK_NEAR(w.m.mph(), 5.0, 0.1);
+        w.run(8.0f, 400);            // two or three pulses at the new speed
+        CHECK(w.m.mph() > 7.5f);
+        // At 60 mph the same constant still smooths (pulses ~13 ms apart).
+        Wheel f;
+        f.next_edge = 1000;
+        f.run(60.0f, 2000);
+        CHECK_NEAR(f.m.mph(), 60.0, 0.5);
+        f.run(70.0f, 40);            // two or three pulses at the new speed
+        CHECK(f.m.mph() < 69.0f);     // not a step to the new value
+        CHECK(f.m.mph() > 60.5f);
+    }
+
+    CASE("a wheel that stops reads less as soon as its pulses are late");
+    {
+        Wheel w;
+        w.next_edge = 1000;
+        w.run(5.0f, 3000);
+        const float rolling = w.m.mph();
+        w.run(0.0f, 500);            // stopped: no more edges
+        // 500 ms after the last edge, one pulse in that time is ~1.6 mph.
+        CHECK(w.m.mph() < 0.5f * rolling);
+        CHECK(w.m.mph() > 0.0f);
+        w.run(0.0f, 1200);           // past stall_ms: exactly zero
+        CHECK_NEAR(w.m.mph(), 0.0, 1e-6);
+    }
+
+    CASE("a steady wheel does not dip between pulses");
+    {
+        Wheel w;
+        w.next_edge = 1000;
+        w.run(20.0f, 2000);
+        float lo = 1e9f, hi = 0.0f;
+        for (int i = 0; i < 200; ++i) {
+            w.run(20.0f, 2);
+            lo = std::min(lo, w.m.mph());
+            hi = std::max(hi, w.m.mph());
+        }
+        CHECK(lo > 19.8f);
+        CHECK(hi < 20.2f);
     }
 
     CASE("the front wheel is believed first, then the rear, then GPS");

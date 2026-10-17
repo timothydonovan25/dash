@@ -17,6 +17,9 @@ namespace services {
 namespace {
 
 constexpr size_t kBatch = 16;
+// The FIFO's 2 kB is eight batches of 16-byte packets; one more for the
+// samples that land while it drains.
+constexpr int kMaxBatchesPerWake = 9;
 
 // How long to wait for a data-ready edge before reading the FIFO anyway.
 // Slightly longer than the 5 ms sample period, so a working interrupt wins
@@ -112,42 +115,56 @@ void imu_task(void* arg) {
             vTaskDelay(pdMS_TO_TICKS(5));
         }
 
-        hal::IImu::Sample batch[kBatch];
-        size_t n = 0;
-        const hal::Status s = d.imu ? d.imu->read_fifo(batch, kBatch, n)
-                                    : hal::Status::NotPresent;
-        const uint32_t now = d.clock->now_ms();
+        // A re-init `keeper` asked for, here between FIFO reads rather than
+        // from core 1 in the middle of one.
+        if (take_retry(d, core::state::Dev::Imu) && d.imu) d.imu->init();
 
-        if (hal::ok(s)) {
-            if (n > 0) d.health->report_ok(core::state::Dev::Imu, now);
+        // Read until the FIFO is drained, not one batch per wake. After a
+        // stall -- SPI2 held by the SD card's busy time, a flash write --
+        // there can be several batches waiting, and one per 5 ms wake fell
+        // further behind with every one. Bounded: the FIFO holds 2 kB, eight
+        // batches of 16, and a part that keeps saying "full" is not allowed
+        // to keep this task here.
+        for (int drain = 0; drain < kMaxBatchesPerWake; ++drain) {
+            hal::IImu::Sample batch[kBatch];
+            size_t n = 0;
+            const hal::Status s = d.imu ? d.imu->read_fifo(batch, kBatch, n)
+                                        : hal::Status::NotPresent;
+            const uint32_t now = d.clock->now_ms();
 
-            const float speed = d.slots->motion.get().best_mph;
-            for (size_t i = 0; i < n; ++i) {
-                core::attitude::Sample a;
-                a.gx_dps = batch[i].gx_dps;
-                a.gy_dps = batch[i].gy_dps;
-                a.gz_dps = batch[i].gz_dps;
-                a.ax_g = batch[i].ax_g;
-                a.ay_g = batch[i].ay_g;
-                a.az_g = batch[i].az_g;
-                a.speed_mph = speed;      // the v.omega reference needs it
-                a.t_ms = batch[i].t_ms;
-                filter.update(a, acfg);
+            if (hal::ok(s)) {
+                if (n > 0) d.health->report_ok(core::state::Dev::Imu, now);
 
-                const float mag = std::sqrt(a.ax_g * a.ax_g + a.ay_g * a.ay_g +
-                                            a.az_g * a.az_g);
-                jumps.update(mag, batch[i].t_ms, jcfg);
+                const float speed = d.slots->motion.get().best_mph;
+                for (size_t i = 0; i < n; ++i) {
+                    core::attitude::Sample a;
+                    a.gx_dps = batch[i].gx_dps;
+                    a.gy_dps = batch[i].gy_dps;
+                    a.gz_dps = batch[i].gz_dps;
+                    a.ax_g = batch[i].ax_g;
+                    a.ay_g = batch[i].ay_g;
+                    a.az_g = batch[i].az_g;
+                    a.speed_mph = speed;      // the v.omega reference needs it
+                    a.t_ms = batch[i].t_ms;
+                    filter.update(a, acfg);
+
+                    const float mag = std::sqrt(a.ax_g * a.ax_g + a.ay_g * a.ay_g +
+                                                a.az_g * a.az_g);
+                    jumps.update(mag, batch[i].t_ms, jcfg);
+                }
+
+                if (n > 0) imu_temp_c = batch[n - 1].temp_c;
+                core::state::Attitude out;
+                filter.publish_into(out);
+                jumps.publish_into(out);
+                out.imu_temp_c = imu_temp_c;
+                d.slots->attitude.publish(out);
+                if (n < kBatch) break;          // drained
+            } else {
+                d.health->report_error(core::state::Dev::Imu,
+                                       static_cast<int32_t>(s), now);
+                break;
             }
-
-            if (n > 0) imu_temp_c = batch[n - 1].temp_c;
-            core::state::Attitude out;
-            filter.publish_into(out);
-            jumps.publish_into(out);
-            out.imu_temp_c = imu_temp_c;
-            d.slots->attitude.publish(out);
-        } else {
-            d.health->report_error(core::state::Dev::Imu,
-                                   static_cast<int32_t>(s), now);
         }
 
     }

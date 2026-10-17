@@ -7,7 +7,9 @@
 //      which roughly doubles the time left (about 9 ms to 17 ms);
 //   2. tell `logger` not to start another SD write;
 //   3. write the odometer and engine hours, so the totals are exact rather
-//      than up to 0.01 of a mile behind.
+//      than up to 0.01 of a mile behind. At once when parked; moving, only
+//      once the rail has stayed down a few ms, since that write freezes
+//      core 0 and a glitch that comes back must not cost a shift lamp.
 //
 // It does not flush the log file. 50 ms is what that needs and the board
 // has less than half of it (docs/p4-board-pin-map.md, "Hold-up on VIN");
@@ -21,6 +23,7 @@
 #include "core/battery/battery.hpp"
 #include "core/power/power.hpp"
 #include "bsp/pins.hpp"
+#include "drivers/pca9955b.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -35,6 +38,11 @@ constexpr const char* kTag = "power";
 // 1 kHz needs a 1 ms tick. The sdkconfig sets it; this keeps a change to it
 // from silently turning a 1 ms watcher into a 10 ms one.
 static_assert(configTICK_RATE_HZ >= 1000, "power needs a 1 ms tick");
+
+// Moving, the totals are saved only once VIN has been below the trip line
+// for this many 1 ms samples, the two that tripped it included: 3 ms later
+// than parked, out of ~17 ms of hold-up once the lamps and backlight are off.
+constexpr uint16_t kConfirmMovingSamples = 5;
 
 void save_totals(Deps& d) {
     if (!d.storage) return;
@@ -53,6 +61,9 @@ void power_task(void* arg) {
 
     core::power::FailDetector detector;
     TickType_t last = xTaskGetTickCount();
+    bool save_pending = false;
+    bool save_now = false;
+    int64_t trip_us = 0, dark_us = 0;
 
     // Battery health (core::battery) at 100 Hz on the lowest VIN of each
     // 10 ms: a starter's dip is a few hundred ms deep and narrow, and this
@@ -95,29 +106,45 @@ void power_task(void* arg) {
 
         switch (detector.feed(vin)) {
             case core::power::FailDetector::Event::Tripped: {
-                const int64_t t0 = esp_timer_get_time();
+                trip_us = esp_timer_get_time();
                 // Order is by how much each step buys. Dark first: it is
-                // two short I2C writes and it doubles the time left.
+                // two short I2C writes and it doubles the time left. Direct,
+                // not through `ctrl`, which would take up to a tick; and
+                // without touching ctrl's lamp state (Pca9955b::blank_lamps).
                 d.power_fail.store(true, std::memory_order_relaxed);
                 if (d.panel) d.panel->set_backlight(0);
-                if (d.lamps) d.lamps->set_master(0);
-                const int64_t t1 = esp_timer_get_time();
-                save_totals(d);
-                const int64_t t2 = esp_timer_get_time();
-                ESP_LOGW(kTag, "VIN %.1f V: supply cut. dark in %d us, totals saved in %d us",
-                         static_cast<double>(vin), static_cast<int>(t1 - t0),
-                         static_cast<int>(t2 - t0));
+                if (auto* leds = static_cast<drivers::Pca9955b*>(d.lamps)) leds->blank_lamps();
+                dark_us = esp_timer_get_time();
+                // The save is a flash write, which freezes core 0. Parked,
+                // that costs nothing and it goes at once. Moving, a trip can
+                // still be a glitch that comes back, and freezing `ctrl`
+                // mid-pull for one is the thing every other flash writer is
+                // gated against; so wait until the rail has stayed down a
+                // few more milliseconds, which a real cut does.
+                save_pending = true;
+                save_now = still_for_flash(d);
                 break;
             }
             case core::power::FailDetector::Event::Recovered:
-                // A dip that came back, or USB holding the board up. `keeper`
-                // resends the backlight within a second and `ctrl` the lamps
-                // within a few milliseconds.
+                // A dip that came back, or USB holding the board up. `ctrl`
+                // resends the lamps and the backlight within a few ms.
                 d.power_fail.store(false, std::memory_order_relaxed);
+                if (save_pending) ESP_LOGW(kTag, "supply back before the save: skipped");
+                save_pending = false;
                 ESP_LOGW(kTag, "VIN %.1f V: supply back, resuming", static_cast<double>(vin));
                 break;
             case core::power::FailDetector::Event::None:
                 break;
+        }
+
+        if (save_pending && (save_now || detector.low_run() >= kConfirmMovingSamples)) {
+            save_pending = false;
+            save_totals(d);
+            const int64_t saved_us = esp_timer_get_time();
+            ESP_LOGW(kTag, "VIN %.1f V: supply cut. dark in %d us, totals saved in %d us%s",
+                     static_cast<double>(vin), static_cast<int>(dark_us - trip_us),
+                     static_cast<int>(saved_us - trip_us),
+                     save_now ? "" : " (moving, after confirming)");
         }
     }
 }

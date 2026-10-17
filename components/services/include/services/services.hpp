@@ -8,16 +8,17 @@
 //
 // | Task    | Core | Prio | Rate      | Owns                                |
 // |---------|------|------|-----------|-------------------------------------|
-// | ctrl    |  0   |  18  | 500 Hz    | tach, wheel speed, shift lamps      |
+// | ctrl    |  0   |  18  | 500 Hz    | tach, wheel speed, shift lamps,     |
+// |         |      |      | + tach    |   every LED-driver write            |
 // | imu     |  0   |  15  | 200 Hz    | FIFO drain, attitude, jumps         |
 // | gnss    |  0   |  12  | UART      | NMEA parse, position                |
 // | logic   |  0   |  10  | 50 Hz     | lap timer, trip, command drain      |
 // | input   |  0   |   9  | 100 Hz    | pod poll, debounce                  |
 // | render  |  1   |   6  | 60 Hz     | snapshot, widgets, panel            |
-// | logger  |  1   |   5  | drain     | blackbox ring to SD                 |
 // | ble     |  1   |   4  | event     | media GATT server, BLE diag         |
 // | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, VIN sense        |
 // | storage |  1   |   3  | 2 Hz      | card mount, hotplug, USB hand-off    |
+// | logger  |  1   |   2  | drain     | blackbox ring to SD                 |
 //
 // Core 0 is a real-time island: no radio, no filesystem. Anything added to
 // it above priority 18 breaks the 3 ms tach-to-lamp budget.
@@ -35,6 +36,7 @@
 #include "core/health/health.hpp"
 #include "core/log/log.hpp"
 #include "core/delta/delta.hpp"
+#include "core/flash/flash.hpp"
 #include "ui/screen.hpp"
 
 namespace services {
@@ -103,7 +105,57 @@ struct Deps {
     // keeps the lamps dark, `keeper` keeps the backlight off. Cleared if the
     // supply comes back, or if the board turns out to be on USB.
     std::atomic<bool> power_fail{false};
+
+    // Re-inits `keeper` has decided on, one bit per core::state::Dev. The
+    // keeper owns the retry *policy* (core::health::claim_retry); the task
+    // that owns the device does the retry, between its own transactions. A
+    // re-init from another core used to land in the middle of them: an IMU
+    // soft reset under a FIFO read, a UART baud change under the GPS parser,
+    // a panel reset mid-frame, an I2C driver deleted under the pod poll.
+    std::atomic<uint32_t> retry_requests{0};
+
+    // The backlight duty, in percent, that `keeper` wants (setting, night
+    // dim, power fail). `ctrl` writes it: it is the one task that talks to
+    // the LED driver, so a core-1 write can never hold I2C1 while the lamps
+    // are waiting for it.
+    std::atomic<uint8_t> backlight_pct{20};
+
+    // The `logic` task, once it is running; TaskHandle_t. See wake_logic.
+    std::atomic<void*> logic_task{nullptr};
 };
+
+// Run a `logic` pass now rather than at its next 50 Hz tick: a producer has
+// published something `logic` turns into what the rider sees (a new fix).
+// Never blocks; a no-op before `logic` has started. Not for ctrl's 500 Hz
+// motion publish -- that would make `logic` a 500 Hz task.
+void wake_logic(Deps& d);
+
+inline void request_retry(Deps& d, core::state::Dev dev) {
+    d.retry_requests.fetch_or(1u << static_cast<unsigned>(dev));
+}
+
+// The owning task: true once per request.
+inline bool take_retry(Deps& d, core::state::Dev dev) {
+    const uint32_t bit = 1u << static_cast<unsigned>(dev);
+    return (d.retry_requests.fetch_and(~bit) & bit) != 0;
+}
+static_assert(core::state::kDevCount <= 32, "retry_requests is one 32-bit mask");
+
+// core::flash::still, read off the slots: may a task write the P4's flash
+// now without stalling `ctrl` mid-pull? `keeper` and NimBLE's bond store ask
+// this; OTA asks the stricter core::ota::may_write.
+inline bool still_for_flash(const Deps& d) {
+    const core::state::Motion m = d.slots->motion.get();
+    const core::state::Gnss g = d.slots->gnss.get();
+    core::flash::Stillness s;
+    s.front_mph = m.front_mph;
+    s.rear_mph = m.rear_mph;
+    s.gps_mph = g.speed_mph;
+    s.gps_fix = g.fix;
+    s.rpm = d.slots->engine.get().rpm;
+    s.lamp_base_rpm = core::config::shift_view(*d.settings).base_rpm;
+    return core::flash::still(s);
+}
 
 // The one command queue (§4.5). Screens post, `logic` drains, and every
 // command that changed anything can be logged in one place.
@@ -114,10 +166,14 @@ public:
     bool post_from_isr(const core::state::Command& c);
     bool take(core::state::Command& out);                   // logic only
     uint32_t dropped() const { return dropped_; }
+    // The task to wake when a command lands, so `logic` acts on it at once
+    // rather than at its next scheduled tick. Set by `logic` itself.
+    void set_consumer(void* task) { consumer_.store(task, std::memory_order_relaxed); }
 
 private:
     void*    q_ = nullptr;          // QueueHandle_t
     uint32_t dropped_ = 0;
+    std::atomic<void*> consumer_{nullptr};   // TaskHandle_t
 };
 
 // Started by main in this order. Each one pins itself to the core in the
@@ -135,6 +191,11 @@ void start_storage(Deps& d);
 // Stable/dev slots and updates (§11.7). Core 1, priority 2.
 void start_ota(Deps& d);
 void start_ble(Deps& d);
+// ESP-Hosted makes its SDIO and RPC tasks at priority 23 with no core
+// affinity: above `ctrl`, and free to run on core 0. This lowers whichever
+// exist below every core-0 task. `report` logs the count even if nothing
+// needed lowering (the bring-up check that the task names still match).
+void demote_radio_tasks(bool report);
 // The on-demand update hotspot and its page (§11.7). Core 1, priority 3.
 // Off until the rider turns it on. Starts nothing on the radio until then,
 // but needs esp_hosted up, so it goes after start_ble.

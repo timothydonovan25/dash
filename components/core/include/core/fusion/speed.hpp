@@ -110,6 +110,16 @@ private:
     uint32_t last_t_ = 0;
     uint32_t last_fix_t_ = 0;             // last accepted correction
     float    ref_mph_ = 0.0f;             // last accepted GPS speed
+    // What the IMU alone says the speed has done since then. Under braking
+    // the wheels are judged against ref_mph_ + ref_dv_, not against a
+    // reading up to `referee_ms` old: at 0.8 g a stale referee was 4 mph
+    // out inside a quarter of a second and threw out two good wheels (only
+    // downwards; see step()). The wheels never move it, so a spinning one
+    // still cannot drag it along:
+    // it integrates against the bias as it stood at the fix (ref_b_), since
+    // the live one is corrected by the wheels in between.
+    float    ref_dv_ = 0.0f;
+    float    ref_b_ = 0.0f;
     uint32_t ref_t_ = 0;
     bool     have_ref_ = false;
     uint32_t reject_since_[4] = {0, 0, 0, 0};

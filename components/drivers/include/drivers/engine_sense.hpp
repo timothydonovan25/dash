@@ -21,9 +21,17 @@ public:
 
     void set_refractory_us(uint32_t tach_us) { tach_refractory_us_ = tach_us; }
 
+    // A FreeRTOS task (TaskHandle_t) to notify on every tach edge that gets
+    // past the refractory window: `ctrl`, so a new rpm reaches the lamps at
+    // the edge rather than at its next 2 ms tick. At most one edge per
+    // refractory window, so a noisy lead cannot wake it more than ~670/s.
+    // nullptr stops it.
+    static void notify_on_tach(void* task);
+
 private:
     uint32_t  tach_refractory_us_ = 0;
     bool      started_ = false;
+    bool      ready_ = false;     // every channel installed; read() says so
 };
 
 }  // namespace drivers

@@ -43,7 +43,8 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
         // measurement and the edge that ended this one — not between polls.
         const uint64_t dt = edge_us - last_edge_us_;
         last_edge_us_ = edge_us;
-        raw_rpm_ = rpm_from_pulses(dp, static_cast<uint32_t>(dt), c.pulses_per_rev);
+        raw_rpm_ = rpm_from_pulses(dp, static_cast<uint32_t>(dt), c.pulses_per_rev) *
+                   static_cast<float>(c.revs_per_pulse ? c.revs_per_pulse : 1);
         running_ = true;
         rpm_ += (raw_rpm_ - rpm_) * c.smoothing;
         return;
@@ -60,7 +61,7 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
 }
 
 void WheelMeter::reset() {
-    mph_ = 0.0f;
+    mph_ = out_ = 0.0f;
     started_ = false;
 }
 
@@ -80,11 +81,23 @@ void WheelMeter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
         const uint64_t dt = edge_us - last_edge_us_;
         last_edge_us_ = edge_us;
         const float raw = mph_from_pulses(dp, static_cast<uint32_t>(dt), c);
-        mph_ += (raw - mph_) * c.smoothing;
+        // First-order low-pass with time constant tau over an interval dt:
+        // dt / (dt + tau) is exp's first-order stand-in, and needs no expf.
+        const float dt_ms = static_cast<float>(dt) / 1000.0f;
+        const float alpha = dt_ms / (dt_ms + static_cast<float>(c.tau_ms));
+        mph_ += (raw - mph_) * alpha;
+        out_ = mph_;
         return;
     }
 
-    if ((now_us - last_edge_us_) / 1000u >= c.stall_ms) mph_ = 0.0f;
+    if (now_us <= last_edge_us_) return;
+    const uint64_t since = now_us - last_edge_us_;
+    if (since / 1000u >= c.stall_ms) {
+        mph_ = out_ = 0.0f;
+        return;
+    }
+    const float bound = mph_from_pulses(1, static_cast<uint32_t>(since), c) * 1.1f;
+    out_ = bound < mph_ ? bound : mph_;
 }
 
 float best_speed_mph(float front_mph, bool front_ok,

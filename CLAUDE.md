@@ -33,6 +33,26 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
+**Two machines share this folder.** The repo is synced by Syncthing
+(`.stfolder`) between the desktop (`Desktop`) and a laptop, and there is no
+`.stignore`, so everything syncs — `build/`, `build-host/`, `build-sim/`,
+`sdkconfig`, and `.git` itself. Consequences:
+
+- `build/` belongs to whichever machine last configured it. The laptop's
+  ESP-IDF Python env is `idf6.0_py3.14_env`, the desktop's is
+  `idf6.0_py3.12_env`, so on the wrong machine `idf.py build` stops with
+  "*… is currently active in the environment while the project was
+  configured with …*". That is not a broken install. Do not `fullclean` it
+  without asking — it is the other machine's build tree. Build elsewhere
+  instead: `idf.py -B /tmp/build-p4 build` (no `set-target` needed; it
+  reads `sdkconfig`).
+- Do not run git, or a build, on both machines at once: Syncthing will merge
+  the two halves of `.git` or a CMake cache into a conflict.
+- Both machines have ESP-IDF v6.0.2 from EIM. On the desktop the
+  `export.sh` line above works as of 2026-10-16 (its Python env was
+  installed with `idf_tools.py install-python-env`), and EIM's
+  `. ~/.espressif/tools/activate_idf_v6.0.2.sh` works too.
+
 The P4 module is hand-fitted after assembly, so expect `/dev/ttyACM0` only
 once U16 is on. v6 is not v5. It split the peripheral drivers into `esp_driver_*`
 components, so `REQUIRES driver` no longer brings in UART or GPIO, and it is
@@ -138,7 +158,10 @@ Things that will bite you:
   handle; do not write the command set.
 - **The backlight and the shift lamps are one chip.** PCA9955B (U2) on its
   own I2C1 bus at 1 MHz: OUT0–7 are the lamps, OUT8–10 the backlight
-  cathodes. A dead PCA9955B is a dark screen *and* dark lamps.
+  cathodes. A dead PCA9955B is a dark screen *and* dark lamps. **`ctrl` is
+  its only writer**: lamps, backlight (level decided by `keeper`, handed over
+  in `Deps::backlight_pct`), the once-a-second config refresh and the
+  re-init. The one exception is `power` blanking it at VIN cut.
 - **The PCA9955B's reset is on the P4's EN.** A software or USB-JTAG reset
   does not reset it, so `init()` must rewrite its registers.
 - **Neutral reads LOW.** Opto-isolated (U6), pulled up by R64, on GPIO12.
@@ -165,22 +188,35 @@ Things that will bite you:
 ## Core split
 
 Core 0 is a real-time island: `ctrl` (500 Hz, shift lights), `imu`,
-`gnss`, `logic`, `input`. No radio, no filesystem.
-Core 1 absorbs what can be late: `render` (60 Hz), `logger`, `storage`,
+`gnss`, `logic` (50 Hz, plus a pass whenever a fix or a command arrives:
+`wake_logic`, `LogicPass`), `input`. No radio, no filesystem.
+Core 1 absorbs what can be late: `render` (120 Hz), `logger`, `storage`,
 `keeper`, `ota`, `ble` and the NimBLE host.
 
 Tach edge to shift lamp must stay under 3 ms. If you add anything to
-core 0 above priority 18, you have broken that.
+core 0 above priority 18, you have broken that. The tach ISR wakes `ctrl`
+on every edge (`EngineSense::notify_on_tach`), so the lamps are decided at
+the edge, not at the next 2 ms tick. ESP-Hosted's tasks and IDF's
+`sys_evt` are created above 18 and are lowered at run time
+(`services::demote_radio_tasks`, from main before `ctrl` starts and once a
+second after); lwIP is pinned to core 1 in sdkconfig.
+
+A device's re-init runs on the task that owns it, never on another core
+under its transactions: `keeper` decides when (`claim_retry`) and sets a
+bit in `Deps::retry_requests`; `imu`, `gnss`, `input` (the pod's bus),
+`ctrl` (the LED driver) and `render` (the panel) do it.
 
 **A flash write freezes core 0** for its whole length — up to ~20 ms when
 NVS erases a page — because IDF suspends the other core's scheduler and
 the P4 has no flash auto-suspend (IDF v6.0). So nothing writes flash while
-the bike moves: `keeper` saves the odometer, hours and settings only below
-0.5 mph, OTA only parked, and `power` saves the totals at key-off.
+the bike moves: `keeper` and NimBLE's bond store write only when
+`core::flash::still` (every speed source below the line, engine at most
+idling), OTA only parked, and `power` saves the totals at key-off (moving,
+only once VIN has stayed down a few ms).
 
 The panel is the other budget. A whole 480x320 frame is 307 kB in RGB565
-— about 31 ms on the 8-bit bus at the 10 MHz starting write clock, two
-whole periods of the 60 Hz render loop. `render` therefore sends only the widgets that
+— about 31 ms on the 8-bit bus at the 10 MHz starting write clock, four
+whole periods of the 120 Hz render loop. `render` therefore sends only the widgets that
 changed — and only the part that changed, where a widget can say
 (`Widget::damage()`: a table's changed rows, the tach marker's rows), via
 `ui::App::damage()`, which the sim and `test_ui` use too — and **anything that moves must be a widget**: background chrome
@@ -206,7 +242,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 39 host test suites, all passing.
+the media half of step 9 is written. 40 host test suites, all passing.
 
 **`core/`** — all host-tested:
 

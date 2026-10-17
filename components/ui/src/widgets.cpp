@@ -24,6 +24,54 @@ inline float held_lean(float shown, bool was_valid, float lean_deg) {
 }
 constexpr float kPi = 3.14159265358979f;
 
+// The characters that differ between two strings drawn the same way, as one
+// rectangle in screen coordinates (empty when none do). False when the
+// lengths differ: then a centred or right-aligned string has moved as a
+// whole, and the caller sends its bounds. Mirrors draw_text's placement.
+bool changed_cells(const char* a, const char* b, int16_t x, int16_t y,
+                   uint8_t scale, Align align, Rect& out) {
+    const size_t n = std::strlen(a);
+    if (std::strlen(b) != n) return false;
+    if (scale == 0) scale = 1;
+    const Font& f = font_5x7();
+    const int16_t w = text_width_px(a, scale);
+    int16_t pen = x;
+    if (align == Align::Center) pen = static_cast<int16_t>(x - w / 2);
+    else if (align == Align::Right) pen = static_cast<int16_t>(x - w);
+    size_t i0 = n, i1 = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (a[i] != b[i]) {
+            if (i0 == n) i0 = i;
+            i1 = i;
+        }
+    }
+    if (i0 == n) {
+        out = Rect{};
+        return true;
+    }
+    out = Rect{static_cast<int16_t>(pen + static_cast<int16_t>(i0) * f.advance * scale), y,
+               static_cast<int16_t>((static_cast<int16_t>(i1 - i0) * f.advance + f.width) * scale),
+               static_cast<int16_t>(f.height * scale)};
+    return true;
+}
+
+// The smallest rectangle holding every point, grown by `margin`.
+struct Box {
+    int16_t x0 = 32767, y0 = 32767, x1 = -32768, y1 = -32768;
+    void add(int16_t x, int16_t y) {
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+    }
+    Rect rect(int16_t margin) const {
+        if (x1 < x0) return Rect{};
+        return Rect{static_cast<int16_t>(x0 - margin), static_cast<int16_t>(y0 - margin),
+                    static_cast<int16_t>(x1 - x0 + 1 + 2 * margin),
+                    static_cast<int16_t>(y1 - y0 + 1 + 2 * margin)};
+    }
+};
+
 // Copy with truncation. Returns whether anything changed, which is what
 // drives the dirty flag.
 bool copy_if_changed(char* dst, size_t cap, const char* src) {
@@ -67,7 +115,25 @@ void Label::configure(const char* text, Color c, uint8_t scale, Align align) {
 }
 
 void Label::set_text(const char* text) {
-    if (text_.set(text)) touch();
+    if (text_.set(text)) touch_part();
+}
+
+int Label::damage(Rect* out, int max) const {
+    (void)max;
+    if (!whole_) {
+        int16_t x = bounds.x;
+        if (align_ == Align::Center) x = bounds.cx();
+        else if (align_ == Align::Right) x = bounds.right();
+        Rect r;
+        if (changed_cells(sent_.s, text_.s, x, bounds.y, scale_, align_, r)) {
+            r = r.clipped_to(bounds);
+            if (r.empty()) return 0;
+            out[0] = r;
+            return 1;
+        }
+    }
+    out[0] = bounds;
+    return 1;
 }
 
 void Label::render(Canvas& c) {
@@ -133,8 +199,36 @@ void BigNumber::set(float value, bool valid) {
     for (int i = 0; i < decimals_; ++i) scale *= 10.0f;
     valid = usable(value, valid);
     const float q = valid ? std::round(value * scale) / scale : value_;
-    const bool changed = assign_t(valid_, valid) | (valid && assign(value_, q));
-    if (changed) touch();
+    // Valid or not changes the colour: everything. A new value only changes
+    // digits, which damage() finds.
+    if (valid_ != valid) {
+        valid_ = valid;
+        touch();
+    }
+    if (valid && value_ != q) {
+        value_ = q;
+        touch_part();
+    }
+}
+
+int BigNumber::damage(Rect* out, int max) const {
+    (void)max;
+    if (!whole_ && sent_valid_ == valid_) {
+        char was[16], now[16];
+        core::units::fmt_value(was, sizeof was, sent_value_, decimals_, sent_valid_);
+        core::units::fmt_value(now, sizeof now, value_, decimals_, valid_);
+        const int16_t th = static_cast<int16_t>(font_5x7().height * scale_);
+        const int16_t y = static_cast<int16_t>(bounds.cy() - th / 2);
+        Rect r;
+        if (changed_cells(was, now, bounds.cx(), y, scale_, Align::Center, r)) {
+            r = r.clipped_to(bounds);
+            if (r.empty()) return 0;
+            out[0] = r;
+            return 1;
+        }
+    }
+    out[0] = bounds;
+    return 1;
 }
 
 void BigNumber::set_color(Color c) { assign_t(color_, c); }
@@ -521,7 +615,11 @@ void Table::render(Canvas& c) {
 
 // --- MapView ------------------------------------------------------------
 
-void MapView::set_source(const IPointSource* src) { src_ = src; touch(); }
+void MapView::set_source(const IPointSource* src) {
+    src_ = src;
+    fit_stale_ = true;
+    touch();
+}
 
 void MapView::set_live(bool valid) {
     assign_t(valid_, valid);
@@ -532,52 +630,74 @@ void MapView::set_live(bool valid) {
     const size_t t = src_ ? src_->total() : 0;
     if (t < drawn_total_ || t >= drawn_total_ + kRedrawPoints) {
         drawn_total_ = t;
+        fit_stale_ = true;
         touch();
+    }
+    if (fit_stale_) refit();
+}
+
+void MapView::refit() {
+    fit_stale_ = false;
+    fit_ok_ = false;
+    fit_n_ = src_ ? src_->count() : 0;
+    if (fit_n_ < 2) return;
+    // Fit the whole trace, walking it rather than keeping a copy. The buffer
+    // is the owner of these points (§4.4) and this is a reader.
+    for (size_t i = 0; i < fit_n_; ++i) {
+        float x, y;
+        if (!src_->point(i, x, y)) continue;
+        if (!fit_ok_) {
+            fit_min_x_ = fit_max_x_ = x;
+            fit_min_y_ = fit_max_y_ = y;
+            fit_ok_ = true;
+            continue;
+        }
+        if (x < fit_min_x_) fit_min_x_ = x;
+        if (x > fit_max_x_) fit_max_x_ = x;
+        if (y < fit_min_y_) fit_min_y_ = y;
+        if (y > fit_max_y_) fit_max_y_ = y;
     }
 }
 
 void MapView::render(Canvas& c) {
+    if (fit_stale_) refit();       // a screen that never called set_live()
+
     c.fill_rect(bounds, color::kPanel);
     c.draw_rect(bounds, color::kGrid);
 
-    const size_t n = src_ ? src_->count() : 0;
+    const size_t n = fit_n_;
     if (n < 2) {
         c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - 3),
                     "no trace", color::kDim, 1, Align::Center);
         return;
     }
+    if (!fit_ok_) return;
 
-    // Fit the whole trace, walking it twice rather than keeping a copy. The
-    // buffer is the owner of these points (§4.4) and this is a reader.
-    float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
-    bool first = true;
-    for (size_t i = 0; i < n; ++i) {
-        float x, y;
-        if (!src_->point(i, x, y)) continue;
-        if (first) { min_x = max_x = x; min_y = max_y = y; first = false; continue; }
-        if (x < min_x) min_x = x;
-        if (x > max_x) max_x = x;
-        if (y < min_y) min_y = y;
-        if (y > max_y) max_y = y;
-    }
-    if (first) return;
-
-    const float span_x = (max_x - min_x) > 1.0f ? (max_x - min_x) : 1.0f;
-    const float span_y = (max_y - min_y) > 1.0f ? (max_y - min_y) : 1.0f;
+    const float span_x = (fit_max_x_ - fit_min_x_) > 1.0f ? (fit_max_x_ - fit_min_x_) : 1.0f;
+    const float span_y = (fit_max_y_ - fit_min_y_) > 1.0f ? (fit_max_y_ - fit_min_y_) : 1.0f;
     const Rect in = bounds.inset(6);
     const float sx = in.w / span_x;
     const float sy = in.h / span_y;
     const float s = sx < sy ? sx : sy;          // square, or the track lies
+    const float mid_x = (fit_min_x_ + fit_max_x_) / 2;
+    const float mid_y = (fit_min_y_ + fit_max_y_) / 2;
 
     int16_t px = 0, py = 0;
     bool have_prev = false;
     for (size_t i = 0; i < n; ++i) {
         float x, y;
         if (!src_->point(i, x, y)) { have_prev = false; continue; }
-        const int16_t dx = static_cast<int16_t>(in.cx() + (x - (min_x + max_x) / 2) * s);
+        const int16_t dx = static_cast<int16_t>(in.cx() + (x - mid_x) * s);
         // Screen y grows downwards; north does not.
-        const int16_t dy = static_cast<int16_t>(in.cy() - (y - (min_y + max_y) / 2) * s);
-        if (have_prev) c.draw_line(px, py, dx, dy, color::kAccent);
+        const int16_t dy = static_cast<int16_t>(in.cy() - (y - mid_y) * s);
+        if (have_prev) {
+            // Only the segments that reach this strip; the rest would be
+            // walked pixel by pixel and every one of them thrown away.
+            const Rect seg{px < dx ? px : dx, py < dy ? py : dy,
+                           static_cast<int16_t>((px < dx ? dx - px : px - dx) + 1),
+                           static_cast<int16_t>((py < dy ? dy - py : py - dy) + 1)};
+            if (c.intersects(seg)) c.draw_line(px, py, dx, dy, color::kAccent);
+        }
         px = dx;
         py = dy;
         have_prev = true;
@@ -585,8 +705,8 @@ void MapView::render(Canvas& c) {
 
     float hx, hy;
     if (valid_ && src_->point(n - 1, hx, hy)) {
-        const int16_t bx = static_cast<int16_t>(in.cx() + (hx - (min_x + max_x) / 2) * s);
-        const int16_t by = static_cast<int16_t>(in.cy() - (hy - (min_y + max_y) / 2) * s);
+        const int16_t bx = static_cast<int16_t>(in.cx() + (hx - mid_x) * s);
+        const int16_t by = static_cast<int16_t>(in.cy() - (hy - mid_y) * s);
         c.fill_circle(bx, by, 3, color::kWarn);
     }
 }
@@ -700,9 +820,74 @@ void LeanGauge::set(float lean_deg, bool valid) {
     // hold keeps noise from walking it back and forth.
     valid = usable(lean_deg, valid);
     const bool was_valid = valid_;
-    const bool b = assign_t(valid_, valid);
-    const bool a = valid && assign(lean_deg_, held_lean(lean_deg_, was_valid, lean_deg));
-    if (a || b) touch();
+    if (valid_ != valid) {
+        valid_ = valid;
+        touch();
+    }
+    if (valid) {
+        const float h = held_lean(lean_deg_, was_valid, lean_deg);
+        if (h != lean_deg_) {
+            lean_deg_ = h;
+            touch_part();       // the marker and the number; see damage()
+        }
+    }
+}
+
+LeanGauge::Geom LeanGauge::geom() const {
+    // render()'s arithmetic, exactly; see the comments there.
+    Geom g;
+    const int16_t by = static_cast<int16_t>((bounds.h - 4) * 20 / 21);
+    const int16_t bx = static_cast<int16_t>((bounds.w - 12) / 2);
+    g.r = bx < by ? bx : by;
+    const int16_t t = static_cast<int16_t>(g.r / 6);
+    g.ov = static_cast<int16_t>(g.r / 20);
+    g.ri = static_cast<int16_t>(g.r - t);
+    g.cx = bounds.cx();
+    g.cy = static_cast<int16_t>(bounds.y + g.r + g.ov + 1);
+    g.scale = static_cast<uint8_t>(g.ri / 16);
+    if (g.scale < 2) g.scale = 2;
+    return g;
+}
+
+Rect LeanGauge::marker_box(const Geom& g, float lean_deg) const {
+    float a = lean_deg;
+    if (a < -85.0f) a = -85.0f;
+    if (a > 85.0f) a = 85.0f;
+    // Every degree of the marker's 14, on both its edges: the box of the
+    // sector, without working out which axes it crosses.
+    const float r_out = static_cast<float>(g.r + g.ov);
+    const float r_in = static_cast<float>(g.ri - g.ov);
+    Box b;
+    for (int k = -7; k <= 7; ++k) {
+        const float rad = (a + static_cast<float>(k)) * kPi / 180.0f;
+        const float sx = std::sin(rad), cy = std::cos(rad);
+        b.add(static_cast<int16_t>(std::lround(g.cx + r_out * sx)),
+              static_cast<int16_t>(std::lround(g.cy - r_out * cy)));
+        b.add(static_cast<int16_t>(std::lround(g.cx + r_in * sx)),
+              static_cast<int16_t>(std::lround(g.cy - r_in * cy)));
+    }
+    return b.rect(3).clipped_to(bounds);
+}
+
+Rect LeanGauge::number_box(const Geom& g) const {
+    // Up to "85", or "--": three characters is room to spare either way.
+    const int16_t w = text_width_px("888", g.scale);
+    const int16_t h = static_cast<int16_t>(font_5x7().height * g.scale);
+    return Rect{static_cast<int16_t>(g.cx - w / 2 - g.scale),
+                static_cast<int16_t>(g.cy - 7 * g.scale - 2),
+                static_cast<int16_t>(w + 2 * g.scale), h}.clipped_to(bounds);
+}
+
+int LeanGauge::damage(Rect* out, int max) const {
+    if (whole_ || face_ != Face::Lean || !valid_ || max < 3) {
+        out[0] = bounds;
+        return 1;
+    }
+    const Geom g = geom();
+    int n = 0;
+    const Rect parts[3] = {marker_box(g, sent_lean_), marker_box(g, lean_deg_), number_box(g)};
+    for (const Rect& r : parts) if (!r.empty()) out[n++] = r;
+    return n;
 }
 
 void LeanGauge::set_jump(Face face, uint32_t airtime_ms, float landing_g) {
@@ -1109,9 +1294,43 @@ void NavArrow::set(float rel_deg, bool heading_up, bool valid) {
     // every fix for a change nobody could see costs a blit each time.
     valid = usable(rel_deg, valid);     // lround(NaN) is undefined
     const int16_t q = valid ? static_cast<int16_t>(std::lround(rel_deg / 2.0f) * 2) : 0;
-    assign_t(rel_deg_, q);
     assign_t(heading_up_, heading_up);
     assign_t(valid_, valid);
+    // Turning only moves the chevron; damage() sends where it was and is.
+    if (rel_deg_ != q) {
+        rel_deg_ = q;
+        touch_part();
+    }
+}
+
+Rect NavArrow::chevron_box(int16_t deg) const {
+    // render()'s four points, for the given angle.
+    const int16_t cx = bounds.cx();
+    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h / 2);
+    const int16_t r = static_cast<int16_t>((bounds.w < bounds.h ? bounds.w : bounds.h) / 2 - 2);
+    const float a = static_cast<float>(deg) * kPi / 180.0f;
+    Box b;
+    const auto pt = [&](float ang, float len) {
+        b.add(static_cast<int16_t>(cx + std::lround(std::sin(ang) * len)),
+              static_cast<int16_t>(cy - std::lround(std::cos(ang) * len)));
+    };
+    pt(a, r * 0.72f);
+    pt(a + 2.5f, r * 0.56f);
+    pt(a - 2.5f, r * 0.56f);
+    pt(a + kPi, r * 0.22f);
+    return b.rect(2).clipped_to(bounds);
+}
+
+int NavArrow::damage(Rect* out, int max) const {
+    if (whole_ || !valid_ || max < 2) {
+        out[0] = bounds;
+        return 1;
+    }
+    int n = 0;
+    const Rect was = chevron_box(sent_deg_), now = chevron_box(rel_deg_);
+    if (!was.empty()) out[n++] = was;
+    if (!now.empty()) out[n++] = now;
+    return n;
 }
 
 void NavArrow::render(Canvas& c) {

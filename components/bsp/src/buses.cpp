@@ -94,6 +94,10 @@ BusStatus init_buses() {
     return s;
 }
 
+bool init_pod_bus() {
+    return init_i2c(I2C_NUM_0, kI2cSda, kI2cScl, kI2cHz);
+}
+
 BusStatus board_init() {
     // Nothing on this board draws current from a floating pin any more. The
     // shift lamps and the backlight are on the PCA9955B, whose outputs come

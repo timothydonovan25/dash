@@ -20,9 +20,15 @@ struct BusStatus {
     void* lcd_bus = nullptr;
 };
 
-// Idempotent: a bus that is already up reports true rather than failing, so
-// the pod's bus recovery can call this again. Does not touch the LCD bus.
+// Idempotent: a bus that is already up reports true rather than failing.
+// Does not touch the LCD bus.
 BusStatus init_buses();
+
+// I2C0 alone, for the pod's bus recovery to hand the pins back. Not
+// init_buses(): that reconfigured I2C1 under `ctrl`'s lamp writes and put
+// the GPS UART back to its boot baud rate, so a pod glitch over a jump
+// cost the GPS until the next power cycle.
+bool init_pod_bus();
 
 // Everything that has to be true before any driver runs. Call once, first.
 BusStatus board_init();

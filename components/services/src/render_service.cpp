@@ -1,4 +1,4 @@
-// `render` — core 1, priority 6, 60 Hz.
+// `render` — core 1, priority 6, 120 Hz.
 //
 // One snapshot of every slot, one update() per screen, one repaint of
 // whatever went dirty. The screen never reads a slot itself (rule 4), which
@@ -8,16 +8,19 @@
 // rate — only the parts of the screen that changed are sent to the panel.
 //
 // On the P4 board the ILI9488 is on an 8-bit 8080 bus: a full 480x320 frame
-// is 307 kB of RGB565, about 31 ms at a 10 MHz write strobe — two 60 Hz
-// periods. The widget dirty flags are what make 60 Hz possible: on the
-// SPEED screen the tach bar and the speed tile together are about 47 kB,
-// 4.7 ms, so a frame where only they move fits with room to spare. A full
-// repaint simply takes two periods, and the deadline below skips ahead
-// rather than trying to catch up. On the S3 board's SPI the same frame was
-// 92 ms, and the dirty flags were the difference between 11 fps and 30.
+// is 307 kB of RGB565, about 31 ms at a 10 MHz write strobe — four 120 Hz
+// periods. The widget dirty flags are what make a high rate possible, and the
+// widgets' own damage() narrows them to the part that changed: the lean
+// marker and its number, the digits of a speed or a lap time that moved.
+// sim/wire_report prices a riding frame on SPEED at about 2 ms (5.6 peak);
+// it was 6.6 (10 peak) while those went whole. A full repaint simply takes
+// several periods, and the deadline below skips ahead rather than trying to
+// catch up. On the S3 board's SPI the same frame was 92 ms, and the dirty
+// flags were the difference between 11 fps and 30.
 //
-// A whole frame still goes out on a screen change, when an alert is
-// dismissed, and at boot — anything where the panel's contents are unknown.
+// A whole frame still goes out on a screen change and at boot — anything
+// where the panel's contents are unknown. An alert being dismissed or the
+// slip bar clearing is not that: only the box it covered goes again.
 #include "services/services.hpp"
 #include "ui/app.hpp"
 #include "ui/blit_plan.hpp"
@@ -35,15 +38,19 @@ namespace {
 
 constexpr const char* kTag = "render";
 
-// Frames are paced to a 60 Hz deadline, about the ILI9488's own refresh
-// rate: writing faster than the panel scans changes nothing on the glass.
-// A button press cuts the wait short and is drawn at once, so the pacing
-// bounds how stale a *number* can be, not how fast a menu responds. A pass
-// that finds nothing dirty sends nothing and costs one walk of the flags.
+// Frames are paced to a 120 Hz deadline, about twice the ILI9488's own
+// refresh rate. Writing faster than the panel scans does not put a number on
+// the glass sooner than its next scan, but it halves the time a changed
+// number waits for *this* loop before going out: up to 8.3 ms instead of
+// 16.7. It costs CPU, not bus: a pass that finds nothing dirty sends nothing
+// and costs one walk of the flags.
 //
-// The deadline is kept in whole frames from a fixed start, so the 16.67 ms
+// A button press cuts the wait short and is drawn at once, so the pacing
+// bounds how stale a *number* can be, not how fast a menu responds.
+//
+// The deadline is kept in whole frames from a fixed start, so the 8.33 ms
 // period does not drift by rounding to the 1 ms tick.
-constexpr uint32_t kFrameHz = 60;
+constexpr uint32_t kFrameHz = 120;
 
 constexpr int16_t kBandLines = bsp::kTftBandLines;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
@@ -142,7 +149,9 @@ void render_task(void* arg) {
 
 
 
-    if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
+    // The backlight goes up with the first frame. `ctrl` sends it, as it
+    // does every LED-driver write; `keeper` takes over from its next pass.
+    d.backlight_pct.store(d.settings->brightness_pct, std::memory_order_relaxed);
 
     uint32_t frames = 0;
     uint32_t last_hz_ms = d.clock->now_ms();
@@ -164,8 +173,12 @@ void render_task(void* arg) {
             app.on_input(ev, canvas);
             while (take_input_event(ev)) app.on_input(ev, canvas);
         } else {
+            // The period ran out: one frame. A pass woken early by a button
+            // is not one, and a deadline skipped below is one missed, so
+            // DIAG's rate reads 60 when every frame takes two periods.
+            ++frames;
             // The period ran out. Advance to the next deadline still in the
-            // future: after a full repaint that is two frames on, not a burst
+            // future: after a full repaint that is several frames on, not a burst
             // of catch-up frames that would each find nothing to send.
             const uint32_t t = d.clock->now_ms();
             while (static_cast<int32_t>(deadline_ms() - t) <= 0) {
@@ -177,6 +190,14 @@ void render_task(void* arg) {
             }
         }
         const uint32_t now = d.clock->now_ms();
+
+        // A re-init `keeper` asked for after the panel faulted. Here, between
+        // frames: from keeper it reset the panel under a transfer. Whatever
+        // was on the glass is gone, so the next frame goes out whole.
+        if (take_retry(d, core::state::Dev::Display) && d.panel) {
+            d.panel->init();
+            app.invalidate();
+        }
 
         // The history grows as laps are scored, so the view is handed over
         // every frame rather than once at startup.
@@ -240,7 +261,6 @@ void render_task(void* arg) {
             d.health->report_ok(core::state::Dev::Display, now);
         }
 
-        ++frames;
         if (now - last_hz_ms >= 1000) {
             if (d.system) {
                 d.system->render_hz_x10 =

@@ -1,7 +1,7 @@
 // What each screen costs on the wire, per frame.
 //
 // The panel is this dashboard's budget: 307 kB a frame of RGB565 is about
-// 31 ms on the P4 board's 8-bit 8080 bus at 10 MHz, two 60 Hz periods, so a
+// 31 ms on the P4 board's 8-bit 8080 bus at 10 MHz, four 120 Hz periods, so a
 // screen is affordable or not depending on how many pixels it actually
 // sends. This runs the firmware's own App, screens and
 // widgets against real Frames, asks the widgets themselves what went dirty,
@@ -293,7 +293,7 @@ int main(int argc, char** argv) {
                         static_cast<double>(m.mean_ms()));
             if (m.mean_ms() > 0.0f) {
                 std::printf("\n  mean %.2f ms/frame → %.0f fps sustainable"
-                            "   (60 Hz needs 16.67 ms)\n",
+                            "   (120 Hz needs 8.33 ms)\n",
                             m.mean_ms(), 1000.0f / m.mean_ms());
             } else {
                 std::printf("\n  nothing moved: this screen costs no wire time "

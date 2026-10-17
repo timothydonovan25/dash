@@ -57,6 +57,16 @@ bool may_evict(size_t peers, bool window_open) {
     return peers == 0 || window_open;
 }
 
+bool may_store(bool still, bool unbonded_peer, bool welcome) {
+    if (!still) return false;
+    if (unbonded_peer && !welcome) return false;
+    return true;
+}
+
+bool new_phone_welcome(size_t peers, bool window_open) {
+    return judge(false, peers, window_open) == Verdict::Keep;
+}
+
 bool encrypt_overdue(uint32_t connected_ms, uint32_t now_ms, bool encrypted) {
     return !encrypted && now_ms - connected_ms >= kEncryptTimeoutMs;
 }

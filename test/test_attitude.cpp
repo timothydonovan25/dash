@@ -1,4 +1,5 @@
 #include "check.hpp"
+#include <algorithm>
 #include "core/attitude/attitude.hpp"
 #include <cmath>
 
@@ -185,6 +186,26 @@ int main() {
         s.t_ms = 5000;                              // a five-second hole
         f.update(s, cfg);
         CHECK_NEAR(f.lean_deg(), before, 1e-4);     // no rotation invented
+    }
+
+    CASE("the published g vector does not alias engine vibration");
+    {
+        // 0.3 g forward, plus 2 g of 75 Hz vibration on the same axis. Read
+        // at 50 Hz like logic does, the raw sample swung by up to 2 g.
+        Filter f;
+        Sample s;
+        float worst = 0.0f;
+        for (int i = 0; i < 400; ++i) {
+            s.t_ms = static_cast<uint32_t>(i * 5);
+            s.ax_g = 0.3f + 2.0f * std::sin(2.0f * 3.14159265f * 75.0f * s.t_ms / 1000.0f);
+            f.update(s, cfg);
+            if (i > 100 && i % 4 == 0) {
+                core::state::Attitude a;
+                f.publish_into(a);
+                worst = std::max(worst, std::fabs(a.g_lon - 0.3f));
+            }
+        }
+        CHECK(worst < 0.5f);
     }
 
     CASE("the published attitude carries the g vector as well");

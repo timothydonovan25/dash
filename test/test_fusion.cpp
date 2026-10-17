@@ -5,6 +5,7 @@
 // seen across them with some headroom. The bounds are about the design,
 // not about a real bike: the noise is a guess until there is a 50 Hz log.
 #include "check.hpp"
+#include <algorithm>
 #include "scenarios.hpp"
 #include "core/fusion/speed.hpp"
 
@@ -165,6 +166,36 @@ int main() {
             }
         }
         CHECK_NEAR(o.mph, 30.0, 0.2);
+    }
+
+    CASE("hard braking: the wheels are judged against where GPS is now, not was");
+    {
+        // 0.8 g from 20 mph, GPS at 10 Hz. Between fixes the last one goes
+        // stale by up to 1.4 mph; against the fixed 4 mph allowance below
+        // 16 mph, judging the wheels against the bare stale reading threw
+        // out good wheels near the end of every fix interval.
+        constexpr float kDecel = 0.8f * 21.94f;      // mph per second
+        SpeedFilter f;
+        SpeedConfig cfg;
+        cfg.wheel_gps_mph = 1.0f;                    // tight, to make it show
+        int wheel_rejections = 0;
+        for (uint32_t t = 0; t <= 3000; t += 20) {
+            const float sec = t < 2000 ? 0.0f : (t - 2000) / 1000.0f;
+            const float truth = t < 2000 ? 20.0f : std::max(0.0f, 20.0f - kDecel * sec);
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.accel_g = t < 2000 || truth <= 0.0f ? 0.0f : -0.8f;
+            in.front_ok = in.rear_ok = true;
+            in.front_mph = in.rear_mph = truth;
+            in.gps_ok = true;
+            in.gps_new = t % 100 == 0;
+            in.gps_mph = truth;
+            const SpeedOutput o = f.step(in, cfg);
+            if (t > 2000 && truth > 3.0f && (o.rejected & (kSrcFront | kSrcRear))) {
+                ++wheel_rejections;
+            }
+        }
+        CHECK(wheel_rejections == 0);
     }
 
     CASE("a source rejected from the very first tick is not suspect at once");

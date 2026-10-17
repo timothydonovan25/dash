@@ -4,6 +4,8 @@
 #include "driver/gpio.h"
 #include "esp_attr.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <atomic>
 
 namespace drivers {
@@ -11,11 +13,14 @@ namespace {
 
 // One of these per channel. Written only by its ISR, read by `ctrl`.
 //
-// The pair is deliberately not a struct copied as a unit: a reader wants the
-// count and the timestamp to be consistent, and on a 32-bit part two aligned
-// 32-bit loads are each atomic, so the count is read first and the timestamp
-// second. A torn read shows up as a count one higher than the timestamp
-// explains — an under-read of rpm by one sample, not a spike.
+// The pair is deliberately not a struct copied as a unit: on a 32-bit part
+// two aligned 32-bit loads are each atomic, but not together. An edge
+// landing between them paired one edge's count with another's timestamp,
+// which read as half the rpm for one tick, a lamp dropping out for 2 ms.
+// So the reader takes the count on both sides of the timestamp and goes
+// again if it moved (read_channel). The ISR runs on core 0 with `ctrl`, so
+// it can only fall between the reader's loads, never part-way through
+// its own stores.
 struct Channel {
     std::atomic<uint32_t> count{0};
     std::atomic<uint32_t> edge_us_lo{0};
@@ -26,6 +31,9 @@ struct Channel {
 Channel g_tach;
 Channel g_front;
 Channel g_rear;
+
+// Who to wake on a tach edge; see EngineSense::notify_on_tach.
+std::atomic<TaskHandle_t> g_tach_waiter{nullptr};
 
 // The ISR is the one place in this firmware with global state, and it has to
 // be: a GPIO interrupt handler takes a void* and nothing else. Keeping it to
@@ -42,7 +50,25 @@ void IRAM_ATTR edge_isr(void* arg) {
 
     ch->last_edge_us = now;
     ch->edge_us_lo.store(now, std::memory_order_relaxed);
-    ch->count.fetch_add(1, std::memory_order_relaxed);
+    ch->count.fetch_add(1, std::memory_order_release);
+
+    if (ch == &g_tach) {
+        if (TaskHandle_t t = g_tach_waiter.load(std::memory_order_relaxed)) {
+            BaseType_t woke = pdFALSE;
+            vTaskNotifyGiveFromISR(t, &woke);
+            if (woke) portYIELD_FROM_ISR();
+        }
+    }
+}
+
+// One consistent (count, timestamp) pair. Three tries is two edges landing
+// inside a window of a few nanoseconds, twice; the last try is kept anyway.
+void read_channel(const Channel& ch, uint32_t& count, uint32_t& edge_lo) {
+    for (int i = 0; i < 3; ++i) {
+        count = ch.count.load(std::memory_order_acquire);
+        edge_lo = ch.edge_us_lo.load(std::memory_order_relaxed);
+        if (ch.count.load(std::memory_order_acquire) == count) return;
+    }
 }
 
 // Rebuild a 64-bit timestamp from the 32-bit one the ISR stored. The low
@@ -73,6 +99,10 @@ hal::Status install(int pin, Channel& ch, uint32_t refractory_us) {
 
 }  // namespace
 
+void EngineSense::notify_on_tach(void* task) {
+    g_tach_waiter.store(static_cast<TaskHandle_t>(task), std::memory_order_relaxed);
+}
+
 hal::Status EngineSense::init() {
     if (!started_) {
         // IRAM so an edge is still counted while flash is busy — the logger
@@ -102,26 +132,31 @@ hal::Status EngineSense::init() {
     n.pull_up_en = GPIO_PULLUP_ENABLE;
     n.pull_down_en = GPIO_PULLDOWN_DISABLE;
     n.intr_type = GPIO_INTR_DISABLE;
-    return gpio_config(&n) == ESP_OK ? hal::Status::Ok : hal::Status::IoError;
+    if (gpio_config(&n) != ESP_OK) return hal::Status::IoError;
+    ready_ = true;
+    return hal::Status::Ok;
 }
 
 hal::Status EngineSense::read(Counts& out) {
     const uint64_t now = static_cast<uint64_t>(esp_timer_get_time());
 
-    out.tach_pulses  = g_tach.count.load(std::memory_order_relaxed);
-    out.tach_edge_us = widen(g_tach.edge_us_lo.load(std::memory_order_relaxed), now);
-    out.front_pulses = g_front.count.load(std::memory_order_relaxed);
-    out.front_edge_us= widen(g_front.edge_us_lo.load(std::memory_order_relaxed), now);
-    out.rear_pulses  = g_rear.count.load(std::memory_order_relaxed);
-    out.rear_edge_us = widen(g_rear.edge_us_lo.load(std::memory_order_relaxed), now);
+    uint32_t lo = 0;
+    read_channel(g_tach, out.tach_pulses, lo);
+    out.tach_edge_us = widen(lo, now);
+    read_channel(g_front, out.front_pulses, lo);
+    out.front_edge_us = widen(lo, now);
+    read_channel(g_rear, out.rear_pulses, lo);
+    out.rear_edge_us = widen(lo, now);
     out.t_us = now;
 
     // Neutral is a plain GPIO on this board. It reads LOW in neutral —
     // opto-isolated and pulled up — and is inverted here so that nothing
-    // above ever has to remember that. Nothing in this read can fail now.
+    // above ever has to remember that.
     const int level = gpio_get_level(static_cast<gpio_num_t>(bsp::kNeutral));
     out.neutral = bsp::kNeutralActiveLow ? level == 0 : level != 0;
-    return hal::Status::Ok;
+    // Counters that were never hooked up read zero, and zero looks like a
+    // parked bike. Say so, so that `ctrl` does not trust the wheels.
+    return ready_ ? hal::Status::Ok : hal::Status::NotPresent;
 }
 
 }  // namespace drivers

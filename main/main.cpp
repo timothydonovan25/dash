@@ -62,7 +62,10 @@ extern "C" void app_main() {
     // a tach edge to a shift lamp.
     //
     // ctrl goes first, as soon as the lamps' hardware is up: the shift
-    // lights should not wait on the panel's 120 ms sleep-out.
+    // lights should not wait on the panel's 120 ms sleep-out. ESP-Hosted's
+    // constructor has already made its SDIO tasks, at priority 23 and on
+    // either core, so they come down below ctrl before ctrl exists.
+    services::demote_radio_tasks(true);
     services::start_ctrl(deps);
     wiring::finish();
     services::start_imu(deps);

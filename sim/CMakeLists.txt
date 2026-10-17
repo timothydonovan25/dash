@@ -26,7 +26,7 @@ add_library(core STATIC
     ${CORE}/src/media.cpp ${CORE}/src/pairing.cpp ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp
     ${CORE}/src/fusion_speed.cpp ${CORE}/src/gearcal.cpp ${CORE}/src/c6.cpp
-    ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp)
+    ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp ${CORE}/src/flash.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 add_library(ui STATIC

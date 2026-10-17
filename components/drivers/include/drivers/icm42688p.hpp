@@ -31,6 +31,10 @@ private:
     float  gyro_scale_ = 0.0f;     // LSB -> dps
     float  accel_scale_ = 0.0f;    // LSB -> g
     bool   identified_ = false;
+    // The last sample's timestamp, so the stream stays strictly increasing
+    // across reads whatever the poll timing does.
+    uint32_t last_t_ms_ = 0;
+    bool     have_last_ = false;
 };
 
 }  // namespace drivers

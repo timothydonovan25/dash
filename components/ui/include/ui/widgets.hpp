@@ -29,9 +29,15 @@ public:
                    uint8_t scale = 1, Align align = Align::Left);
     void set_text(const char* text);
     void render(Canvas& c) override;
+    // Only the characters that changed, when the length did not: the LAP
+    // screen's running time is a 288x62 label that changes every frame, and
+    // usually in its last two digits.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override { Widget::clear_dirty(); sent_ = text_; }
 
 private:
     TextBuf<48> text_;
+    TextBuf<48> sent_;            // what the panel shows
     Color       color_ = color::kDim;
     uint8_t     scale_ = 1;
     Align       align_ = Align::Left;
@@ -62,11 +68,21 @@ public:
     void set(float value, bool valid = true);
     void set_color(Color c);
     void render(Canvas& c) override;
+    // Only the digits that changed. MINIMAL's speed is 480x210, ~20 ms of
+    // wire whole, for what is usually one digit moving.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override {
+        Widget::clear_dirty();
+        sent_value_ = value_;
+        sent_valid_ = valid_;
+    }
 
 private:
     TextBuf<8> unit_;
     float      value_ = 0.0f;
     bool       valid_ = false;
+    float      sent_value_ = 0.0f;
+    bool       sent_valid_ = false;
     int        decimals_ = 0;
     uint8_t    scale_ = 8;
     Color      color_ = color::kText;
@@ -214,10 +230,21 @@ public:
     void render(Canvas& c) override;
 
 private:
+    // How many points to draw and the box that fits them, worked out once
+    // per redraw rather than once per strip: a 286x276 map is five strips,
+    // each walking 4096 PSRAM points twice, and a point landing between two
+    // strips rescaled the second against the first. The strips of one
+    // redraw now share one fit.
+    void refit();
+
     const IPointSource* src_ = nullptr;
     static constexpr size_t kRedrawPoints = 10;
     size_t drawn_total_ = 0;
     bool  valid_ = false;
+    bool  fit_stale_ = true;
+    size_t fit_n_ = 0;
+    float fit_min_x_ = 0, fit_max_x_ = 0, fit_min_y_ = 0, fit_max_y_ = 0;
+    bool  fit_ok_ = false;          // at least one readable point
 };
 
 // The tach bar: an outline up the left edge of the speed screen that flares
@@ -315,11 +342,26 @@ public:
     Face face() const { return face_; }
 
     void render(Canvas& c) override;
+    // On the lean face, only where the marker was, where it is, and the
+    // number: the whole 248x126 gauge was 6.2 ms of wire nearly every
+    // frame of a ride.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override {
+        Widget::clear_dirty();
+        sent_lean_ = lean_deg_;
+    }
 
 private:
     void render_jump(Canvas& c);
 
+    // The geometry render() draws with, so damage() names the same pixels.
+    struct Geom { int16_t cx, cy, r, ri, ov; uint8_t scale; };
+    Geom geom() const;
+    Rect marker_box(const Geom& g, float lean_deg) const;
+    Rect number_box(const Geom& g) const;
+
     float    lean_deg_ = 0.0f;
+    float    sent_lean_ = 0.0f;
     bool     valid_ = false;
     Face     face_ = Face::Lean;
     uint32_t airtime_ms_ = 0;
@@ -452,9 +494,16 @@ class NavArrow : public Widget {
 public:
     void set(float rel_deg, bool heading_up, bool valid);
     void render(Canvas& c) override;
+    // Where the chevron was and where it is, not the whole 236x236 dial:
+    // heading-up while riding, it turns on nearly every fix.
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override { Widget::clear_dirty(); sent_deg_ = rel_deg_; }
 
 private:
+    Rect chevron_box(int16_t deg) const;
+
     int16_t rel_deg_ = 0;           // whole degrees: finer only redraws noise
+    int16_t sent_deg_ = 0;
     bool    heading_up_ = false;
     bool    valid_ = false;
 };

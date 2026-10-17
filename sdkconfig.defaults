@@ -116,3 +116,13 @@ CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
 # skipping the check also takes ~35 ms off the boot. components/p4_restart_fix
 # covers the panic path, which writes the dump with SHA just before restarting.
 CONFIG_ESP_COREDUMP_CHECK_BOOT=n
+
+# Keep the radio's helpers off core 0, where ctrl has ~1 ms of margin.
+# lwIP's tcpip task runs at 18, ctrl's own priority; unpinned, it shared
+# time slices with ctrl during an upload. ESP-Hosted's tasks and IDF's
+# event loop are lowered at run time instead (services::demote_radio_tasks).
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
+# ESP-Hosted's CLI opens a REPL on the USB-Serial/JTAG console behind
+# ESP_ERROR_CHECKs (an abort, against rule 5) and installs the blocking
+# console driver. Nothing here uses it.
+CONFIG_ESP_HOSTED_CLI_ENABLED=n

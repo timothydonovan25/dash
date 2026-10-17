@@ -10,6 +10,23 @@ inline float dist_sq(const Point& p, float x, float y) {
     return dx * dx + dy * dy;
 }
 
+// (x, y) projected onto the segment a->b: how far along it (0..1), and the
+// squared distance from the segment. A degenerate segment projects to a.
+float project(const Point& a, const Point& b, float x, float y, float& d2) {
+    const float sx = b.x_ft - a.x_ft;
+    const float sy = b.y_ft - a.y_ft;
+    const float len2 = sx * sx + sy * sy;
+    float u = 0.0f;
+    if (len2 > 0.0f) {
+        u = ((x - a.x_ft) * sx + (y - a.y_ft) * sy) / len2;
+        u = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
+    }
+    const float px = a.x_ft + u * sx - x;
+    const float py = a.y_ft + u * sy - y;
+    d2 = px * px + py * py;
+    return u;
+}
+
 int32_t quantise(int32_t ms, uint32_t quantum) {
     if (quantum <= 1) return ms;
     const int32_t q = static_cast<int32_t>(quantum);
@@ -100,8 +117,28 @@ void Tracker::sample(float x_ft, float y_ft, uint32_t elapsed_ms,
 
     match_ = best_i;
     anchored_ = true;
+
+    // Along the reference line, not at its nearest stored point: the rider
+    // is usually between two of them, and snapping to one was up to half a
+    // sample interval (±50 ms at 10 Hz) of error before any rounding. Of
+    // the two segments either side of the nearest point, the closer one.
+    float ref_ms = static_cast<float>(ref_[best_i].elapsed_ms);
+    float seg_best = best_d2;
+    for (int side = -1; side <= 1; side += 2) {
+        const size_t j = side < 0 ? (best_i > 0 ? best_i - 1 : best_i) : best_i + 1;
+        if (j == best_i || j >= ref_count_) continue;
+        const Point& a = side < 0 ? ref_[j] : ref_[best_i];
+        const Point& b = side < 0 ? ref_[best_i] : ref_[j];
+        float d2 = 0.0f;
+        const float u = project(a, b, x_ft, y_ft, d2);
+        if (d2 < seg_best) {
+            seg_best = d2;
+            ref_ms = static_cast<float>(a.elapsed_ms) +
+                     u * (static_cast<float>(b.elapsed_ms) - static_cast<float>(a.elapsed_ms));
+        }
+    }
     const int32_t raw = static_cast<int32_t>(elapsed_ms) -
-                        static_cast<int32_t>(ref_[best_i].elapsed_ms);
+                        static_cast<int32_t>(std::lround(ref_ms));
     delta_ms_ = quantise(raw, c.quantum_ms);
     valid_ = true;
 }

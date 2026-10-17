@@ -73,6 +73,9 @@ void Filter::update(const Sample& s, const Config& c) {
         // does not spend a second sweeping up to the truth at every boot.
         lean_deg_ = accel_lean_deg_;
         pitch_deg_ = accel_pitch_deg;
+        lx_ = ax_;
+        ly_ = ay_;
+        lz_ = az_;
         last_ms_ = s.t_ms;
         started_ = true;
         return;
@@ -82,6 +85,12 @@ void Filter::update(const Sample& s, const Config& c) {
     last_ms_ = s.t_ms;
     if (dt_ms == 0 || dt_ms > kMaxTickMs) return;
     const float dt = static_cast<float>(dt_ms) / 1000.0f;
+
+    // The published g vector: dt / (dt + tau) is the first-order low-pass.
+    const float gk = static_cast<float>(dt_ms) / (static_cast<float>(dt_ms) + c.g_tau_ms);
+    lx_ += (ax_ - lx_) * gk;
+    ly_ += (ay_ - ly_) * gk;
+    lz_ += (az_ - lz_) * gk;
 
     // Fast term: integrate the rate gyros.
     float lean  = lean_deg_  + gx * dt;
@@ -133,9 +142,9 @@ void Filter::publish_into(state::Attitude& a) const {
     a.lean_deg     = lean_deg_;
     a.pitch_deg    = pitch_deg_;
     a.yaw_rate_dps = yaw_rate_dps_;
-    a.g_lat        = ay_;
-    a.g_lon        = ax_;
-    a.g_vert       = az_;
+    a.g_lat        = ly_;
+    a.g_lon        = lx_;
+    a.g_vert       = lz_;
 }
 
 }  // namespace core::attitude

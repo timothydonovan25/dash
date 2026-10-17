@@ -109,5 +109,26 @@ int main() {
         CHECK(!ps.contains(peer(2)));
     }
 
+    CASE("the bond store writes nothing while the bike is moving");
+    {
+        CHECK(!may_store(false, false, true));
+        CHECK(!may_store(false, true, true));
+        CHECK(may_store(true, false, false));      // a bonded phone's CCCD, parked
+    }
+
+    CASE("a stranger's records are never written outside a window");
+    {
+        CHECK(!may_store(true, true, false));
+        CHECK(may_store(true, true, true));        // the phone being paired
+    }
+
+    CASE("a new phone is welcome exactly when judge would keep it");
+    {
+        CHECK(new_phone_welcome(0, false));
+        CHECK(!new_phone_welcome(1, false));
+        CHECK(new_phone_welcome(1, true));
+        CHECK(new_phone_welcome(3, true));
+    }
+
     return check::report("pairing");
 }

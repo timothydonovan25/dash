@@ -1211,10 +1211,21 @@ int main() {
         f.health[core::state::Dev::Sd].state = core::state::DevState::Fault;
         for (uint32_t t = 9000; t < 10000; t += 20) { f.t_ms = t; fx.app.update(f); }
         CHECK(fx.app.alert().active());
+        fx.app.render(s.canvas, true);
+        fx.app.clear_full_repaint();
         f.health[core::state::Dev::Sd].state = core::state::DevState::Ok;
         for (uint32_t t = 10000; t < 12000; t += 20) { f.t_ms = t; fx.app.update(f); }
         CHECK(!fx.app.alert().active());               // the condition ended: so does the overlay
-        CHECK(fx.app.needs_full_repaint());            // and what it covered is repainted
+        // ...and what it covered is repainted: that box, as damage, not the
+        // whole screen.
+        CHECK(!fx.app.needs_full_repaint());
+        App::Damage dm[App::kMaxDamage];
+        const size_t nd = fx.app.damage(dm, App::kMaxDamage);
+        bool covered = false;
+        for (size_t i = 0; i < nd; ++i) {
+            if (dm[i].region && dm[i].r.intersects(fx.app.alert().bounds)) covered = true;
+        }
+        CHECK(covered);
     }
 
     CASE("the map screens draw a trace from a buffer they do not own");
@@ -1247,6 +1258,26 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() > 100);           // a trace, not just a frame and a label
+
+        // Drawn in 40-line bands, as the render task does, the map is the
+        // same picture: every strip of one redraw shares one fit, and a
+        // segment culled from a strip it does not reach is not missed.
+        Screen320x480 banded;
+        for (int16_t y = 0; y < kScreenH; y += 40) {
+            std::vector<Color> band(static_cast<size_t>(kScreenW) * 40, 0);
+            FrameBufferCanvas bc(band.data(), kScreenW, 40);
+            bc.set_window(0, y, kScreenW, 40);
+            fx.app.render(bc, true);
+            for (int16_t r = 0; r < 40 && y + r < kScreenH; ++r) {
+                for (int16_t x = 0; x < kScreenW; ++x) {
+                    banded.px[static_cast<size_t>(y + r) * kScreenW + x] =
+                        band[static_cast<size_t>(r) * kScreenW + x];
+                }
+            }
+        }
+        size_t differing = 0;
+        for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != banded.px[i]) ++differing;
+        CHECK(differing == 0);
     }
 
     CASE("the lap history screen shows the newest lap first");
@@ -1416,6 +1447,124 @@ int main() {
         }
     }
 
+    CASE("ride 300 random frames on every screen: partial always matches whole");
+    {
+        // The finer damage() overrides (digits, the lean marker, the nav
+        // chevron, the lap time) each name only part of a widget. If any of
+        // them misses a pixel that changed, the panel and a full repaint
+        // stop agreeing, and stay disagreeing until something repaints
+        // there; so this rides every screen through random frames and
+        // compares every 25th, which keeps it to a few seconds. It found
+        // the TRACK lap time drawing past its own bounds.
+        uint32_t seed = 12345;
+        auto rnd = [&](float lo, float hi) {
+            seed = seed * 1664525u + 1013904223u;
+            return lo + (hi - lo) * static_cast<float>(seed >> 8) / 16777216.0f;
+        };
+        const core::nav::Layout counts;
+        int screens = 0;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t sn = 0; sn < counts.screens[m]; ++sn) {
+                Fixture fx;
+                fx.settings.gauge_sweep = false;
+                Screen320x480 partial;
+                fx.app.begin(partial.canvas);
+                go_to(fx.app, partial.canvas, static_cast<Mode>(m), sn);
+                Frame f = busy_frame();
+                f.waypoint.pts[0].set = true;
+                f.waypoint.pts[0].lat = f.gnss.lat + 0.01;
+                f.waypoint.pts[0].lon = f.gnss.lon + 0.01;
+                fx.app.update(f);
+                fx.app.render(partial.canvas, true);
+                fx.app.clear_full_repaint();
+                size_t worst = 0;
+                for (int i = 0; i < 300; ++i) {
+                    f.t_ms += 17;
+                    f.motion.best_mph = rnd(0.0f, 1.0f) < 0.1f ? rnd(0, 120) : f.motion.best_mph + rnd(-2, 2);
+                    if (f.motion.best_mph < 0) f.motion.best_mph = 0;
+                    f.engine.rpm = rnd(1200, 11000);
+                    f.att.lean_deg = rnd(0.0f, 1.0f) < 0.05f ? rnd(-90, 90) : f.att.lean_deg + rnd(-4, 4);
+                    f.health[Dev::Imu].state = rnd(0.0f, 1.0f) > 0.02f ? DevState::Ok : DevState::Fault;
+                    f.gnss.course_deg = rnd(0, 360);
+                    f.gnss.speed_mph = rnd(0, 60);
+                    f.lap.current_ms += static_cast<uint32_t>(rnd(0, 40));
+                    if (rnd(0.0f, 1.0f) < 0.02f) f.lap.current_ms = static_cast<uint32_t>(rnd(0, 700000));
+                    f.trip.trip_a_mi += rnd(0, 0.02f);
+                    fx.app.update(f);
+                    if (fx.app.needs_full_repaint()) {
+                        fx.app.render(partial.canvas, true);
+                        fx.app.clear_full_repaint();
+                    } else {
+                        send_damage(fx.app, partial.px);
+                    }
+                    if (i % 25 != 24) continue;
+                    Screen320x480 whole;
+                    fx.app.render(whole.canvas, true);
+                    size_t differing = 0;
+                    for (size_t k = 0; k < partial.px.size(); ++k) {
+                        if (partial.px[k] != whole.px[k]) ++differing;
+                    }
+                    if (differing > worst) worst = differing;
+                }
+                if (worst) {
+                    std::printf("       %s/%s: up to %zu px differ\n",
+                                fx.app.mode_name(), fx.app.current().name(), worst);
+                }
+                CHECK(worst == 0);
+                ++screens;
+            }
+        }
+        CHECK(screens >= 20);
+    }
+
+    CASE("riding frames send only what moved: SPEED, MINIMAL and LAP");
+    {
+        // The pixels a riding frame sends on the screens a rider watches,
+        // averaged over two seconds of a steady pull. With the lean gauge,
+        // the big digits and the running lap time sent whole, this ride was
+        // SPEED ~25k px a frame, MINIMAL ~13k, LAP ~20k; now ~6k, ~2.5k and
+        // ~4k (sim/wire_report has the costs in ms).
+        struct Want { Mode m; uint8_t screen; const char* name; size_t max_avg_px; };
+        const Want wants[] = {
+            {Mode::Cruise, 0, "SPEED", 12000},
+            {Mode::Cruise, 5, "MINIM", 6000},
+            {Mode::Track, 0, "LAP", 10000},
+        };
+        for (const Want& w : wants) {
+            Fixture fx;
+            fx.settings.gauge_sweep = false;
+            Screen320x480 s;
+            fx.app.begin(s.canvas);
+            go_to(fx.app, s.canvas, w.m, w.screen);
+            Frame f = busy_frame();
+            f.lap.phase = core::lap::Phase::Timing;
+            fx.app.update(f);
+            fx.app.render(s.canvas, true);
+            fx.app.clear_full_repaint();
+            size_t total = 0;
+            const int kFrames = 120;
+            for (int i = 0; i < kFrames; ++i) {
+                f.t_ms += 17;
+                f.lap.current_ms += 17;
+                f.motion.best_mph = 30.0f + i * 0.12f;             // a pull
+                f.engine.rpm = 5000.0f + i * 30.0f;
+                f.att.lean_deg = 20.0f * std::sin(i * 0.05f);       // a corner
+                fx.app.update(f);
+                App::Damage d[App::kMaxDamage];
+                const size_t n = fx.app.damage(d, App::kMaxDamage);
+                for (size_t k = 0; k < n; ++k) {
+                    const Rect r = d[k].r.clipped_to(Rect{0, 0, kScreenW, kScreenH});
+                    total += static_cast<size_t>(r.w) * r.h;
+                }
+                send_damage(fx.app, s.px);
+            }
+            const size_t avg = total / kFrames;
+            std::printf("       (%s: %zu px a frame)\n", w.name, avg);
+            CHECK(std::strcmp(fx.app.current().name(), w.name) == 0);
+            CHECK(avg <= w.max_avg_px);
+        }
+    }
+
     CASE("an alert stays on top of what changes under it without being resent");
     {
         Fixture fx;
@@ -1451,6 +1600,55 @@ int main() {
             if (partial.px[i] != whole.px[i]) ++differing;
         }
         CHECK(differing == 0);
+    }
+
+    CASE("an alert that clears puts back only the box it covered, on every screen");
+    {
+        int screens_tested = 0;
+        const core::nav::Layout counts;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t sn = 0; sn < counts.screens[m]; ++sn) {
+                Fixture fx;
+                fx.settings.gauge_sweep = false;
+                Screen320x480 partial;
+                fx.app.begin(partial.canvas);
+                go_to(fx.app, partial.canvas, static_cast<Mode>(m), sn);
+                Frame a = busy_frame();
+                a.health[Dev::Imu].state = DevState::Fault;     // raises an alert
+                for (int i = 0; i < 400 && fx.app.alert_kind() == core::alert::Kind::None; ++i) {
+                    a.t_ms += 17;
+                    fx.app.update(a);
+                }
+                if (fx.app.alert_kind() == core::alert::Kind::None) continue;  // e.g. CONFIG
+                fx.app.render(partial.canvas, true);
+                fx.app.clear_full_repaint();
+
+                Frame b = a;                                     // fault gone
+                b.health[Dev::Imu].state = DevState::Ok;
+                for (int i = 0; i < 400 && fx.app.alert_kind() != core::alert::Kind::None; ++i) {
+                    b.t_ms += 17;
+                    fx.app.update(b);
+                    if (fx.app.alert_kind() != core::alert::Kind::None) send_damage(fx.app, partial.px);
+                }
+                CHECK(fx.app.alert_kind() == core::alert::Kind::None);
+                CHECK(!fx.app.needs_full_repaint());
+                ++screens_tested;
+                send_damage(fx.app, partial.px);
+                Screen320x480 whole;
+                fx.app.render(whole.canvas, true);
+                size_t differing = 0;
+                for (size_t i = 0; i < partial.px.size(); ++i) {
+                    if (partial.px[i] != whole.px[i]) ++differing;
+                }
+                if (differing) {
+                    std::printf("       %s/%s: %zu px differ after the alert cleared\n",
+                                fx.app.mode_name(), fx.app.current().name(), differing);
+                }
+                CHECK(differing == 0);
+            }
+        }
+        std::printf("       (alert cleared on %d screens)\n", screens_tested);
+        CHECK(screens_tested >= 10);
     }
 
     CASE("wheelspin shows as a bar across the top, and clearing it repaints");
@@ -1490,10 +1688,29 @@ int main() {
         c.t_ms = b.t_ms + 2000;                      // ...past the hold
         fx.app.update(c);
         CHECK(!fx.app.slip_bar().active());
-        CHECK(fx.app.needs_full_repaint());         // the top comes back whole
+        // The strip it covered comes back as damage, not as a whole frame:
+        // this happens every time a spin ends.
+        CHECK(!fx.app.needs_full_repaint());
+        {
+            App::Damage dm[App::kMaxDamage];
+            const size_t nd = fx.app.damage(dm, App::kMaxDamage);
+            bool region = false;
+            for (size_t i = 0; i < nd; ++i) region |= dm[i].region;
+            CHECK(region);
+        }
+        send_damage(fx.app, partial.px);
+        {
+            Screen320x480 whole2;
+            fx.app.render(whole2.canvas, true);
+            size_t diff2 = 0;
+            for (size_t i = 0; i < partial.px.size(); ++i) {
+                if (partial.px[i] != whole2.px[i]) ++diff2;
+            }
+            CHECK(diff2 == 0);
+            CHECK(partial.px[5 * kScreenW + 5] != color::kWarn);   // the bar is gone
+        }
 
         fx.settings.slip_bar = false;                // and it can be turned off
-        fx.app.clear_full_repaint();
         Frame d = b;
         d.t_ms = c.t_ms + 17;
         fx.app.update(d);
