@@ -30,7 +30,11 @@ void bike_task(void* arg) {
     // shows what the real dash shows with nothing connected -- zeros and
     // `--`. That also leaves the start-up gauge sweep free to play. Media
     // and Ctrl belong to the production `ble` task now, not to this one.
-    services::LogicState logic;
+    // Static, as `logic` keeps its own (logic_service.cpp): LogicState is
+    // 5.8 kB since 1.26 (the splits' path buffer), and on this task's 4 kB
+    // stack it overflowed it at start and the demo boot-looped back to its
+    // stable image. One bike task, so it is this task's alone.
+    static services::LogicState logic;
     services::logic_restore(d, logic);
     QueueCommandSource commands(q);
 
