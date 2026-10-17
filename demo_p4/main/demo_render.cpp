@@ -162,12 +162,36 @@ void render_task_impl(void* arg) {
 
         hal::Status s = hal::Status::Ok;
         bool sent = false;
+        // `r`, just drawn into buf (packed), sent only where it differs from
+        // the glass, each part packed to the front of the buffer and written
+        // before the next.
+        auto send_drawn = [&](const ui::Rect& r) {
+            ui::Rect parts[ui::Shadow::kMaxParts];
+            const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, overhead_px);
+            for (int k = 0; k < np && hal::ok(s); ++k) {
+                const ui::Rect& p = parts[k];
+                ui::Shadow::pack(r, buf, p);
+                if (d.panel) {
+                    s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
+                                      static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h),
+                                      buf);
+                }
+                sent = true;
+            }
+        };
+
         if (app.needs_full_repaint()) {
             canvas.set_window(0, 0, ui::kScreenW, ui::kScreenH);
             app.render(canvas, true);
-            if (d.panel) s = d.panel->blit(0, 0, ui::kScreenW, ui::kScreenH, buf);
-            sent = true;
-            shadow.record(screen, buf);
+            // A screen change over a glass the shadow knows sends only what
+            // differs from the screen before; an unknown glass, all of it.
+            if (shadow.valid()) {
+                send_drawn(screen);
+            } else {
+                if (d.panel) s = d.panel->blit(0, 0, ui::kScreenW, ui::kScreenH, buf);
+                sent = true;
+                shadow.record(screen, buf);
+            }
             if (hal::ok(s)) {
                 app.clear_full_repaint();
                 shadow.validate();
@@ -188,20 +212,7 @@ void render_task_impl(void* arg) {
                 const ui::Rect r = dmg[i].r.clipped_to(screen);
                 if (r.empty() || !canvas.set_window(r.x, r.y, r.w, r.h)) continue;
                 app.draw_damage(canvas, dmg[i]);
-                // Only where it differs from the glass, each part packed to
-                // the front of the buffer and written before the next.
-                ui::Rect parts[ui::Shadow::kMaxParts];
-                const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, overhead_px);
-                for (int k = 0; k < np && hal::ok(s); ++k) {
-                    const ui::Rect& p = parts[k];
-                    ui::Shadow::pack(r, buf, p);
-                    if (d.panel) {
-                        s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
-                                          static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h),
-                                          buf);
-                    }
-                    sent = true;
-                }
+                send_drawn(r);
             }
             // A failed write leaves the glass unknown where the shadow says
             // it was sent: a whole frame next, which puts them back in step.

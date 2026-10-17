@@ -8,6 +8,11 @@
 // differ. Comparing 38 kB is a fraction of a millisecond of CPU; sending it
 // at 10 MHz is 7.7 ms of bus.
 //
+// A full repaint goes through it too while it is valid: a screen change
+// sends only what differs from the screen before (31 ms whole, 6-26 ms
+// diffed). Only a glass that is genuinely unknown -- boot, a panel re-init,
+// a failed write -- is sent whole.
+//
 // The copy is only as good as the last transfer. Anything that leaves the
 // glass unknown -- a failed blit, a panel re-init -- must invalidate() it,
 // and until a whole frame has been recorded again every diff sends its
@@ -33,6 +38,13 @@ public:
     // A whole frame has been recorded and every part of it was sent.
     void validate() { valid_ = px_ != nullptr; }
     bool valid() const { return valid_; }
+
+    // Row `y` of what the panel holds (kScreenW pixels, rows contiguous), or
+    // null without a store. For resending the glass as it should be: a
+    // brown-out can wipe an ILI9488's memory without any write failing.
+    const Color* row(int16_t y) const {
+        return px_ ? px_ + static_cast<size_t>(y) * kScreenW : nullptr;
+    }
 
     // `px` (r.w x r.h, packed) has been sent whole; remember it.
     void record(const Rect& r, const Color* px);

@@ -39,6 +39,7 @@ add_library(core STATIC
     ${CORE}/src/wifi.cpp
     ${CORE}/src/sweep.cpp
     ${CORE}/src/fusion_speed.cpp
+    ${CORE}/src/fixtime.cpp
     ${CORE}/src/gearcal.cpp
     ${CORE}/src/c6.cpp
     ${CORE}/src/battery.cpp
@@ -74,7 +75,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

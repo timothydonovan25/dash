@@ -89,7 +89,8 @@ struct Gnss {
     // The system clock (ms since boot, the clock every task's `now` comes
     // from) when this fix's first sentence finished arriving. Moves once
     // per fix, not per sentence, so it is how `logic` tells a new fix from
-    // the same one read again, and it is the fix's time for the lap timer.
+    // the same one read again. Not the fix's time for the lap timer: that
+    // is utc_ms put on this clock by core::fixtime, without the latency.
     uint32_t rx_ms = 0;
 };
 

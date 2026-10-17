@@ -250,12 +250,19 @@ int main(int argc, char** argv) {
                 app.update(f);
 
                 if (app.needs_full_repaint()) {
-                    m.full_repaint();
                     whole.full_repaint();
                     ++full_frames;
                     app.render(canvas, true);
                     app.clear_full_repaint();
-                    record_all();
+                    // Over a known glass, as render_service: only what
+                    // differs from what was there.
+                    if (shadow.valid()) {
+                        wire::Model none(p, kBandPixels, kBandLines);
+                        send(Rect{0, 0, kScreenW, kScreenH}, none, m);
+                    } else {
+                        m.full_repaint();
+                        record_all();
+                    }
                 } else {
                     // Exactly what render_service sends: App::damage(), which
                     // is the changed part of each widget, not its bounds,

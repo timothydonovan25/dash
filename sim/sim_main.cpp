@@ -527,6 +527,8 @@ int main() {
     ui::Shadow shadow(glass.data());
     std::vector<ui::Color> strip_px;
     const uint32_t overhead_px = ui::wire::overhead_px(wire_panel);
+    uint32_t last_scrub = 0;
+    int scrub_band = 0;
     // What the glass shows: the canvas as the bus has delivered it so far.
     sim::PanelSim panel(kBandPixels, kBandLines);
     panel.set_bus_limit(kBusLimitBytes);
@@ -796,34 +798,50 @@ int main() {
             // made a widget goes visibly stale.
             app.render(canvas, true);
             app.clear_full_repaint();
-            if (full) {
+            // One strip, drawn: sent where it differs from the glass.
+            auto send_strip = [&](const ui::Rect& r) {
+                strip_px.resize(static_cast<size_t>(r.w) * r.h);
+                for (int16_t y = 0; y < r.h; ++y) {
+                    const ui::Color* src = px.data() +
+                        static_cast<size_t>(r.y + y) * ui::kScreenW + r.x;
+                    std::copy(src, src + r.w,
+                              strip_px.begin() + static_cast<size_t>(y) * r.w);
+                }
+                ui::Rect parts[ui::Shadow::kMaxParts];
+                const int np = shadow.diff(r, strip_px.data(), parts,
+                                           ui::Shadow::kMaxParts, overhead_px);
+                for (int j = 0; j < np; ++j) {
+                    wire.transfer(parts[j]);
+                    panel.queue_part(parts[j], px.data());
+                }
+            };
+            if (full && !shadow.valid()) {
+                // The glass is unknown: all of it, band by band.
                 wire.full_repaint();
                 panel.queue_full(px.data());
                 shadow.record(ui::Rect{0, 0, ui::kScreenW, ui::kScreenH}, px.data());
                 shadow.validate();
+            } else if (full) {
+                // A screen change: only what differs from the screen before.
+                for (int16_t y = 0; y < ui::kScreenH; y = static_cast<int16_t>(y + kBandLines)) {
+                    send_strip(ui::Rect{0, y, ui::kScreenW, kBandLines});
+                }
             } else {
                 for (size_t i = 0; i < ndmg; ++i) {
                     ui::Rect strips[ui::kMaxStrips];
                     const int ns = ui::plan_strips(dmg[i].r, kBandPixels, strips,
                                                    ui::kMaxStrips);
-                    for (int k = 0; k < ns; ++k) {
-                        const ui::Rect& r = strips[k];
-                        strip_px.resize(static_cast<size_t>(r.w) * r.h);
-                        for (int16_t y = 0; y < r.h; ++y) {
-                            const ui::Color* src = px.data() +
-                                static_cast<size_t>(r.y + y) * ui::kScreenW + r.x;
-                            std::copy(src, src + r.w,
-                                      strip_px.begin() + static_cast<size_t>(y) * r.w);
-                        }
-                        ui::Rect parts[ui::Shadow::kMaxParts];
-                        const int np = shadow.diff(r, strip_px.data(), parts,
-                                                   ui::Shadow::kMaxParts, overhead_px);
-                        for (int j = 0; j < np; ++j) {
-                            wire.transfer(parts[j]);
-                            panel.queue_part(parts[j], px.data());
-                        }
-                    }
+                    for (int k = 0; k < ns; ++k) send_strip(strips[k]);
                 }
+            }
+            // render_service's scrub: one band of the glass resent a second.
+            if (shadow.valid() && now - last_scrub >= 1000) {
+                last_scrub = now;
+                const ui::Rect r{0, static_cast<int16_t>(scrub_band * kBandLines),
+                                 ui::kScreenW, kBandLines};
+                scrub_band = (scrub_band + 1) % (ui::kScreenH / kBandLines);
+                wire.transfer(r);
+                panel.queue_part(r, glass.data());
             }
             cost = wire.end_frame();
         }

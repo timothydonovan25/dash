@@ -226,8 +226,12 @@ pixels as a full repaint, which is the property that catches it.
 Narrower again, `ui::Shadow` (1.21) keeps a copy of the glass in PSRAM and
 each drawn strip goes out only where it differs from it (CPU for bus: SPEED's
 riding frame is ~1 ms on the wire, ~2 without). Anything that leaves the glass
-unknown — a failed blit, a panel re-init — must `invalidate()` it; a full
-repaint `record()`s and `validate()`s it. Render, the demo, the sim and
+unknown — a failed blit, a panel re-init — must `invalidate()` it; a whole
+send `record()`s and `validate()`s it. A screen change (a full repaint) over a
+known glass goes through it too (1.24): 6–26 ms instead of 31. So a screen
+change no longer rewrites the panel, and `render` instead resends one band of
+the shadow a second (the scrub, 3.9 ms of bus), which repairs an ILI9488 that
+lost its memory without a write failing. Render, the demo, the sim and
 `sim/wire_report` all send through it.
 
 ## Conventions
@@ -262,7 +266,10 @@ the media half of step 9 is written. 40 host test suites, all passing.
   where the rpm will be, from `tach::RateEstimator`'s slope, less a noise floor
 - `geo/` distance, bearing, finish-line crossing with sub-sample interpolation
 - `lap/` arm, score, best lap, and the speed / min-lap / fix-gap gates that
-  turn a geometric crossing into a real lap
+  turn a geometric crossing into a real lap. Fixes are timed by their own GPS
+  time put on the system clock (`fixtime/`, 1.24: the lowest-latency offset,
+  NTP-style), not by when they arrived: arrival carries the receiver's
+  varying latency, and laps were up to ~17 ms off with it, ~2 without
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
 - `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy.

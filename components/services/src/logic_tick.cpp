@@ -374,8 +374,13 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     if (new_fix) {
         s.last_lap_rx_ms = g.rx_ms;
         s.lap_told_stale = false;
+        // The fix's own GPS time on the system clock, not its arrival: the
+        // arrival carries the receiver's varying latency, the UART and the
+        // poll, and a lap time is the difference of two of them. Without a
+        // fix the time of day may not be there yet, so arrival it is.
+        s.last_fix_ms = g.fix ? s.fix_clock.stamp(g.utc_ms, g.rx_ms) : g.rx_ms;
         lf.valid = g.fix;
-        lf.t_ms = g.rx_ms;
+        lf.t_ms = s.last_fix_ms;
         lu = s.lap.update(lf, lc);
     } else if (silent && !s.lap_told_stale && s.last_lap_rx_ms != 0) {
         s.lap_told_stale = true;
@@ -437,7 +442,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             // fix's, and the pass runs a little after it (the gnss poll, or
             // a whole tick if the fix arrived with no wake).
             const uint32_t cur = s.lap.state().current_ms;
-            const uint32_t age = now - g.rx_ms;
+            const uint32_t age = now - s.last_fix_ms;
             d.delta->sample(p.x_ft, p.y_ft, cur > age ? cur - age : 0, s.delta_cfg);
         }
     }

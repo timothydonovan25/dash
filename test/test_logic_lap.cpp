@@ -97,6 +97,70 @@ int main() {
         CHECK(advanced_between_fixes > 1000);
     }
 
+    CASE("a receiver whose latency wanders 30-90 ms still times laps to the ms");
+    {
+        // Each fix arrives 30..90 ms after it was taken, a different amount
+        // every time. Timed from arrival, every lap was off by the difference
+        // of two of those; timed from the fixes' own GPS time
+        // (core::fixtime) it is not.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        NoCommands             none;
+        deps.slots = &slots;
+        deps.settings = &settings;
+
+        const Track track;
+        state.lap.set_line(at_ft(0.0, -track.r_ft), 90.0);
+        constexpr uint32_t kBoot = 5000;
+        uint32_t seed = 99;
+        auto latency = [&](uint32_t fix) {
+            seed = seed * 1103515245u + 12345u + fix;
+            return 30u + (seed >> 16) % 61u;
+        };
+        uint32_t next_fix = 0;
+        uint32_t next_rx = kBoot + latency(0);
+        core::state::Gnss g;
+        uint32_t laps_seen = 0;
+        double worst = 0, first = 0;
+        for (uint32_t t = 0; t < 6 * 35000 + 5000; t += 20) {
+            const uint32_t now = kBoot + t + 3;
+            while (next_rx <= now) {
+                const core::geo::LatLon p = track.pos(next_fix);
+                g.fix = true;
+                g.lat = p.lat;
+                g.lon = p.lon;
+                g.speed_mph = static_cast<float>(track.mph);
+                g.utc_ms = next_fix;
+                g.rx_ms = next_rx;
+                slots.gnss.publish(g);
+                next_fix += 100;
+                // Sentences come out in order: never before the last one.
+                const uint32_t r = kBoot + next_fix + latency(next_fix);
+                next_rx = r > next_rx ? r : next_rx + 1;
+            }
+            services::logic_tick(deps, state, none, now);
+            const core::state::Lap lap = slots.lap.get();
+            if (lap.count != laps_seen) {
+                laps_seen = lap.count;
+                const double e = std::fabs(static_cast<double>(lap.last_ms) - track.period_ms());
+                // The first lap starts in the GPS's first second, before the
+                // clock has seen a quick fix to anchor on: it is timed no
+                // better than from arrival. On a ride the first crossing is
+                // minutes after the fix, long after that.
+                if (lap.count == 1) first = e;
+                else if (e > worst) worst = e;
+            }
+        }
+        std::printf("       (wandering latency: %u laps, first %.1f ms off, the rest at worst %.1f;"
+                    " from arrival times it was 17)\n",
+                    static_cast<unsigned>(laps_seen), first, worst);
+        CHECK(laps_seen >= 4);
+        CHECK(first <= 20.0);
+        CHECK(worst <= 2.0);
+    }
+
     CASE("a receiver that goes silent is told to the timer as no fix");
     {
         core::state::Slots     slots;

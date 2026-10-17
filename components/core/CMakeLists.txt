@@ -25,6 +25,7 @@ idf_component_register(
          "src/wifi.cpp"
          "src/sweep.cpp"
          "src/fusion_speed.cpp"
+         "src/fixtime.cpp"
          "src/c6.cpp"
          "src/gearcal.cpp"
          "src/battery.cpp"

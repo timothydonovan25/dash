@@ -25,9 +25,14 @@
 // but sends little more than the digit that changed. Comparing is a fraction
 // of a millisecond of CPU; that is the trade, CPU for bus.
 //
-// A whole frame still goes out on a screen change and at boot — anything
-// where the panel's contents are unknown. An alert being dismissed or the
-// slip bar clearing is not that: only the box it covered goes again.
+// A whole frame is drawn on a screen change, but while the shadow knows the
+// glass only what differs from the screen before goes out (31 ms whole,
+// 6-26 ms diffed). It is sent whole only where the panel's contents are
+// unknown: at boot, after a panel re-init or a failed write. An alert being
+// dismissed or the slip bar clearing is not even a whole frame: only the box
+// it covered goes again. And once a second one band is resent from the
+// shadow regardless (the scrub), which repairs a panel that lost its memory
+// without a write failing.
 #include "services/services.hpp"
 #include "ui/app.hpp"
 #include "ui/blit_plan.hpp"
@@ -85,21 +90,42 @@ private:
     Buffer* buf_;
 };
 
+// What one more transfer costs in pixels: below it, sending unchanged pixels
+// between two changes beats splitting them. BRINGUP: the per-transfer
+// overhead in ui::wire is a guess until it is scoped.
+uint32_t overhead_px() {
+    static const uint32_t k = ui::wire::overhead_px(ui::wire::i80_8bit(bsp::kTftWrHz));
+    return k;
+}
+
+// Send `r`, just drawn into `buf` (packed), only where it differs from what
+// the glass already shows (ui::Shadow): each changed part packed to the
+// front of the band and blitted. The panel copies a transfer into its own
+// staging buffer before blit() returns, so the band is free for the next
+// part. `sent` is set when anything went on the wire.
+hal::Status send_drawn(Deps& d, ui::Shadow& shadow, ui::Color* buf, const ui::Rect& r,
+                       bool& sent) {
+    ui::Rect parts[ui::Shadow::kMaxParts];
+    const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, overhead_px());
+    for (int k = 0; k < np; ++k) {
+        const ui::Rect& p = parts[k];
+        ui::Shadow::pack(r, buf, p);
+        sent = true;
+        if (!d.panel) continue;
+        const hal::Status s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
+                                            static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h),
+                                            buf);
+        if (!hal::ok(s)) return s;
+    }
+    return hal::Status::Ok;
+}
+
 // Push one damaged rectangle, in horizontal strips that fit the one band
 // buffer. A tall widget becomes a few transfers rather than needing a
-// framebuffer the size of the screen. Each strip, once drawn, goes out only
-// where it differs from what the glass already shows (ui::Shadow), packed to
-// the front of the band; the panel copies a transfer into its own staging
-// buffer before blit() returns, so the band is free for the next part.
-// `sent` is set when anything went on the wire.
+// framebuffer the size of the screen; each strip goes through send_drawn.
 hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
                         ui::Color* buf, ui::Shadow& shadow,
                         const ui::App::Damage& dmg, bool& sent) {
-    // What one more transfer costs in pixels: below it, sending unchanged
-    // pixels between two changes beats splitting them. BRINGUP: the
-    // per-transfer overhead in ui::wire is a guess until it is scoped.
-    static const uint32_t kOverheadPx =
-        ui::wire::overhead_px(ui::wire::i80_8bit(bsp::kTftWrHz));
     // The clip and the strip split are in ui/blit_plan.hpp so that the
     // wire-cost model prices exactly what this sends, rather than its own
     // idea of it.
@@ -108,25 +134,22 @@ hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
     if (n == 0) return hal::Status::Ok;
     if (n < 0)  return hal::Status::Unsupported;
 
-    hal::Status s = hal::Status::Ok;
     for (int i = 0; i < n; ++i) {
         const ui::Rect& r = strips[i];
         if (!canvas.set_window(r.x, r.y, r.w, r.h)) return hal::Status::Unsupported;
         app.draw_damage(canvas, dmg);
-        ui::Rect parts[ui::Shadow::kMaxParts];
-        const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, kOverheadPx);
-        for (int k = 0; k < np; ++k) {
-            const ui::Rect& p = parts[k];
-            ui::Shadow::pack(r, buf, p);
-            sent = true;
-            if (!d.panel) continue;
-            s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
-                              static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h), buf);
-            if (!hal::ok(s)) return s;
-        }
+        const hal::Status s = send_drawn(d, shadow, buf, r, sent);
+        if (!hal::ok(s)) return s;
     }
-    return s;
+    return hal::Status::Ok;
 }
+
+// Once a second one band of the glass is sent again, from the shadow, as it
+// should be: all of it every eight seconds, 3.9 ms of bus a second. A
+// brown-out can wipe the ILI9488's memory without any write failing, and
+// while every screen change went out whole that was what repaired it; now a
+// screen change sends only what differs, so this does instead, and sooner.
+constexpr uint32_t kScrubEveryMs = 1000;
 
 void render_task(void* arg) {
     auto* pair = static_cast<std::pair<Deps*, CommandQueue*>*>(arg);
@@ -189,6 +212,8 @@ void render_task(void* arg) {
     uint32_t frames = 0;
     uint32_t last_hz_ms = d.clock->now_ms();
     bool last_send_ok = true;
+    uint32_t last_scrub_ms = d.clock->now_ms();
+    int scrub_band = 0;
 
     uint32_t start_ms = d.clock->now_ms();
     uint32_t frame_no = 1;
@@ -248,17 +273,26 @@ void render_task(void* arg) {
         bool sent = false;
 
         if (app.needs_full_repaint()) {
-            sent = true;
-            // The panel's contents are unknown, so everything goes out: the
-            // background chrome as well as every widget, band by band.
+            // Everything is drawn: the background chrome as well as every
+            // widget, band by band. What goes out depends on the glass. Known
+            // (a screen change), only what differs from the screen before;
+            // unknown (boot, a panel re-init, a failed write), all of it.
+            const bool known = shadow.valid();
             for (int16_t y = 0; y < ui::kScreenH; y += kBandLines) {
                 canvas.set_window(0, y, ui::kScreenW, kBandLines);
                 app.render(canvas, true);
-                if (d.panel && hal::ok(blit_status)) {
-                    blit_status = d.panel->blit(0, static_cast<uint16_t>(y),
-                                                ui::kScreenW, kBandLines, band);
+                if (!hal::ok(blit_status)) continue;
+                const ui::Rect r{0, y, ui::kScreenW, kBandLines};
+                if (known) {
+                    blit_status = send_drawn(d, shadow, band, r, sent);
+                } else {
+                    sent = true;
+                    if (d.panel) {
+                        blit_status = d.panel->blit(0, static_cast<uint16_t>(y),
+                                                    ui::kScreenW, kBandLines, band);
+                    }
+                    shadow.record(r, band);
                 }
-                shadow.record(ui::Rect{0, y, ui::kScreenW, kBandLines}, band);
             }
             // A band that did not go out leaves the panel unknown: repaint
             // again next frame rather than call it done.
@@ -289,6 +323,22 @@ void render_task(void* arg) {
             if (hal::ok(blit_status)) {
                 app.clear_damage();
             } else {
+                shadow.invalidate();
+                app.invalidate();
+            }
+        }
+
+        // The scrub, after this frame's own sends so it resends the glass as
+        // it now is. Not over a glass the shadow does not know.
+        if (d.panel && shadow.valid() && hal::ok(blit_status) &&
+            now - last_scrub_ms >= kScrubEveryMs) {
+            last_scrub_ms = now;
+            const int16_t y = static_cast<int16_t>(scrub_band * kBandLines);
+            scrub_band = (scrub_band + 1) % (ui::kScreenH / kBandLines);
+            blit_status = d.panel->blit(0, static_cast<uint16_t>(y), ui::kScreenW,
+                                        kBandLines, shadow.row(y));
+            sent = true;
+            if (!hal::ok(blit_status)) {
                 shadow.invalidate();
                 app.invalidate();
             }

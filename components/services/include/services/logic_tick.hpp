@@ -14,6 +14,7 @@
 #include "core/delta/delta.hpp"
 #include "core/geo/geo.hpp"
 #include "core/lap/lap.hpp"
+#include "core/fixtime/fixtime.hpp"
 #include "core/trip/trip.hpp"
 #include "core/waypoint/waypoint.hpp"
 
@@ -48,6 +49,10 @@ struct LogicState {
     // already been told the receiver went quiet.
     uint32_t last_lap_rx_ms = 0;
     bool     lap_told_stale = false;
+    // When each fix was taken, on the system clock, from its own GPS time
+    // (core::fixtime) rather than from when it arrived; and the last one.
+    core::fixtime::Clock fix_clock;
+    uint32_t last_fix_ms = 0;
 
     // The named waypoints (core::waypoint), and whether START has been
     // looked at yet this power-on.

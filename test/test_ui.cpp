@@ -114,12 +114,44 @@ size_t send_damage_diffed(App& app, std::vector<Color>& panel, Shadow& sh,
     return sent;
 }
 
-// A full repaint through a Shadow: all of it sent, all of it remembered.
-void full_repaint_diffed(App& app, Screen320x480& s, Shadow& sh) {
-    app.render(s.canvas, true);
+// A full repaint through a Shadow, as the render loops make one: the whole
+// frame drawn, then sent whole if the glass is unknown, or only where it
+// differs from what the panel holds if it is known (a screen change).
+// Returns the pixels sent.
+size_t full_repaint_diffed(App& app, Screen320x480& s, Shadow& sh) {
+    Screen320x480 drawn;
+    app.render(drawn.canvas, true);
     app.clear_full_repaint();
-    sh.record(Rect{0, 0, kScreenW, kScreenH}, s.px.data());
-    sh.validate();
+    const Rect screen{0, 0, kScreenW, kScreenH};
+    if (!sh.valid()) {
+        s.px = drawn.px;
+        sh.record(screen, drawn.px.data());
+        sh.validate();
+        return drawn.px.size();
+    }
+    const uint32_t overhead = wire::overhead_px(wire::i80_8bit(10000000u));
+    size_t sent = 0;
+    // Band by band, as render_service draws it.
+    std::vector<Color> band;
+    for (int16_t y = 0; y < kScreenH; y = static_cast<int16_t>(y + 40)) {
+        const Rect r{0, y, kScreenW, 40};
+        band.assign(drawn.px.begin() + static_cast<size_t>(y) * kScreenW,
+                    drawn.px.begin() + static_cast<size_t>(y + 40) * kScreenW);
+        Rect parts[Shadow::kMaxParts];
+        const int np = sh.diff(r, band.data(), parts, Shadow::kMaxParts, overhead);
+        for (int k = 0; k < np; ++k) {
+            const Rect& p = parts[k];
+            Shadow::pack(r, band.data(), p);
+            for (int16_t yy = 0; yy < p.h; ++yy) {
+                for (int16_t x = 0; x < p.w; ++x) {
+                    s.px[static_cast<size_t>(p.y + yy) * kScreenW + p.x + x] =
+                        band[static_cast<size_t>(yy) * p.w + x];
+                }
+            }
+            sent += static_cast<size_t>(p.w) * p.h;
+        }
+    }
+    return sent;
 }
 
 // One frame the way every render loop runs it (render_service, demo_render,
@@ -1661,6 +1693,61 @@ int main() {
                     total_whole, 100.0 * static_cast<double>(total_sent) /
                                      static_cast<double>(total_whole ? total_whole : 1));
         CHECK(total_sent < total_whole);
+    }
+
+    CASE("screen changes through a shadow: every screen lands whole, for less");
+    {
+        // A screen change is a full repaint, and over a glass the shadow
+        // knows only what differs from the screen before goes out. Walk every
+        // screen of every mode the way a rider does, riding a few frames on
+        // each, and after every step the panel must be what a full redraw
+        // gives.
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 panel;
+        std::vector<Color> store(static_cast<size_t>(kScreenW) * kScreenH, 0);
+        Shadow sh(store.data());
+        fx.app.begin(panel.canvas);
+        Frame f = busy_frame();
+        fx.app.update(f);
+        full_repaint_diffed(fx.app, panel, sh);
+        size_t worst = 0, changes = 0, sent = 0;
+        const core::nav::Layout counts;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
+                Screen320x480 scratch;
+                go_to(fx.app, scratch.canvas, static_cast<Mode>(m), n);
+                for (int i = 0; i < 3; ++i) {
+                    f.t_ms += 17;
+                    f.motion.best_mph += 1.0f;
+                    f.engine.rpm += 150.0f;
+                    fx.app.update(f);
+                    if (fx.app.needs_full_repaint()) {
+                        sent += full_repaint_diffed(fx.app, panel, sh);
+                        ++changes;
+                    } else {
+                        send_damage_diffed(fx.app, panel.px, sh);
+                    }
+                    Screen320x480 whole;
+                    fx.app.render(whole.canvas, true);
+                    size_t differing = 0;
+                    for (size_t k = 0; k < panel.px.size(); ++k) {
+                        if (panel.px[k] != whole.px[k]) ++differing;
+                    }
+                    if (differing) {
+                        std::printf("       %s/%s: %zu px differ\n", fx.app.mode_name(),
+                                    fx.app.current().name(), differing);
+                    }
+                    if (differing > worst) worst = differing;
+                }
+            }
+        }
+        CHECK(worst == 0);
+        CHECK(changes >= 15);
+        const size_t whole_px = changes * static_cast<size_t>(kScreenW) * kScreenH;
+        std::printf("       (screen changes: %zu, %zu%% of their pixels sent)\n", changes,
+                    whole_px ? 100 * sent / whole_px : 0);
+        CHECK(sent < whole_px);
     }
 
     CASE("key-on splash and sweep: the panel matches a full repaint, frame by frame");
