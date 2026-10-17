@@ -38,9 +38,15 @@ size_t Decoder::update(uint8_t raw_mask, uint32_t t_ms, const Config& c,
             s.stable = raw;
             if (raw) {
                 s.down_ms = t_ms;
-                s.long_sent = false;
+                s.release_silent = false;
                 s.repeat_ms = t_ms + c.repeat_delay_ms;
-            } else if (!s.long_sent) {
+                if ((c.on_press_mask >> i) & 1u) {
+                    // Acts now, so the release has nothing left to say, and
+                    // a button with no long meaning never makes one.
+                    s.release_silent = true;
+                    if (n < max) out[n++] = InputEvent{static_cast<Button>(i), Press::Short};
+                }
+            } else if (!s.release_silent) {
                 // Released before it became a long press. A long press has
                 // already reported itself, so releasing after one is silent
                 // rather than a short press on the way out.
@@ -52,8 +58,8 @@ size_t Decoder::update(uint8_t raw_mask, uint32_t t_ms, const Config& c,
 
         const uint32_t down_for = t_ms - s.down_ms;
 
-        if (!s.long_sent && down_for >= c.long_press_ms) {
-            s.long_sent = true;
+        if (!s.release_silent && down_for >= c.long_press_ms) {
+            s.release_silent = true;
             if (n < max) out[n++] = InputEvent{static_cast<Button>(i), Press::Long};
             continue;
         }
@@ -64,7 +70,7 @@ size_t Decoder::update(uint8_t raw_mask, uint32_t t_ms, const Config& c,
         if (repeats && down_for >= c.repeat_delay_ms &&
             static_cast<int32_t>(t_ms - s.repeat_ms) >= 0) {
             s.repeat_ms = t_ms + c.repeat_ms;
-            s.long_sent = true;         // a held cursor key is repeat, not long
+            s.release_silent = true;    // a held cursor key is repeat, not long
             if (n < max) out[n++] = InputEvent{static_cast<Button>(i), Press::Short};
         }
     }

@@ -24,6 +24,7 @@ void Meter::reset() {
     rpm_ = raw_rpm_ = 0.0f;
     running_ = false;
     started_ = false;
+    rate_.reset();
 }
 
 void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
@@ -47,6 +48,7 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
                    static_cast<float>(c.revs_per_pulse ? c.revs_per_pulse : 1);
         running_ = true;
         rpm_ += (raw_rpm_ - rpm_) * c.smoothing;
+        rate_.add(edge_us, raw_rpm_, static_cast<uint32_t>(c.rate_window_ms) * 1000u);
         return;
     }
 
@@ -57,7 +59,52 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
         running_ = false;
         raw_rpm_ = 0.0f;
         rpm_ = 0.0f;     // snapped, not decayed: a stopped engine reads zero
+        rate_.reset();
     }
+}
+
+void RateEstimator::reset() {
+    head_ = 0;
+    n_ = 0;
+    rate_ = 0.0f;
+}
+
+void RateEstimator::add(uint64_t t_us, float rpm, uint32_t window_us) {
+    t_us_[head_] = t_us;
+    rpm_[head_] = rpm;
+    head_ = (head_ + 1) % kMaxSamples;
+    if (n_ < kMaxSamples) ++n_;
+
+    // Forget what has fallen out of the window, oldest first.
+    while (n_ > 1) {
+        const int oldest = (head_ - n_ + kMaxSamples) % kMaxSamples;
+        if (t_us - t_us_[oldest] <= window_us) break;
+        --n_;
+    }
+    // Three readings, or two intervals, before there is a slope to speak of.
+    if (n_ < 3) {
+        rate_ = 0.0f;
+        return;
+    }
+
+    // Least squares, with time in seconds before the newest reading so the
+    // sums stay small enough for a float.
+    float st = 0, sv = 0, stt = 0, stv = 0;
+    for (int k = 0; k < n_; ++k) {
+        const int i = (head_ - 1 - k + kMaxSamples) % kMaxSamples;
+        const float t = -static_cast<float>(t_us - t_us_[i]) * 1e-6f;
+        st += t;
+        sv += rpm_[i];
+        stt += t * t;
+        stv += t * rpm_[i];
+    }
+    const float n = static_cast<float>(n_);
+    const float den = n * stt - st * st;
+    if (den <= 0.0f) return;              // every reading at one instant
+    float r = (n * stv - st * sv) / den;
+    if (r > kMaxRpmPerS) r = kMaxRpmPerS;
+    if (r < -kMaxRpmPerS) r = -kMaxRpmPerS;
+    rate_ = r;
 }
 
 void WheelMeter::reset() {

@@ -1,5 +1,6 @@
 #include "check.hpp"
 #include <algorithm>
+#include <cmath>
 #include "core/tach/tach.hpp"
 
 using namespace core::tach;
@@ -110,6 +111,73 @@ int main() {
         x.c.revs_per_pulse = 2;
         x.run(2000.0f, 2000);
         CHECK_NEAR(x.m.raw_rpm(), 4000.0, 50.0);
+    }
+
+    CASE("the rate of climb is the slope of a steady pull");
+    {
+        // 4000 rpm rising at 6000 rpm/s, one edge per revolution, through the
+        // Meter exactly as ctrl feeds it.
+        Meter m;
+        Config c;
+        double rev = 0.0, t_s = 0.0;
+        uint32_t total = 0;
+        uint64_t edge_us = 0;
+        for (int i = 0; i < 400; ++i) {                     // 0.4 s of 1 ms steps
+            for (int k = 0; k < 100; ++k) {                 // 10 us integration
+                const double rpm = 4000.0 + 6000.0 * t_s;
+                rev += rpm / 60.0 * 10e-6;
+                t_s += 10e-6;
+                if (rev >= 1.0) { rev -= 1.0; ++total; edge_us = static_cast<uint64_t>(t_s * 1e6); }
+            }
+            m.update(total, edge_us, static_cast<uint64_t>(t_s * 1e6), c);
+        }
+        CHECK_NEAR(m.rpm_rate(), 6000.0, 300.0);
+    }
+
+    CASE("a steady engine with a jittery period reads a small rate");
+    {
+        // A percent of period jitter is 60 rpm per reading at 6000 rpm. A
+        // two-point derivative would call that +-6000 rpm/s.
+        RateEstimator r;
+        uint32_t seed = 12345;
+        uint64_t t = 0;
+        float worst = 0.0f;
+        for (int i = 0; i < 500; ++i) {
+            seed = seed * 1664525u + 1013904223u;
+            const float jitter = (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f) * 0.02f;
+            const float period_us = 10000.0f * (1.0f + jitter);
+            t += static_cast<uint64_t>(period_us);
+            r.add(t, 60000000.0f / period_us, 100000);
+            if (i > 20) worst = std::max(worst, std::abs(r.rpm_per_s()));
+        }
+        CHECK(worst < 1500.0f);
+    }
+
+    CASE("the rate is zero until there are readings, and after a stall");
+    {
+        RateEstimator r;
+        CHECK(r.rpm_per_s() == 0.0f);
+        r.add(0, 5000.0f, 100000);
+        r.add(10000, 5100.0f, 100000);
+        CHECK(r.rpm_per_s() == 0.0f);                       // two is not a slope
+        r.add(20000, 5200.0f, 100000);
+        CHECK_NEAR(r.rpm_per_s(), 10000.0, 1.0);
+
+        Ctrl x;
+        x.run(4000.0f, 100);
+        x.run(7000.0f, 100);                                 // a blip
+        x.run(0.0f, 1000);                                   // and it stalls
+        CHECK(!x.m.running());
+        CHECK(x.m.rpm_rate() == 0.0f);
+    }
+
+    CASE("a glitch cannot claim an impossible rate");
+    {
+        RateEstimator r;
+        r.add(0, 3000.0f, 100000);
+        r.add(1000, 3000.0f, 100000);
+        r.add(2000, 60000.0f, 100000);                       // one wild reading
+        CHECK(r.rpm_per_s() <= RateEstimator::kMaxRpmPerS);
     }
 
     CASE("wheel speed from circumference and magnet count");

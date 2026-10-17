@@ -251,7 +251,9 @@ the media half of step 9 is written. 40 host test suites, all passing.
   buffers, not a seqlock: a seqlock reader that preempted its writer on the
   same core spun forever (ctrl at 18 reading gnss at 12). A reader never
   waits on a writer that has stopped half way
-- `nav/` mode and screen machine · `shift/` RPM to lamp pattern
+- `nav/` mode and screen machine · `shift/` RPM to lamp pattern, with an
+  optional lead (CONFIG → Shift → Lead time, off by default): the lamps go by
+  where the rpm will be, from `tach::RateEstimator`'s slope, less a noise floor
 - `geo/` distance, bearing, finish-line crossing with sub-sample interpolation
 - `lap/` arm, score, best lap, and the speed / min-lap / fix-gap gates that
   turn a geometric crossing into a real lap
@@ -264,7 +266,8 @@ the media half of step 9 is written. 40 host test suites, all passing.
   ejected SD card stays ejected. A device that reports must `begin_init` first
 - `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
 - `nmea/` the sentence parser, so the GPS driver is only bytes
-- `input/` debounce and short/long/repeat · `tach/` pulses to rpm and mph
+- `input/` debounce and short/long/repeat; C and D act on the press
+  (`on_press_mask`), as they have no long meaning — a button given one must leave the mask · `tach/` pulses to rpm and mph
 - `log/` the blackbox ring, its CSV format, and the rate decimator
 - `media/` the §11.1 Feed line parser: bounded, UTF-8-safe, `P` as an anchor
 - `ota/` stable/dev slot roles from the bootloader's rollback state, the

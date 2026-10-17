@@ -43,6 +43,7 @@
 #include "core/input/input.hpp"
 #include "core/gear/gear.hpp"
 #include "core/shift/shift.hpp"
+#include "core/tach/tach.hpp"
 #include "core/slip/slip.hpp"
 #include "core/sun/sun.hpp"
 #include "core/wifi/wifi.hpp"
@@ -530,6 +531,9 @@ int main() {
     core::input::Config   button_cfg;
     uint8_t button_mask = 0;
     uint8_t lamp_mask = 0;
+    // The tach's rate of climb, for predictive lamps: fed the bike's rpm
+    // every tick, where ctrl feeds it every tach edge.
+    core::tach::RateEstimator rpm_rate;
 
     services::logic_restore(deps, logic);
 
@@ -666,7 +670,14 @@ int main() {
         sc.span_rpm = sv.span_rpm;
         sc.hysteresis_rpm = sv.hysteresis_rpm;
         sc.flash_rpm = sv.flash_rpm;
-        uint16_t rpm = static_cast<uint16_t>(bike.rpm());
+        sc.lead_ms = sv.lead_ms;
+        if (bike.rpm() > 0.0f) {
+            rpm_rate.add(static_cast<uint64_t>(now) * 1000u, bike.rpm(),
+                         core::tach::Config{}.rate_window_ms * 1000u);
+        } else {
+            rpm_rate.reset();
+        }
+        uint16_t rpm = core::shift::lamp_rpm(bike.rpm(), rpm_rate.rpm_per_s(), sc);
         // ...including the start-up sweep, timed from the first frame.
         if (system.first_frame_ms != 0) {
             core::sweep::Config wc;

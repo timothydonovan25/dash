@@ -35,6 +35,34 @@ struct Config {
     // shift lights read the unsmoothed value; this is for the display, where
     // a needle that twitches is just noise.
     float    smoothing = 0.35f;
+    // How far back rpm_rate() looks. Long enough to average out a
+    // revolution's jitter, short enough to follow a gear's pull.
+    uint16_t rate_window_ms = 100;
+};
+
+// How fast the rpm is changing, in rpm per second: the least-squares slope
+// of the readings in the last `window_us`. Each reading is one revolution's
+// period, and that carries a percent or so of jitter, which a two-point
+// derivative turns into thousands of rpm/s (60 rpm over 10 ms at 6000 rpm);
+// a slope over ~100 ms of readings brings it down to hundreds. Fixed
+// storage: a reading older than the window, or past kMaxSamples, drops out.
+class RateEstimator {
+public:
+    static constexpr int   kMaxSamples = 24;
+    // A real engine does not change faster than this; a reading that says
+    // it does is a glitch, and is held to it.
+    static constexpr float kMaxRpmPerS = 40000.0f;
+
+    void  add(uint64_t t_us, float rpm, uint32_t window_us);
+    float rpm_per_s() const { return rate_; }
+    void  reset();
+
+private:
+    uint64_t t_us_[kMaxSamples] = {};
+    float    rpm_[kMaxSamples] = {};
+    int      head_ = 0;     // where the next reading goes
+    int      n_ = 0;
+    float    rate_ = 0.0f;
 };
 
 struct WheelConfig {
@@ -62,6 +90,9 @@ public:
 
     float rpm() const { return rpm_; }
     float raw_rpm() const { return raw_rpm_; }   // unsmoothed, for the lamps
+    // rpm per second, from the edge timestamps (RateEstimator). 0 until a
+    // few edges have arrived, and 0 again when the engine stops.
+    float rpm_rate() const { return rate_.rpm_per_s(); }
     bool  running() const { return running_; }
     void  reset();
 
@@ -72,6 +103,7 @@ private:
     float    raw_rpm_ = 0.0f;
     bool     running_ = false;
     bool     started_ = false;
+    RateEstimator rate_;
 };
 
 // Between pulses the reading cannot be higher than one pulse's distance

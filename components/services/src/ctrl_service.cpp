@@ -90,8 +90,12 @@ void ctrl_task(void* arg) {
         sc.span_rpm = sv.span_rpm;
         sc.hysteresis_rpm = sv.hysteresis_rpm;
         sc.flash_rpm = sv.flash_rpm;
+        sc.lead_ms = sv.lead_ms;
 
-        const uint16_t rpm = static_cast<uint16_t>(tach.raw_rpm());
+        // With a lead time set, the lamps go by where the rpm is heading
+        // (core::shift::lamp_rpm); the rate is the tach's own, from the
+        // edge timestamps, so it costs nothing here but a multiply.
+        const uint16_t rpm = core::shift::lamp_rpm(tach.raw_rpm(), tach.rpm_rate(), sc);
         lamp_rpm = rpm;
         if (!sweep_done) {
             const uint32_t now = d.clock->now_ms();

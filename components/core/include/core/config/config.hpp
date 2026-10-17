@@ -83,6 +83,11 @@ struct Settings {
     // revolution, 2 if only on the compression stroke. BRINGUP: compare the
     // dash with a known idle; reading half is 1 where it should be 2.
     uint8_t  tach_revs_per_pulse = 1;
+    // Predictive lamps (core::shift::Config::lead_ms): light them this far
+    // ahead of the rpm while it climbs. 0, off, until it has been tried on
+    // the bike: the right number is about a reaction time, and nobody's is
+    // known yet.
+    uint16_t shift_lead_ms = 0;
 
     // Lap timer — mirrors core::lap::Config
     float    lap_half_width_ft = 50.0f;
@@ -155,7 +160,7 @@ size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n);
 
 // Copy the tunables that other modules keep their own config structs for.
 // Called after any ConfigSet so nothing goes on using a stale threshold.
-struct ShiftView { uint16_t base_rpm, span_rpm, hysteresis_rpm, flash_rpm; };
+struct ShiftView { uint16_t base_rpm, span_rpm, hysteresis_rpm, flash_rpm, lead_ms; };
 struct LapView   { double half_width_ft; float min_speed_mph; uint32_t min_lap_ms; };
 ShiftView shift_view(const Settings& s);
 LapView   lap_view(const Settings& s);

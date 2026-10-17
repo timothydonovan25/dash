@@ -26,4 +26,16 @@ uint8_t pattern(uint16_t rpm, const Config& c, uint8_t prev) {
 
 bool over_limit(uint16_t rpm, const Config& c) { return rpm >= c.flash_rpm; }
 
+uint16_t lamp_rpm(float rpm, float rpm_per_s, const Config& c) {
+    if (rpm < 0.0f) rpm = 0.0f;
+    float lead = 0.0f;
+    const float climb = rpm_per_s - static_cast<float>(c.lead_floor_rpm_s);
+    if (c.lead_ms > 0 && rpm > 0.0f && climb > 0.0f) {
+        lead = climb * static_cast<float>(c.lead_ms) * 1e-3f;
+        if (lead > c.lead_cap_rpm) lead = c.lead_cap_rpm;
+    }
+    const float r = rpm + lead;
+    return r >= 65535.0f ? 65535 : static_cast<uint16_t>(r);
+}
+
 }  // namespace core::shift

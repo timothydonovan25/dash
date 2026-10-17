@@ -81,6 +81,7 @@ const ConfigItem kItems[] = {
     num(0x0304, "Flash above", "Shift", Kind::Int, 3000, 14000, 100, "rpm", FIELD(shift_flash_rpm)),
     num(0x0305, "Brightness",  "Shift", Kind::Int,    5,   100,   5, "%",   FIELD(shift_brightness_pct)),
     num(0x0306, "Revs/spark",  "Shift", Kind::Int,    1,     2,   1, "",    FIELD(tach_revs_per_pulse)),
+    num(0x0307, "Lead time",   "Shift", Kind::Int,    0,   300,  10, "ms",  FIELD(shift_lead_ms)),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),
@@ -331,7 +332,7 @@ size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n) {
 
 ShiftView shift_view(const Settings& s) {
     return ShiftView{s.shift_base_rpm, s.shift_span_rpm, s.shift_hyst_rpm,
-                     s.shift_flash_rpm};
+                     s.shift_flash_rpm, s.shift_lead_ms};
 }
 
 core::gear::Config gear_view(const Settings& s) {

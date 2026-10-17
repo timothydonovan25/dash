@@ -1,5 +1,6 @@
 #include "check.hpp"
 #include "core/shift/shift.hpp"
+#include "core/tach/tach.hpp"
 using namespace core::shift;
 
 int main() {
@@ -68,6 +69,64 @@ int main() {
             const uint8_t m = pattern(rpm, c, prev);
             CHECK((m & static_cast<uint8_t>(m + 1)) == 0);
         }
+    }
+
+    CASE("lead time off: the lamps see the rpm as it is");
+    {
+        Config d;                                  // lead_ms 0
+        CHECK(lamp_rpm(7000.0f, 8000.0f, d) == 7000);
+        CHECK(lamp_rpm(7000.0f, -8000.0f, d) == 7000);
+        CHECK(lamp_rpm(-5.0f, 0.0f, d) == 0);
+    }
+
+    CASE("lead time on: a climbing engine is shown where it is heading");
+    {
+        Config d;
+        d.lead_ms = 100;
+        // (5000 - the 1000 rpm/s noise floor) for 0.1 s
+        CHECK(lamp_rpm(7000.0f, 5000.0f, d) == 7400);
+        CHECK(lamp_rpm(7000.0f, 0.0f, d) == 7000);      // steady
+        CHECK(lamp_rpm(7000.0f, 900.0f, d) == 7000);    // jitter, under the floor
+        CHECK(lamp_rpm(7000.0f, 1100.0f, d) == 7010);   // no step at the floor
+        CHECK(lamp_rpm(7000.0f, -9000.0f, d) == 7000);  // falling: as it is
+        CHECK(lamp_rpm(0.0f, 5000.0f, d) == 0);         // not running
+        d.lead_ms = 300;
+        CHECK(lamp_rpm(7000.0f, 30000.0f, d) == 8000);  // capped at +1000
+        d.lead_floor_rpm_s = 0;
+        d.lead_ms = 100;
+        CHECK(lamp_rpm(7000.0f, 5000.0f, d) == 7500);   // floor off: the whole rate
+    }
+
+    CASE("a 150 ms lead flashes about 150 ms of climb early on a hard pull");
+    // ...less the noise floor.
+    {
+        // Through the real tach: edges from an engine pulling 6000 rpm/s,
+        // the Meter's rate, lamp_rpm, then the flash test ctrl makes.
+        auto flash_at = [](uint16_t lead_ms) {
+            core::tach::Meter m;
+            core::tach::Config tc;
+            Config sc;
+            sc.lead_ms = lead_ms;
+            double rev = 0.0, t_s = 0.0;
+            uint32_t total = 0;
+            uint64_t edge_us = 0;
+            for (int i = 0; i < 1000; ++i) {               // 1 s in 1 ms ticks
+                double rpm = 0.0;
+                for (int k = 0; k < 100; ++k) {
+                    rpm = 4000.0 + 6000.0 * t_s;
+                    rev += rpm / 60.0 * 10e-6;
+                    t_s += 10e-6;
+                    if (rev >= 1.0) { rev -= 1.0; ++total; edge_us = static_cast<uint64_t>(t_s * 1e6); }
+                }
+                m.update(total, edge_us, static_cast<uint64_t>(t_s * 1e6), tc);
+                if (over_limit(lamp_rpm(m.raw_rpm(), m.rpm_rate(), sc), sc)) return rpm;
+            }
+            return 0.0;
+        };
+        const double on_time = flash_at(0);
+        const double early = flash_at(150);
+        CHECK_NEAR(on_time, 8800.0, 150.0);        // the reading lags a revolution
+        CHECK_NEAR(on_time - early, 750.0, 200.0); // (6000 - 1000) rpm/s * 0.15 s
     }
 
     return check::report("shift");

@@ -58,6 +58,14 @@ struct Config {
     uint16_t repeat_delay_ms = 500;
     uint16_t repeat_ms       = 120;
     uint8_t  repeat_mask     = (1u << 2) | (1u << 3);   // C and D
+    // Buttons that act the moment they settle down, not when they come up.
+    // A button with a long-press meaning has to wait for the release to
+    // know which press it was; one without has nothing to wait for, and
+    // waiting cost the length of the press itself -- 80 to 150 ms with a
+    // gloved thumb -- on every cursor move. C and D have no long meaning
+    // anywhere (nav, and every screen's handle()); a button given one must
+    // come out of this mask.
+    uint8_t  on_press_mask   = (1u << 2) | (1u << 3);   // C and D
 };
 
 class Decoder {
@@ -79,7 +87,9 @@ private:
     struct Btn {
         bool     stable    = false;   // debounced state
         bool     raw       = false;   // last raw reading
-        bool     long_sent = false;
+        // The release reports nothing: a long press, a repeat, or an
+        // on-press button has already said what this press was.
+        bool     release_silent = false;
         uint32_t edge_ms   = 0;       // when raw last changed
         uint32_t down_ms   = 0;       // when stable went down
         uint32_t repeat_ms = 0;       // when the next repeat is due

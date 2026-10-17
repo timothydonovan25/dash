@@ -14,7 +14,7 @@ bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
 const uint16_t kShippedKeys[] = {
     0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106,
     0x0201, 0x0202, 0x0203, 0x0204,
-    0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306,
+    0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307,
     0x0401, 0x0402, 0x0403, 0x0404, 0x0405,
     0x0501, 0x0502, 0x0503,
     0x0601, 0x0602, 0x0603,
@@ -236,6 +236,9 @@ int main() {
         const ShiftView sv = shift_view(s);
         CHECK(sv.base_rpm == 7000);
         CHECK(sv.flash_rpm == s.shift_flash_rpm);
+        CHECK(sv.lead_ms == 0);                  // off until tried on the bike
+        s.shift_lead_ms = 120;
+        CHECK(shift_view(s).lead_ms == 120);
         const LapView lv = lap_view(s);
         CHECK(lv.min_lap_ms == 25000);
         CHECK_NEAR(lv.half_width_ft, s.lap_half_width_ft, 1e-6);

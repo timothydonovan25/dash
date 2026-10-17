@@ -144,6 +144,54 @@ int main() {
         CHECK(p.total_events() == 0);
     }
 
+    CASE("a cursor key acts on the press, while it is still down");
+    {
+        // C and D have no long meaning, so there is nothing to wait for: the
+        // press is reported the moment it settles, not when the thumb lifts.
+        Pod p;
+        p.poll(0, 200);
+        p.poll(kC, 20);                        // settled on its second read
+        CHECK(p.shorts[2] == 1);
+        p.poll(kC, 150);                       // a gloved tap, still held
+        CHECK(p.shorts[2] == 1);
+        p.poll(0, 200);
+        CHECK(p.shorts[2] == 1);               // the release adds nothing
+        CHECK(p.longs[2] == 0);
+    }
+
+    CASE("an on-press key still ignores bounce and spikes");
+    {
+        Pod p;
+        p.poll(0, 200);
+        p.poll(kC, 10);                        // one read only: a spike
+        p.poll(0, 300);
+        CHECK(p.total_events() == 0);
+        for (int i = 0; i < 5; ++i) { p.poll(kC, 10); p.poll(0, 10); }
+        p.poll(kC, 200);
+        for (int i = 0; i < 5; ++i) { p.poll(0, 10); p.poll(kC, 10); }
+        p.poll(0, 200);
+        CHECK(p.shorts[2] == 1);
+    }
+
+    CASE("a key with a long meaning still waits for the release");
+    {
+        Pod p;
+        p.poll(0, 200);
+        p.poll(kE, 150);
+        CHECK(p.shorts[4] == 0);               // could still become a long
+        p.poll(0, 100);
+        CHECK(p.shorts[4] == 1);
+
+        // And a cursor key taken out of the mask goes back to the release.
+        Pod q;
+        q.c.on_press_mask = 0;
+        q.poll(0, 200);
+        q.poll(kC, 150);
+        CHECK(q.shorts[2] == 0);
+        q.poll(0, 100);
+        CHECK(q.shorts[2] == 1);
+    }
+
     CASE("held() and held_ms() track the settled state");
     {
         Pod p;
