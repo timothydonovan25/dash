@@ -279,7 +279,7 @@ void PowerScreen::update(const Frame& f) {
                    core::battery::verdict_name(
                        static_cast<core::battery::Verdict>(f.battery.verdict)));
     volts(v, sizeof v, f.battery.rest_v);
-    table_.set_row(3, "At rest", v);
+    table_.set_row(3, "At key-on", v);   // once per key-on, after the prime
     volts(v, sizeof v, f.battery.crank_min_v);
     table_.set_row(4, "Cranking low", v);
     volts(v, sizeof v, f.battery.charge_v);

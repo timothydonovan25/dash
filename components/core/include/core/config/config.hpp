@@ -89,6 +89,12 @@ struct Settings {
     // known yet.
     uint16_t shift_lead_ms = 0;
 
+    // What VIN reads under the battery: the input diode's drop, 0.3-0.4 V at
+    // the dash's current, and whatever the ADC is off by. Added to VIN for
+    // every battery number (core::power::battery_v). Set it by reading the
+    // battery with a meter, key on, and matching DIAG -> POWER to it.
+    float battery_trim_v = 0.35f;
+
     // Lap timer — mirrors core::lap::Config
     float    lap_half_width_ft = 50.0f;
     float    lap_min_speed_mph = 10.0f;

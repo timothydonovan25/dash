@@ -65,13 +65,16 @@ void power_task(void* arg) {
     bool save_now = false;
     int64_t trip_us = 0, dark_us = 0;
 
-    // Battery health (core::battery) at 100 Hz on the lowest VIN of each
-    // 10 ms: a starter's dip is a few hundred ms deep and narrow, and this
-    // is the one task that samples VIN fast enough to see it.
+    // Battery health (core::battery) at 100 Hz on the mean and the lowest
+    // VIN of each 10 ms: a starter's dip is a few hundred ms deep and narrow,
+    // and this is the one task that samples VIN fast enough to see it; the
+    // rest and charging levels are read from the mean, which the ripple does
+    // not pull down. Both in battery volts, the trim added.
     core::battery::Monitor battery;
     const core::battery::Config battery_cfg;
     core::state::Battery published;
     float low_v = 0.0f;
+    float sum_v = 0.0f;
     uint32_t samples = 0;
     uint32_t last_pub_ms = 0;
 
@@ -84,9 +87,13 @@ void power_task(void* arg) {
         const float vin = core::power::vin_from_pin_mv(pin_mv, div);
 
         if (samples == 0 || vin < low_v) low_v = vin;
+        sum_v = samples == 0 ? vin : sum_v + vin;
         if (++samples >= 10) {
             const uint32_t now = d.clock->now_ms();
-            battery.update(low_v, d.slots->engine.get().rpm, now, battery_cfg);
+            const float trim = d.settings ? d.settings->battery_trim_v : 0.0f;
+            battery.update(core::power::battery_v(sum_v / static_cast<float>(samples), trim),
+                           core::power::battery_v(low_v, trim),
+                           d.slots->engine.get().rpm, now, battery_cfg);
             samples = 0;
             // On change, and once a second regardless so DIAG's averages
             // move: this is the slot's only writer.

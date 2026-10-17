@@ -320,8 +320,12 @@ the media half of step 9 is written. 40 host test suites, all passing.
   (bringup §8.1)
 - `battery/` rest voltage, the crank dip and charging voltage, and a verdict
   (good / weak / not charging / overcharging). `power` feeds it at 100 Hz
-  with the lowest VIN of each 10 ms, because a starter's dip is too short
-  for keeper's 1 Hz, and owns the `battery` slot. DIAG → POWER shows it
+  with the mean and the lowest VIN of each 10 ms (the crank dip from the
+  lowest, rest and charge from the mean), both as battery volts: VIN plus
+  CONFIG → Battery → Trim (`core::power::battery_v`, default +0.35 V, the
+  input diode's drop), which keeper's `elec.vbat` carries too. Rest is read
+  once per key-on, after the fuel pump's prime, never after a ride (surface
+  charge reads full). It owns the `battery` slot; DIAG → POWER shows it
 - `slip/` wheelspin and lockup: each wheel against road speed (fused, GPS
   behind it), held 0.7 s at its peak. `ui::App` runs it on every Frame and
   draws a bar across the top of every screen (CONFIG → Display → Slip bar);

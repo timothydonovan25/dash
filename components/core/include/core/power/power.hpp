@@ -23,6 +23,14 @@ struct Divider {
 // VIN in volts from the voltage at the ADC pin.
 float vin_from_pin_mv(uint32_t pin_mv, const Divider& d);
 
+// The battery's voltage from VIN: the sense divider is after the input
+// diode (SS34, D6), which drops 0.3-0.4 V at the dash's current, so VIN reads
+// that much under the battery. `trim_v` is CONFIG -> Battery -> Trim: the
+// diode by default, and set against a meter it takes the ADC's own error out
+// too. 0 (no reading) stays 0. Not for the power-fail detector, which
+// watches the board's rail, the side of the diode VIN is on.
+float battery_v(float vin_v, float trim_v);
+
 enum class Source : uint8_t {
     Unknown = 0,   // no reading, or a reading too low to be either supply
     Usb,           // about 4.5 V: USB through the Schottky

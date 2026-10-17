@@ -8,6 +8,14 @@ using namespace core::power;
 int main() {
     const Divider div;   // 100k over 22.1k, R17 and R18
 
+    CASE("battery volts are VIN plus the trim, and no reading stays none");
+    {
+        CHECK_NEAR(core::power::battery_v(12.25f, 0.35f), 12.6, 0.001);
+        CHECK_NEAR(core::power::battery_v(12.25f, -0.2f), 12.05, 0.001);
+        CHECK(core::power::battery_v(0.0f, 0.35f) == 0.0f);      // no reading
+        CHECK(core::power::battery_v(0.1f, -1.0f) == 0.0f);      // never negative
+    }
+
     CASE("the divider scales the pin back up to VIN");
     {
         // 14.4 V across 100k/22.1k is 2.606 V at the pin.

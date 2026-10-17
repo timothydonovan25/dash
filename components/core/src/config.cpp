@@ -140,6 +140,10 @@ const ConfigItem kItems[] = {
     // the password and has the same switch.
     action(0x0D01, "Wi-Fi on/off", "Wi-Fi", state::CommandId::WifiToggle),
 
+    // Battery: VIN reads the diode's drop under the battery; this adds it
+    // back. Set against a meter on the battery, key on.
+    num(0x0E01, "Trim", "Battery", Kind::Float, -1.0f, 1.5f, 0.05f, "V", FIELD(battery_trim_v)),
+
     // Blackbox. 50 Hz is about 27 MB an hour and gives the ring ten seconds
     // of slack against an SD stall; 5 Hz is a hundred. Lap markers are
     // written whatever this says.

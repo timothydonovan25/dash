@@ -131,7 +131,10 @@ void keeper_task(void* arg) {
             core::power::Divider div;
             div.top_kohm = bsp::kVinTopKohm;
             div.bottom_kohm = bsp::kVinBottomKohm;
-            e.vbat = core::power::vin_from_pin_mv(pin_mv, div);
+            // Battery volts: VIN plus the input diode's drop (the trim), so
+            // DIAG, the alerts and the bike/USB test all read the battery.
+            e.vbat = core::power::battery_v(core::power::vin_from_pin_mv(pin_mv, div),
+                                            d.settings->battery_trim_v);
         }
         d.slots->elec.publish(e);
 
