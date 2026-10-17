@@ -274,7 +274,11 @@ the media half of step 9 is written. 40 host test suites, all passing.
 - `nmea/` the sentence parser, so the GPS driver is only bytes
 - `input/` debounce and short/long/repeat; C and D act on the press
   (`on_press_mask`), as they have no long meaning — a button given one must leave the mask · `tach/` pulses to rpm and mph
-- `log/` the blackbox ring, its CSV format, and the rate decimator
+- `log/` the blackbox ring, its CSV format, the rate decimator, and
+  `FlushPolicy`: the block goes to the card when its oldest row is 2 s old,
+  fsync 5 s after the first uncommitted write or when the bike stops (was
+  every empty-ring pass, ~4.5 a second at 10 Hz). A cut loses up to ~7 s
+  of rows
 - `media/` the §11.1 Feed line parser: bounded, UTF-8-safe, `P` as an anchor
 - `ota/` stable/dev slot roles from the bootloader's rollback state, the
   image header check, parked-only gating

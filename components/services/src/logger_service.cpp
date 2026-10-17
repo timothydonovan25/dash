@@ -44,6 +44,10 @@ void logger_task(void* arg) {
     bool     dated = false;
     bool     header_written = false;
     uint32_t written_records = 0;
+    // When the block goes to the card and when the file is committed: not
+    // every time the ring runs dry, which at 10 Hz was between every row.
+    core::log::FlushPolicy flush;
+    const core::log::FlushConfig flush_cfg;
 
     for (;;) {
         // The supply has been cut and the board is on its capacitors. A
@@ -62,6 +66,7 @@ void logger_task(void* arg) {
             // log is a nuisance, a stalled `logic` task is not.
             if (d.blackbox) d.blackbox->clear();
             used = 0;
+            flush = core::log::FlushPolicy{};
             header_written = false;
             path[0] = '\0';           // a card put back starts a new file
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -114,7 +119,10 @@ void logger_task(void* arg) {
                             std::snprintf(path, sizeof path, "%s", dated_path);
                         }
                     } else {
-                        if (used > 0 && hal::ok(card->append(path, block, used))) used = 0;
+                        if (used > 0 && hal::ok(card->append(path, block, used))) {
+                            used = 0;
+                            flush.written(d.clock->now_ms());
+                        }
                         if (used == 0 && hal::ok(card->rename(path, dated_path))) {
                             std::snprintf(path, sizeof path, "%s", dated_path);
                         }
@@ -130,7 +138,10 @@ void logger_task(void* arg) {
         if (!header_written) {
             char head[256];
             const size_t n = core::log::csv_header(head, sizeof head);
-            if (hal::ok(card->append(path, head, n))) header_written = true;
+            if (hal::ok(card->append(path, head, n))) {
+                header_written = true;
+                flush.written(d.clock->now_ms());
+            }
         }
 
         const size_t n = d.blackbox->pop_batch(batch, kBatch);
@@ -160,6 +171,7 @@ void logger_task(void* arg) {
                     s = card->append(path, block, used);
                 }
                 used = 0;
+                flush.written(d.clock->now_ms());
                 if (hal::ok(s)) {
                     d.health->report_ok(core::state::Dev::Sd, d.clock->now_ms());
                 } else {
@@ -169,6 +181,7 @@ void logger_task(void* arg) {
                 }
             }
             for (size_t k = 0; k < len; ++k) block[used++] = line[k];
+            flush.buffered(d.clock->now_ms());
             ++written_records;
         }
 
@@ -177,18 +190,35 @@ void logger_task(void* arg) {
             d.system->log_dropped = d.blackbox->dropped();
         }
 
-        if (n == 0) {
-            // Idle: push out whatever is buffered so a log never lags the
-            // ride by more than a moment, then sleep.
-            if (used > 0) {
-                // Kept for the next pass if the card was only busy.
-                if (card->append(path, block, used) != hal::Status::Busy) used = 0;
+        // The block goes out when its oldest row is 2 s old, and the file is
+        // committed 5 s after the first uncommitted write or when the bike
+        // stops (core::log::FlushPolicy). This used to append and fsync
+        // whenever the ring was empty -- at 10 Hz, between almost every row,
+        // about 4.5 card writes a second each spinning through the card's
+        // busy time on this core with SPI2 held from the IMU.
+        const uint32_t now = d.clock->now_ms();
+        const core::log::Flush f = flush.decide(now, still_for_flash(d), flush_cfg);
+        if (f != core::log::Flush::None && used > 0) {
+            // Kept for the next pass if the card was only busy.
+            if (card->append(path, block, used) != hal::Status::Busy) {
+                used = 0;
+                flush.written(now);
             }
-            card->sync();
-            vTaskDelay(pdMS_TO_TICKS(200));
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(20));
         }
+        if (f == core::log::Flush::WriteAndSync && used == 0) {
+            // Busy is another task holding the card lock past its 3 s wait,
+            // and the next pass tries again. Anything else, failed or not,
+            // waits for the next interval: a card that will not sync is not
+            // retried every pass (rule 5).
+            const hal::Status s = card->sync();
+            if (s != hal::Status::Busy) {
+                flush.synced();
+                if (!hal::ok(s)) {
+                    d.health->report_error(core::state::Dev::Sd, static_cast<int32_t>(s), now);
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(n == 0 ? 200 : 20));
     }
 }
 

@@ -264,4 +264,36 @@ int session_of(const char* name) {
     return v;
 }
 
+void FlushPolicy::buffered(uint32_t now_ms) {
+    if (!has_rows_) {
+        has_rows_ = true;
+        oldest_ms_ = now_ms;
+    }
+}
+
+void FlushPolicy::written(uint32_t now_ms) {
+    has_rows_ = false;
+    if (!unsynced_) {
+        unsynced_ = true;
+        unsynced_since_ms_ = now_ms;
+    }
+}
+
+void FlushPolicy::synced() {
+    unsynced_ = false;
+}
+
+Flush FlushPolicy::decide(uint32_t now_ms, bool stopped, const FlushConfig& c) {
+    const bool stop_edge = stopped && !was_stopped_;
+    was_stopped_ = stopped;
+    const bool pending = has_rows_ || unsynced_;
+    if (stop_edge && pending) return Flush::WriteAndSync;
+    // Unsigned differences, so a wrapped millisecond counter still counts.
+    if (unsynced_ && now_ms - unsynced_since_ms_ >= c.sync_every_ms) {
+        return Flush::WriteAndSync;
+    }
+    if (has_rows_ && now_ms - oldest_ms_ >= c.max_age_ms) return Flush::Write;
+    return Flush::None;
+}
+
 }  // namespace core::log

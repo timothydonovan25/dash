@@ -344,5 +344,93 @@ int main() {
         CHECK(small[sizeof small - 1] == '\0');
     }
 
+    CASE("flush: a minute of riding is a write every 2 s and a sync every 7 s");
+    {
+        // The logger's loop as it runs: a pass every 20 ms, a row every
+        // 100 ms (10 Hz, the default). Before this policy each empty-ring pass
+        // wrote and synced: about 4.5 of each a second.
+        FlushPolicy p;
+        const FlushConfig c;
+        int writes = 0, syncs = 0;
+        uint32_t oldest_uncommitted = 0;    // row time of the oldest row not yet synced
+        bool any_uncommitted = false;
+        uint32_t worst_wait = 0;
+        p.decide(0, false, c);              // riding from the start
+        for (uint32_t t = 20; t <= 60000; t += 20) {
+            if (t % 100 == 0) {
+                p.buffered(t);
+                if (!any_uncommitted) { any_uncommitted = true; oldest_uncommitted = t; }
+            }
+            const Flush f = p.decide(t, false, c);
+            if (f != Flush::None) { p.written(t); ++writes; }
+            if (f == Flush::WriteAndSync) {
+                p.synced();
+                ++syncs;
+                if (any_uncommitted && t - oldest_uncommitted > worst_wait) {
+                    worst_wait = t - oldest_uncommitted;
+                }
+                any_uncommitted = false;
+            }
+        }
+        // A write every 2 s of rows, and every ~7 s (the sync clock starts at
+        // the first write, 2 s after the first row) one more that also syncs:
+        // about 33 writes and 8 syncs a minute, against ~270 of each before.
+        CHECK(writes >= 30 && writes <= 35);
+        CHECK(syncs >= 8 && syncs <= 9);
+        CHECK(worst_wait <= c.max_age_ms + c.sync_every_ms + 100);
+    }
+
+    CASE("flush: stopping commits the ride at once");
+    {
+        FlushPolicy p;
+        const FlushConfig c;
+        CHECK(p.decide(0, false, c) == Flush::None);
+        p.buffered(100);
+        CHECK(p.decide(500, false, c) == Flush::None);     // half a second old
+        CHECK(p.decide(520, true, c) == Flush::WriteAndSync);
+        p.written(520);
+        p.synced();
+        // Still stopped, still logging: back to the timers, no sync per pass.
+        p.buffered(600);
+        CHECK(p.decide(700, true, c) == Flush::None);
+        CHECK(p.decide(2600, true, c) == Flush::Write);
+    }
+
+    CASE("flush: nothing pending, nothing to do");
+    {
+        FlushPolicy p;
+        const FlushConfig c;
+        // Boots parked: no edge, nothing written.
+        CHECK(p.decide(0, true, c) == Flush::None);
+        CHECK(p.decide(10000, false, c) == Flush::None);
+        // A stop with nothing buffered or uncommitted is not a sync.
+        CHECK(p.decide(20000, true, c) == Flush::None);
+        CHECK(!p.has_rows() && !p.unsynced());
+    }
+
+    CASE("flush: a block written when full starts the sync clock");
+    {
+        // The logger writes a full 8 kB block itself, outside decide(). The
+        // sync is still owed sync_every_ms after it.
+        FlushPolicy p;
+        const FlushConfig c;
+        p.decide(0, false, c);
+        p.buffered(1000);
+        p.written(1500);                           // block filled
+        CHECK(p.decide(6000, false, c) == Flush::None);
+        CHECK(p.decide(6500, false, c) == Flush::WriteAndSync);
+    }
+
+    CASE("flush: the millisecond counter wrapping does not stall or fire early");
+    {
+        FlushPolicy p;
+        const FlushConfig c;
+        const uint32_t t0 = 0xFFFFFF00u;
+        p.decide(t0, false, c);
+        p.buffered(t0);
+        CHECK(p.decide(t0 + 1000, false, c) == Flush::None);
+        CHECK(p.decide(t0 + 2000, false, c) == Flush::Write);
+    }
+
     return check::report("log");
 }

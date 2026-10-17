@@ -115,6 +115,56 @@ private:
     bool     primed_  = false;
 };
 
+// When `logger` sends its RAM block to the card and when it commits it.
+//
+// An fsync on an SD card rewrites the file's data sector and its directory
+// entry, and the SD-over-SPI driver spins through the card's busy time, on
+// core 1 and holding SPI2 from the IMU. The logger used to do one whenever
+// the ring was empty, which at 10 rows a second is between almost every row:
+// about 4.5 small writes and syncs a second where one 8 kB block every few
+// seconds was meant. This decides instead:
+//
+//  - Write: the block's oldest row is `max_age_ms` old. (A full block is
+//    written by the logger anyway, as it fills.)
+//  - WriteAndSync: something written has gone `sync_every_ms` uncommitted;
+//    or the bike has just stopped, since key-off nearly always follows a
+//    stop and the rows of the ride are then committed before it.
+//
+// The cost is what a sudden cut loses: rows not yet committed, up to about
+// max_age_ms + sync_every_ms while moving. FAT stays consistent -- an
+// unsynced file keeps its last committed length. `power` stops all writes at
+// VIN cut, so nothing here could be saved at the cut itself.
+struct FlushConfig {
+    uint32_t max_age_ms    = 2000;
+    uint32_t sync_every_ms = 5000;
+};
+
+enum class Flush : uint8_t { None, Write, WriteAndSync };
+
+class FlushPolicy {
+public:
+    // A row went into the RAM block.
+    void buffered(uint32_t now_ms);
+    // The block went to the card (whole, or what there was of it).
+    void written(uint32_t now_ms);
+    // The file was committed.
+    void synced();
+
+    // What to do now. `stopped` is core::flash::still; its rising edge is a
+    // sync. Call once per logger pass.
+    Flush decide(uint32_t now_ms, bool stopped, const FlushConfig& c);
+
+    bool has_rows() const { return has_rows_; }
+    bool unsynced() const { return unsynced_; }
+
+private:
+    bool     has_rows_ = false;
+    uint32_t oldest_ms_ = 0;
+    bool     unsynced_ = false;
+    uint32_t unsynced_since_ms_ = 0;
+    bool     was_stopped_ = true;   // a dash that boots parked has nothing to commit
+};
+
 // Single producer, single consumer, lock-free. The producer is `logic`; the
 // consumer is `logger` on the other core.
 template <typename T, size_t N>
