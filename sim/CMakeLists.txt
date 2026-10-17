@@ -19,6 +19,7 @@ set(SVC  ${ROOT}/components/services)
 add_library(core STATIC
     ${CORE}/src/nav.cpp      ${CORE}/src/shift.cpp   ${CORE}/src/geo.cpp
     ${CORE}/src/lap.cpp      ${CORE}/src/state.cpp   ${CORE}/src/units.cpp
+    ${CORE}/src/sectors.cpp
     ${CORE}/src/trip.cpp     ${CORE}/src/config.cpp  ${CORE}/src/health.cpp
     ${CORE}/src/attitude.cpp ${CORE}/src/jump.cpp    ${CORE}/src/nmea.cpp
     ${CORE}/src/input.cpp    ${CORE}/src/tach.cpp    ${CORE}/src/log.cpp

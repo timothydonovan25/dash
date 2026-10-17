@@ -262,7 +262,7 @@ void render_task(void* arg) {
         // every frame rather than once at startup.
         if (d.lap_history) {
             app.set_lap_history(d.lap_history->ms, d.lap_history->count,
-                                d.lap_history->best_ms);
+                                d.lap_history->best_ms, d.lap_history->peak);
         }
 
         // One coherent read of every slot, once per frame.

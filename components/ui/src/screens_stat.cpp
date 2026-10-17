@@ -188,6 +188,7 @@ void AttitudeScreen::enter(Canvas&) {
 void AttitudeScreen::update(const Frame& f) {
     const bool imu = f.health.ok(Dev::Imu);
     lean_.set(f.att.lean_deg, imu);
+    lean_.set_peaks(f.lap.max_lean_left_deg, f.lap.max_lean_right_deg);
     pitch_.set(f.att.pitch_deg, imu);
     yaw_.set(f.att.yaw_rate_dps, imu);
     g_lat_.set(f.att.g_lat, imu);
@@ -203,12 +204,13 @@ bool AttitudeScreen::handle(const core::nav::InputEvent& e) {
     if (e.button == Button::E && e.press == Press::Long) {
         // Park upright, hold E. Without this every lean reading carries the
         // fixed bias of however the board ended up bolted in (§8).
-        lean_.reset_peaks();
+        // Peaks taken against the old mount offset are not records.
+        post(core::state::Command(core::state::CommandId::LeanPeaksReset));
         return post(core::state::Command(core::state::CommandId::ImuCalibrate));
     }
     if (e.button == Button::E) {
-        lean_.reset_peaks();
-        return true;
+        // The peaks live in `logic` (Lap::max_lean_*), so it resets them.
+        return post(core::state::Command(core::state::CommandId::LeanPeaksReset));
     }
     return false;
 }

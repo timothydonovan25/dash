@@ -145,7 +145,7 @@ void render_task_impl(void* arg) {
 
         if (d.lap_history) {
             app.set_lap_history(d.lap_history->ms, d.lap_history->count,
-                                d.lap_history->best_ms);
+                                d.lap_history->best_ms, d.lap_history->peak);
         }
 
         // CONFIG -> Display -> Brightness takes effect as it is changed,

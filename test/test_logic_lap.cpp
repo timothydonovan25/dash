@@ -12,6 +12,21 @@ public:
     bool take(core::state::Command&) override { return false; }
 };
 
+// Hands over one command, once.
+class OneCommand final : public services::ICommandSource {
+public:
+    explicit OneCommand(core::state::CommandId id) { cmd_.id = id; }
+    bool take(core::state::Command& out) override {
+        if (given_) return false;
+        given_ = true;
+        out = cmd_;
+        return true;
+    }
+private:
+    core::state::Command cmd_;
+    bool given_ = false;
+};
+
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kLat0 = 40.0;
 constexpr double kLon0 = -105.0;
@@ -159,6 +174,88 @@ int main() {
         CHECK(laps_seen >= 4);
         CHECK(first <= 20.0);
         CHECK(worst <= 2.0);
+    }
+
+    CASE("splits, the ideal lap, each lap's peaks and the session's lean reach the slots");
+    {
+        // Six laps of the circle, leaning into it (left, anticlockwise) and
+        // revving harder each lap. Fixes carry GPS time and course, as the
+        // receiver's do.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        services::LapHistory   history;
+        NoCommands             none;
+        deps.slots = &slots;
+        deps.settings = &settings;
+        deps.lap_history = &history;
+        core::state::Health h;
+        h[core::state::Dev::Imu].state = core::state::DevState::Ok;
+        slots.health.publish(h);
+
+        const Track track;
+        state.lap.set_line(at_ft(0.0, -track.r_ft), 90.0);
+        constexpr uint32_t kBoot = 5000;
+        uint32_t next_fix = 0;
+        bool saw_split = false, saw_flash = false;
+        for (uint32_t t = 0; t < 6 * 35000 + 3000; t += 20) {
+            const uint32_t now = kBoot + t + 3;
+            const int lap = static_cast<int>(t / 34772);
+            while (kBoot + next_fix + 40 <= now) {
+                const core::geo::LatLon p = track.pos(next_fix);
+                core::state::Gnss g;
+                g.fix = true;
+                g.lat = p.lat;
+                g.lon = p.lon;
+                g.speed_mph = static_cast<float>(track.mph);
+                const double a = -kPi / 2 + 2.0 * kPi * next_fix / track.period_ms() - 0.05;
+                double course = std::fmod(-a * 180.0 / kPi, 360.0);
+                if (course < 0) course += 360.0;
+                g.course_deg = static_cast<float>(course);
+                g.utc_ms = 36000000u + next_fix;
+                g.rx_ms = kBoot + next_fix + 40;
+                slots.gnss.publish(g);
+                next_fix += 100;
+            }
+            core::state::Motion m;
+            m.best_mph = static_cast<float>(track.mph);
+            slots.motion.publish(m);
+            core::state::Engine e;
+            e.rpm = 9000.0f + 300.0f * lap;
+            slots.engine.publish(e);
+            core::state::Attitude att;
+            att.lean_deg = -(30.0f + lap);
+            slots.attitude.publish(att);
+            services::logic_tick(deps, state, none, now);
+            const core::state::Lap l = slots.lap.get();
+            if (l.split_ms != 0) saw_split = true;
+            if (l.last_was_best && l.last_done_ms != 0) saw_flash = true;
+        }
+        const core::state::Lap l = slots.lap.get();
+        CHECK(l.count >= 5);
+        CHECK(saw_split);
+        CHECK(saw_flash);
+        CHECK(l.sector >= 0);
+        // A steady circle: every lap the same, so the ideal is the lap.
+        CHECK(l.ideal_ms > 0);
+        CHECK(std::fabs(static_cast<double>(l.ideal_ms) - track.period_ms()) <= 5.0);
+        CHECK(l.max_lean_left_deg >= 34.0f);
+        CHECK(l.max_lean_right_deg == 0.0f);
+        // Each lap's own peaks: the rpm and lean climb a step a lap.
+        CHECK(history.count == l.count);
+        if (history.count >= 3) {
+            CHECK(history.peak[2].rpm > history.peak[1].rpm);
+            CHECK(history.peak[2].lean_deg > history.peak[1].lean_deg);
+            CHECK(std::fabs(history.peak[2].mph - track.mph) < 0.5);
+        }
+
+        // IMU's short E: the session's lean peaks back to zero.
+        OneCommand reset(core::state::CommandId::LeanPeaksReset);
+        core::state::Attitude upright;
+        slots.attitude.publish(upright);
+        services::logic_tick(deps, state, reset, kBoot + 6 * 35000 + 4000);
+        CHECK(slots.lap.get().max_lean_left_deg == 0.0f);
     }
 
     CASE("a receiver that goes silent is told to the timer as no fix");

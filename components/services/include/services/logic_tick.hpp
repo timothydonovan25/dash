@@ -14,6 +14,7 @@
 #include "core/delta/delta.hpp"
 #include "core/geo/geo.hpp"
 #include "core/lap/lap.hpp"
+#include "core/lap/sectors.hpp"
 #include "core/fixtime/fixtime.hpp"
 #include "core/trip/trip.hpp"
 #include "core/waypoint/waypoint.hpp"
@@ -53,6 +54,18 @@ struct LogicState {
     // (core::fixtime) rather than from when it arrived; and the last one.
     core::fixtime::Clock fix_clock;
     uint32_t last_fix_ms = 0;
+
+    // Splits and the ideal lap, fed the same fixes as `lap`; the last split
+    // crossed, kept for the Lap slot until the next one.
+    core::lap::Sectors sectors;
+    core::lap::Split   last_split;
+    // Peaks: this lap's, into LapHistory when it ends, and the session's
+    // lean each way, until IMU's short E resets them.
+    core::lap::Peaks   lap_peaks;
+    core::lap::Peaks   session_peaks;
+    // The last lap's end, and whether it was a new best: LAP flashes it.
+    uint32_t last_done_ms = 0;
+    bool     last_was_best = false;
 
     // The named waypoints (core::waypoint), and whether START has been
     // looked at yet this power-on.

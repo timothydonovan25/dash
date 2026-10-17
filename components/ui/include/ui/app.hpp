@@ -116,7 +116,10 @@ public:
     // it and hands it to the screen each time that screen is built.
     void set_trip_source(const IPointSource* s);
     void set_track_source(const IPointSource* s);
-    void set_lap_history(const uint32_t* laps, size_t n, uint32_t best);
+    // `peaks`, when given, runs parallel to `laps`: each lap's top speed,
+    // rpm and lean, for LAPS.
+    void set_lap_history(const uint32_t* laps, size_t n, uint32_t best,
+                         const core::state::LapPeak* peaks = nullptr);
     void bind_settings(core::config::Settings* s);
 
     // Screen count per mode, for tests and for the diag dump.
@@ -146,6 +149,7 @@ private:
     const uint32_t*         laps_ = nullptr;
     size_t                  lap_count_ = 0;
     uint32_t                best_lap_ = 0;
+    const core::state::LapPeak* lap_peaks_ = nullptr;
     core::config::Settings* settings_ = nullptr;
     // CONFIG's submenu and cursor, kept while the gear calibration page has
     // its place, and given back when CONFIG is built again.

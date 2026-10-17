@@ -118,6 +118,31 @@ struct Lap {
     // a representation.
     bool       delta_valid     = false;
     float      dist_to_line_ft = 0.0f;
+
+    // Splits (core::lap::Sectors), once the first clean lap has placed them.
+    int8_t     sector            = -1;    // being ridden, 0..2; -1 none
+    uint8_t    split_sector      = 0;     // the last split: which sector it ended
+    uint32_t   split_ms          = 0;     // and its time; 0 before the first
+    int32_t    split_delta_ms    = 0;     // against that sector's best
+    bool       split_delta_valid = false;
+    uint32_t   split_at_ms       = 0;     // when it was crossed, system clock
+    uint32_t   ideal_ms          = 0;     // the three best sectors; 0 until all
+    // The last lap: when it finished (system clock), and whether it was a
+    // new session best, for LAP's flash.
+    uint32_t   last_done_ms      = 0;
+    bool       last_was_best     = false;
+    // The session's deepest lean each way, above core::lap::Peaks::kMinMph.
+    // Kept here, not in a widget: a screen is rebuilt every time it is
+    // entered (1.17), and peaks kept in one were lost on leaving it.
+    float      max_lean_left_deg  = 0.0f;
+    float      max_lean_right_deg = 0.0f;
+};
+
+// One lap's peaks, for LAPS (core::lap::Peaks, as kept per lap by logic).
+struct LapPeak {
+    float mph = 0.0f;
+    float rpm = 0.0f;
+    float lean_deg = 0.0f;    // deeper of the two sides
 };
 
 Lap to_published(const lap::State& s, int32_t delta_ms = 0,

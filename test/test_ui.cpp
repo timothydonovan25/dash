@@ -1750,6 +1750,89 @@ int main() {
         CHECK(sent < whole_px);
     }
 
+    CASE("LAP flashes a new best for five seconds, and shows a split for five");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Track, 0);
+        CHECK(fx.app.current_id() == ScreenId::Lap);
+        Frame f = busy_frame();
+        f.lap.phase = core::lap::Phase::Timing;
+        f.lap.count = 3;
+        f.lap.last_ms = 90100;
+        f.lap.best_ms = 90100;
+        f.lap.last_was_best = true;
+        f.lap.last_done_ms = 50000;
+        f.lap.split_ms = 29880;
+        f.lap.split_sector = 0;
+        f.lap.split_delta_ms = -180;
+        f.lap.split_delta_valid = true;
+        f.lap.split_at_ms = 50000;
+        f.lap.sector = 1;
+        auto frame_at = [&](uint32_t t) {
+            f.t_ms = t;
+            render_task_frame(fx.app, s, f);
+            return s.px;
+        };
+        const auto lit = frame_at(50100);       // first quarter-second: lit
+        const auto dark = frame_at(50350);      // second: dark
+        const auto lit2 = frame_at(50600);
+        size_t blink = 0, same = 0;
+        for (size_t i = 0; i < lit.size(); ++i) {
+            if (lit[i] != dark[i]) ++blink;
+            if (lit[i] != lit2[i]) ++same;
+        }
+        CHECK(blink > 100);                     // LAST went dark
+        CHECK(same == 0);                       // and came back the same
+        const auto during = frame_at(54000);
+        const auto after = frame_at(56000);     // both over
+        size_t settled = 0;
+        for (size_t i = 0; i < during.size(); ++i) if (during[i] != after[i]) ++settled;
+        CHECK(settled > 100);                   // the split went back to the sector
+        const auto later = frame_at(58000);
+        size_t still = 0;
+        for (size_t i = 0; i < after.size(); ++i) if (after[i] != later[i]) ++still;
+        CHECK(still == 0);                      // nothing flashing any more
+    }
+
+    CASE("IMU's lean peaks come from the Frame and survive leaving the screen");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Stat, 2);
+        CHECK(fx.app.current_id() == ScreenId::Attitude);
+        Frame f = busy_frame();
+        f.lap.max_lean_left_deg = 0.0f;
+        f.lap.max_lean_right_deg = 0.0f;
+        render_task_frame(fx.app, s, f);
+        const auto none = s.px;
+        f.lap.max_lean_left_deg = 44.0f;
+        f.lap.max_lean_right_deg = 41.0f;
+        render_task_frame(fx.app, s, f);
+        const auto peaks = s.px;
+        size_t diff = 0;
+        for (size_t i = 0; i < none.size(); ++i) if (none[i] != peaks[i]) ++diff;
+        CHECK(diff > 20);
+        // Away and back: the screen is rebuilt, the peaks are not lost.
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        go_to(fx.app, s.canvas, Mode::Stat, 2);
+        render_task_frame(fx.app, s, f);
+        size_t back = 0;
+        for (size_t i = 0; i < peaks.size(); ++i) if (peaks[i] != s.px[i]) ++back;
+        CHECK(back == 0);
+        // Short E asks logic to reset them, rather than forgetting locally.
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        bool asked = false;
+        for (const auto& c : fx.sink.posted) {
+            asked |= c.id == core::state::CommandId::LeanPeaksReset;
+        }
+        CHECK(asked);
+    }
+
     CASE("key-on splash and sweep: the panel matches a full repaint, frame by frame");
     {
         // Every ride case turns the sweep off, so this is the only one that

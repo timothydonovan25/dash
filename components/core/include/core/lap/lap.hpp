@@ -82,6 +82,10 @@ struct Update {
     // laps glued together by a crossing nobody saw, so it is not allowed to
     // become the session best.
     bool     valid  = true;
+    // The instant of the crossing, for Started and Completed: when the lap
+    // began, interpolated inside the fix pair. Sectors start from it.
+    uint32_t at_ms   = 0;
+    float    at_frac = 0.0f;
 };
 
 class Timer {

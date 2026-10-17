@@ -46,6 +46,7 @@ namespace services {
 struct LapHistory {
     static constexpr size_t kMax = 64;
     uint32_t ms[kMax] = {};
+    core::state::LapPeak peak[kMax] = {};
     size_t   count = 0;
     uint32_t best_ms = 0;
 };

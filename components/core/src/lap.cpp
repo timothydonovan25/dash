@@ -81,6 +81,8 @@ Update Timer::update(const Fix& f, const Config& c) {
             at.ms   = prev_t_ms_ + static_cast<uint32_t>(whole);
             at.frac = static_cast<float>(offset_ms - whole);
 
+            out.at_ms = at.ms;
+            out.at_frac = at.frac;
             if (pub_.phase == Phase::Armed) {
                 begin_lap(at);
                 out.event = Event::Started;

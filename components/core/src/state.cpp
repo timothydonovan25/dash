@@ -79,6 +79,7 @@ const char* command_name(CommandId id) {
         case CommandId::GearCalSkip:       return "gearcal.skip";
         case CommandId::GearCalCancel:     return "gearcal.cancel";
         case CommandId::GearCalReset:      return "gearcal.reset";
+        case CommandId::LeanPeaksReset:    return "lean.peaks_reset";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
         case CommandId::MediaCtrl:         return "media.ctrl";

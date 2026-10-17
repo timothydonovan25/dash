@@ -185,11 +185,14 @@ private:
     Label     current_;
     Label     last_;
     Label     best_;
+    Label     ideal_;
     DeltaBar  delta_;
     ValueBox  lap_count_;
     ValueBox  speed_;
     Label     phase_;
-    Widget*   list_[7] = {};
+    Label     split_title_;
+    Label     split_;
+    Widget*   list_[10] = {};
 };
 
 class LapHistoryScreen final : public Screen {
@@ -201,13 +204,15 @@ public:
     WidgetList widgets() override;
 
     // The logic task owns lap history; the screen is handed a view of it.
-    void set_history(const uint32_t* laps_ms, size_t count, uint32_t best_ms);
+    // `peaks` runs parallel to `laps_ms`, or is null.
+    void set_history(const uint32_t* laps_ms, size_t count, uint32_t best_ms,
+                     const core::state::LapPeak* peaks = nullptr);
 
 private:
     Table           table_;
-    Label           title_;
-    Widget*         list_[2] = {};
+    Widget*         list_[1] = {};
     const uint32_t* laps_ = nullptr;
+    const core::state::LapPeak* peaks_ = nullptr;
     size_t          lap_count_ = 0;
     uint32_t        best_ms_ = 0;
     // What the table was last built from. It only changes when a lap is
@@ -215,6 +220,7 @@ private:
     bool            shown_ = false;
     size_t          shown_count_ = 0;
     uint32_t        shown_best_ = 0;
+    const core::state::LapPeak* shown_peaks_ = nullptr;
 };
 
 class TrackMapScreen final : public Screen {

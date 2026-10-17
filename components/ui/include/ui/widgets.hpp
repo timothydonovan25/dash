@@ -149,7 +149,10 @@ private:
 class LeanIndicator : public Widget {
 public:
     void set(float lean_deg, bool valid);
-    void reset_peaks();
+    // The deepest lean each way, both in positive degrees. Handed in from
+    // the Frame (Lap::max_lean_*), not kept here: a screen is rebuilt every
+    // time it is entered, and peaks kept in this widget were lost each time.
+    void set_peaks(float left_deg, float right_deg);
     void render(Canvas& c) override;
 
 private:

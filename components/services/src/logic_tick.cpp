@@ -98,13 +98,26 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 // good enough, because the screen only has a Frame.
                 if (g.fix) {
                     s.lap.set_line(core::geo::LatLon{g.lat, g.lon}, g.course_deg);
+                    // The splits were placed round the old line.
+                    s.sectors.reset();
+                    s.last_split = core::lap::Split{};
                 }
                 break;
             case core::state::CommandId::LapArm:
                 s.lap.arm();
+                s.sectors.abort_lap();
+                s.lap_peaks.reset();
+                break;
+            case core::state::CommandId::LeanPeaksReset:
+                s.session_peaks.lean_left_deg = 0.0f;
+                s.session_peaks.lean_right_deg = 0.0f;
                 break;
             case core::state::CommandId::LapClear:
                 s.lap.clear();
+                s.sectors.reset();
+                s.last_split = core::lap::Split{};
+                s.last_done_ms = 0;
+                s.last_was_best = false;
                 s.lap_count = 0;
                 if (d.lap_history) *d.lap_history = LapHistory{};
                 if (d.lap_trace) d.lap_trace->clear();
@@ -382,26 +395,51 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         lf.valid = g.fix;
         lf.t_ms = s.last_fix_ms;
         lu = s.lap.update(lf, lc);
+        const core::lap::Split sp = s.sectors.update(lf, g.course_deg, lu, lc);
+        if (sp.crossed) s.last_split = sp;
     } else if (silent && !s.lap_told_stale && s.last_lap_rx_ms != 0) {
         s.lap_told_stale = true;
         lf.valid = false;
         lf.t_ms = now;
         lu = s.lap.update(lf, lc);
+        s.sectors.update(lf, g.course_deg, lu, lc);
+    }
+
+    // Peaks, every pass: this lap's and the session's.
+    {
+        const core::state::Attitude att = d.slots->attitude.get();
+        const bool imu_ok = d.slots->health.get().ok(core::state::Dev::Imu);
+        const float lean = imu_ok ? att.lean_deg : 0.0f;
+        if (s.lap.state().phase == core::lap::Phase::Timing) {
+            s.lap_peaks.add(m.best_mph, e.rpm, lean);
+        }
+        s.session_peaks.add(m.best_mph, e.rpm, lean);
     }
     s.lap.advance(now);
     const bool lap_event = lu.event != core::lap::Event::None;
     if (lu.event == core::lap::Event::Started) {
         if (d.delta) d.delta->start_lap();
+        s.lap_peaks.reset();
     } else if (lu.event == core::lap::Event::Completed) {
         // The lap tag in the log is 0-based, so it is the count *before*
         // this lap is added.
         lap_done_index = s.lap_count;
         lap_done_ms = lu.lap_ms;
+        s.last_done_ms = now;
+        s.last_was_best = lu.valid && lu.lap_ms == s.lap.state().best_ms;
         if (s.lap_count < LogicState::kMaxLaps) s.laps_ms[s.lap_count++] = lu.lap_ms;
         if (d.lap_history && d.lap_history->count < LapHistory::kMax) {
-            d.lap_history->ms[d.lap_history->count++] = lu.lap_ms;
+            core::state::LapPeak& pk = d.lap_history->peak[d.lap_history->count];
+            pk.mph = s.lap_peaks.mph;
+            pk.rpm = s.lap_peaks.rpm;
+            pk.lean_deg = s.lap_peaks.lean_deg();
+            // The count last: render reads the history from the other core,
+            // and a row must be whole before it is counted.
+            d.lap_history->ms[d.lap_history->count] = lu.lap_ms;
             d.lap_history->best_ms = s.lap.state().best_ms;
+            ++d.lap_history->count;
         }
+        s.lap_peaks.reset();
         if (d.lap_trace) d.lap_trace->clear();      // trace the new lap
         if (d.delta) {
             // The reference is the session best. The lap timer has already
@@ -416,8 +454,21 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     int32_t delta_ms = 0;
     bool delta_valid = false;
     if (d.delta) delta_valid = d.delta->delta_ms(delta_ms);
-    d.slots->lap.publish(
-        core::state::to_published(s.lap.state(), delta_ms, delta_valid));
+    {
+        core::state::Lap pl = core::state::to_published(s.lap.state(), delta_ms, delta_valid);
+        pl.sector = static_cast<int8_t>(s.sectors.current());
+        pl.split_sector = s.last_split.sector;
+        pl.split_ms = s.last_split.crossed ? s.last_split.ms : 0;
+        pl.split_delta_ms = s.last_split.delta_ms;
+        pl.split_delta_valid = s.last_split.delta_valid;
+        pl.split_at_ms = s.last_split.at_ms;
+        pl.ideal_ms = s.sectors.ideal_ms();
+        pl.last_done_ms = s.last_done_ms;
+        pl.last_was_best = s.last_was_best;
+        pl.max_lean_left_deg = s.session_peaks.lean_left_deg;
+        pl.max_lean_right_deg = s.session_peaks.lean_right_deg;
+        d.slots->lap.publish(pl);
+    }
 
     // --- traces ---------------------------------------------------------
     // One point per fix, at most 10 Hz (the sim makes a fix every tick).

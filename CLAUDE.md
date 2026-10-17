@@ -269,7 +269,15 @@ the media half of step 9 is written. 40 host test suites, all passing.
   turn a geometric crossing into a real lap. Fixes are timed by their own GPS
   time put on the system clock (`fixtime/`, 1.24: the lowest-latency offset,
   NTP-style), not by when they arrived: arrival carries the receiver's
-  varying latency, and laps were up to ~17 ms off with it, ~2 without
+  varying latency, and laps were up to ~17 ms off with it, ~2 without.
+  `lap/sectors.hpp` (1.26): two split lines placed by the first clean lap at
+  a third and two thirds of its distance (no rider setup, any track), timed
+  in order with the finish line's crossing; each sector's best and the ideal
+  lap (their sum). Forgotten when the line is set or cleared. `Peaks`: each
+  lap's top speed, rpm and lean (lean only above 10 mph) into `LapHistory`,
+  and the session's lean each way on the `lap` slot (IMU shows them; short E
+  posts `LeanPeaksReset`). LAP has SPLIT and IDEAL tiles and flashes LAST
+  for 5 s on a new best; LAPS shows each lap's peaks
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
 - `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy.
@@ -422,7 +430,7 @@ in PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`; measured on the demo,
 131 kB free). ESP-Hosted falls back to internal RAM silently if PSRAM
 fails, so if this ever boot-loops again, check that first. Check
 `nm build/dash.elf | grep _heap_start` after adding statics; the bike is at
-0x4FF1E450. Big buffers go on a task stack (allocated later) or in PSRAM
+0x4FF1F810 (1.26; the splits' path buffer is most of `logic`'s 5.8 kB). Big buffers go on a task stack (allocated later) or in PSRAM
 with `EXT_RAM_BSS_ATTR`, never in a plain static.
 
 **CRUISE → NAV** guides back to one of five named waypoints:

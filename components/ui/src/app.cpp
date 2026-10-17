@@ -114,7 +114,7 @@ void App::build(ScreenId id) {
         case ScreenId::Lap:        s = make<LapScreen>(slot_); break;
         case ScreenId::LapHistory: {
             auto* t = make<LapHistoryScreen>(slot_);
-            t->set_history(laps_, lap_count_, best_lap_);
+            t->set_history(laps_, lap_count_, best_lap_, lap_peaks_);
             s = t;
             break;
         }
@@ -172,12 +172,14 @@ void App::set_track_source(const IPointSource* s) {
     if (active_id_ == ScreenId::TrackMap) static_cast<TrackMapScreen*>(active_)->set_source(s);
 }
 
-void App::set_lap_history(const uint32_t* laps, size_t n, uint32_t best) {
+void App::set_lap_history(const uint32_t* laps, size_t n, uint32_t best,
+                          const core::state::LapPeak* peaks) {
     laps_ = laps;
     lap_count_ = n;
     best_lap_ = best;
+    lap_peaks_ = peaks;
     if (active_id_ == ScreenId::LapHistory) {
-        static_cast<LapHistoryScreen*>(active_)->set_history(laps, n, best);
+        static_cast<LapHistoryScreen*>(active_)->set_history(laps, n, best, peaks);
     }
 }
 

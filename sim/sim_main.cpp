@@ -779,7 +779,7 @@ int main() {
         ui::wire::Cost cost{};
         if (!bus_busy) {
             app.set_lap_history(lap_history.ms, lap_history.count,
-                                lap_history.best_ms);
+                                lap_history.best_ms, lap_history.peak);
             app.update(core::state::snapshot(slots, now));
 
             // Take the damage before rendering it: `update` is what sets the

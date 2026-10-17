@@ -403,18 +403,17 @@ void LeanIndicator::set(float lean_deg, bool valid) {
     bool a = false;
     if (valid) {
         a = assign(lean_deg_, held_lean(lean_deg_, was_valid, lean_deg));
-        // Peaks are records, so they take the half-degree step, not the hold.
-        const float q = std::round(lean_deg * 2.0f) / 2.0f;
-        if (q < peak_left_)  { peak_left_ = q;  touch(); }
-        if (q > peak_right_) { peak_right_ = q; touch(); }
     }
     if (a || b) touch();
 }
 
-void LeanIndicator::reset_peaks() {
-    peak_left_ = 0.0f;
-    peak_right_ = 0.0f;
-    touch();
+void LeanIndicator::set_peaks(float left_deg, float right_deg) {
+    // Records, so they take the half-degree step, not the hold.
+    const float l = -std::round(left_deg * 2.0f) / 2.0f;
+    const float r = std::round(right_deg * 2.0f) / 2.0f;
+    const bool a = assign(peak_left_, l);
+    const bool b = assign(peak_right_, r);
+    if (a || b) touch();
 }
 
 void LeanIndicator::render(Canvas& c) {

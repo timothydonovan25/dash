@@ -3,6 +3,7 @@ idf_component_register(
          "src/shift.cpp"
          "src/geo.cpp"
          "src/lap.cpp"
+         "src/sectors.cpp"
          "src/state.cpp"
          "src/units.cpp"
          "src/trip.cpp"
