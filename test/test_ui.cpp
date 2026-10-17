@@ -63,6 +63,21 @@ size_t send_damage(App& app, std::vector<Color>& panel) {
     return n;
 }
 
+// One frame the way every render loop runs it (render_service, demo_render,
+// sim_main): render() only when the App asks for a whole frame, otherwise
+// its damage. A test that calls render() itself can hide anything the App
+// does only inside render() -- the gear calibration page was built there,
+// and on the board it never appeared.
+void render_task_frame(App& app, Screen320x480& s, const Frame& f) {
+    app.update(f);
+    if (app.needs_full_repaint()) {
+        app.render(s.canvas, true);
+        app.clear_full_repaint();
+    } else {
+        send_damage(app, s.px);
+    }
+}
+
 class RecordingSink final : public ICommandSink {
 public:
     bool post(const core::state::Command& c) override {
@@ -982,8 +997,8 @@ int main() {
         f.gear_cal.autotune = true;
         f.gear_cal.learn_n[2] = 5;
         f.gear_cal.learn_err_pct[2] = -3.2f;
-        fx.app.update(f);
-        fx.app.render(s.canvas);
+        render_task_frame(fx.app, s, f);
+        render_task_frame(fx.app, s, f);
         CHECK(std::strcmp(fx.app.current().name(), "GEAR CAL") == 0);
         fx.app.update(f);
         fx.app.render(s.canvas, true);
@@ -1048,8 +1063,8 @@ int main() {
 
         // Closed again: CONFIG is back, in the Gearing submenu it left.
         f.gear_cal = core::state::GearCal{};
-        fx.app.update(f);
-        fx.app.render(s.canvas);
+        render_task_frame(fx.app, s, f);
+        render_task_frame(fx.app, s, f);
         CHECK(std::strcmp(fx.app.current().name(), "CONFIG") == 0);
         CHECK(fx.app.current().focus_count() == core::config::group_size(g));
     }

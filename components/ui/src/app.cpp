@@ -287,6 +287,10 @@ void App::update(const core::state::Frame& f) {
     const bool cal = f.gear_cal.phase != 0 && nav_.mode == Mode::Config;
     if (cal != cal_active_) {
         cal_swap_ = true;
+        // A whole frame, which is the only time a render loop calls render()
+        // -- where the swap happens. Without it the page was never built on
+        // the board: only a test that called render() itself ever saw it.
+        needs_full_ = true;
         // CONFIG comes back where it was. Its memo was saved when the
         // calibration page was built in its place.
         if (!cal) config_resume_ = true;
