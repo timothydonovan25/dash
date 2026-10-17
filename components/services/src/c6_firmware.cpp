@@ -117,7 +117,9 @@ bool push_partition_to_slave(const esp_partition_t* part, size_t fw_size) {
         return false;
     }
 
-    uint8_t chunk[kChunkSize];
+    // Static: 1.5 kB was most of the calling task's stack, and there is only
+    // ever one push, at boot.
+    static uint8_t chunk[kChunkSize];
     size_t offset = 0;
     while (offset < fw_size) {
         const size_t n = (fw_size - offset > kChunkSize) ? kChunkSize : (fw_size - offset);

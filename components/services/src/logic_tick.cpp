@@ -271,6 +271,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     fused.speed_sigma_mph = fo.sigma_mph;
     fused.speed_valid = fo.valid;
     fused.used = fo.used;
+    fused.rejected = fo.rejected;
     fused.suspect = fo.suspect;
     fused.resets = fo.resets;
     fused.accel_bias_g = fo.bias_g;

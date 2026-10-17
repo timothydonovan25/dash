@@ -1,4 +1,5 @@
 #include "demo_render.hpp"
+#include "core/stack.hpp"
 #include "esp_log.h"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
@@ -61,6 +62,7 @@ void log_state(ui::App& app, const core::state::Frame& f) {
              static_cast<unsigned>(f.wifi.clients));
 }
 
+DASH_BIG_FRAME_BEGIN   // ui::App (~2 kB) is a local; start_demo_render sizes the stack for it
 void render_task_impl(void* arg) {
     auto* ra = static_cast<RenderArg*>(arg);
     services::Deps& d = *ra->deps;
@@ -255,6 +257,7 @@ void render_task_impl(void* arg) {
             const bool ok = chip_temp_up && hal::ok(chip_temp.read(c));
             if (ok) d.system->chip_temp_c = c;
             d.system->chip_temp_ok = ok;
+            services::watch_stacks(*d.system, now);
         }
 
         ++frames;
@@ -268,6 +271,7 @@ void render_task_impl(void* arg) {
         }
     }
 }
+DASH_BIG_FRAME_END
 
 RenderArg g_render_arg;
 

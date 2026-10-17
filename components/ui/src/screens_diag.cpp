@@ -6,6 +6,7 @@
 #include "ui/chrome.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 namespace ui {
 
@@ -148,6 +149,121 @@ void GpsScreen::update(const Frame& f) {
 
 WidgetList GpsScreen::widgets() { return WidgetList{list_, 1}; }
 
+// --- FusionScreen -------------------------------------------------------
+namespace {
+constexpr Rect kFusTable {14, 40, 452, 264};
+
+// A signed number with its sign always shown: a residual of +0.4 and one of
+// -0.4 say different things about a wheel.
+size_t fmt_signed(char* buf, size_t n, float v, int decimals) {
+    if (n < 2) return 0;
+    buf[0] = v < 0.0f ? '-' : '+';
+    return 1 + u::fmt_float(buf + 1, n - 1, v < 0.0f ? -v : v, decimals);
+}
+
+// What the filter made of one source this step.
+const char* source_state(const core::state::Fused& fu, uint8_t bit) {
+    if (fu.suspect & bit) return "SUSPECT";
+    if (fu.rejected & bit) return "gated";
+    if (fu.used & bit) return "used";
+    return "--";
+}
+
+const char* wheel_verdict(core::state::DevState st) {
+    switch (st) {
+        case core::state::DevState::Ok:       return "ok";
+        case core::state::DevState::Fault:
+        case core::state::DevState::Degraded: return "DEAD";
+        default:                              return "unchecked";
+    }
+}
+}  // namespace
+
+void FusionScreen::enter(Canvas&) {
+    table_.set_bounds(kFusTable);
+    table_.configure(12, 2);
+    list_[0] = &table_;
+}
+
+void FusionScreen::update(const Frame& f) {
+    namespace fz = core::fusion;
+    const core::state::Fused& fu = f.fused;
+    const char* unit = "mph";
+    const auto spd = [&](float mph) { return u::speed_for_display(mph, units(), &unit); };
+    char v[24];
+    char left[24];
+
+    // The answer, and how sure of it the filter is.
+    u::fmt_value(v, sizeof v, spd(fu.speed_mph), 1, fu.speed_valid);
+    size_t k = std::strlen(v);
+    if (fu.speed_valid && k + 1 + std::strlen(unit) < sizeof v) {
+        v[k++] = ' ';
+        std::strcpy(v + k, unit);
+    }
+    table_.set_row(0, "Fused speed", v);
+    if (fu.speed_valid) {
+        k = 0;
+        v[k++] = '+'; v[k++] = '/'; v[k++] = '-';
+        u::fmt_float(v + k, sizeof v - k, spd(fu.speed_sigma_mph), 1);
+    } else {
+        std::strcpy(v, "--");
+    }
+    table_.set_row(1, "Within", v);
+
+    // Each source: its reading, and how far that is from the fused speed.
+    const auto source = [&](size_t row, const char* name, float mph, bool have, uint8_t bit,
+                            const char* why_not) {
+        k = std::snprintf(left, sizeof left, "%-6s", name);
+        if (have) {
+            k += u::fmt_float(left + k, sizeof left - k, spd(mph), 1);
+            if (fu.speed_valid && k + 2 < sizeof left) {
+                left[k++] = ' ';
+                k += fmt_signed(left + k, sizeof left - k, spd(mph) - spd(fu.speed_mph), 1);
+            }
+        } else if (k + 2 < sizeof left) {
+            left[k++] = '-'; left[k++] = '-'; left[k] = '\0';
+        }
+        table_.set_row(row, left, have ? source_state(fu, bit) : why_not);
+    };
+    source(2, "Front", f.motion.front_mph, true, fz::kSrcFront, "--");
+    source(3, "Rear", f.motion.rear_mph, true, fz::kSrcRear, "--");
+    source(4, "GPS", f.gnss.speed_mph, f.gnss.fix, fz::kSrcGps, "no fix");
+
+    // The accelerometer predicts rather than measures speed, so it has no
+    // residual: its reading is the forward g it is integrating.
+    const bool imu = f.health.ok(Dev::Imu);
+    k = std::snprintf(left, sizeof left, "%-6s", "IMU");
+    if (imu) {
+        k += fmt_signed(left + k, sizeof left - k, f.att.g_lon, 2);
+        if (k + 2 < sizeof left) { left[k++] = ' '; left[k++] = 'g'; left[k] = '\0'; }
+    }
+    table_.set_row(5, left, imu ? source_state(fu, fz::kSrcAccel) : "no IMU");
+
+    // What the filter has learned about the accelerometer: the offset it
+    // subtracts. A large one is a mount that is not level, or a hill.
+    if (fu.speed_valid) {
+        k = fmt_signed(v, sizeof v, fu.accel_bias_g, 3);
+        if (k + 2 < sizeof v) { v[k++] = ' '; v[k++] = 'g'; v[k] = '\0'; }
+    } else {
+        std::strcpy(v, "--");
+    }
+    table_.set_row(6, "Accel bias", v);
+
+    u::fmt_value(v, sizeof v, f.gnss.hdop, 1, f.gnss.fix);
+    table_.set_row(7, "GPS HDOP", v);
+
+    // The wheel sensors' verdicts (core::fusion::WheelCheck, through the
+    // health table): only ever known while moving with something to compare.
+    table_.set_row(8, "Front sensor", wheel_verdict(f.health[Dev::FrontWheel].state));
+    table_.set_row(9, "Rear sensor", wheel_verdict(f.health[Dev::RearWheel].state));
+
+    u::fmt_float(v, sizeof v, static_cast<float>(fu.resets), 0);
+    table_.set_row(10, "Filter resets", v);
+    table_.set_row_count(11);
+}
+
+WidgetList FusionScreen::widgets() { return WidgetList{list_, 1}; }
+
 // --- SystemScreen -------------------------------------------------------
 namespace {
 constexpr Rect kSysTable {14, 40, 452, 264};
@@ -179,10 +295,27 @@ void SystemScreen::update(const Frame& f) {
     }
     table_.set_row(0, "Uptime", v);
 
-    fmt_bytes(v, sizeof v, s->heap_free_b);
-    table_.set_row(1, "Heap free", v);
-    fmt_bytes(v, sizeof v, s->heap_min_b);
-    table_.set_row(2, "Heap low water", v);
+    // Free now and at its lowest, in one row, so the row below can say
+    // which task's stack is tightest.
+    {
+        size_t k = u::fmt_float(v, sizeof v, s->heap_free_b / 1024.0f, 0);
+        if (k + 1 < sizeof v) v[k++] = '/';
+        k += u::fmt_float(v + k, sizeof v - k, s->heap_min_b / 1024.0f, 0);
+        if (k + 2 < sizeof v) { v[k++] = ' '; v[k++] = 'k'; }
+        v[k] = '\0';
+    }
+    table_.set_row(1, "Heap free/low", v);
+    {
+        // "Stack: render" and how many bytes it has never touched.
+        char name[24] = "Stack: ";
+        std::strncat(name, s->stack_low_task[0] ? s->stack_low_task : "--",
+                     sizeof name - std::strlen(name) - 1);
+        u::fmt_value(v, sizeof v, static_cast<float>(s->stack_low_free_b), 0,
+                     s->stack_low_task[0] != '\0');
+        size_t k = std::strlen(v);
+        if (s->stack_low_task[0] && k + 2 < sizeof v) { v[k++] = ' '; v[k++] = 'B'; v[k] = '\0'; }
+        table_.set_row(2, name, v);
+    }
     fmt_bytes(v, sizeof v, s->psram_free_b);
     table_.set_row(3, "PSRAM free", v);
 

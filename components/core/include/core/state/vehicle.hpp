@@ -271,6 +271,7 @@ struct Fused {
     float    speed_sigma_mph = 0.0f;
     bool     speed_valid     = false;
     uint8_t  used            = 0;     // core::fusion::Source bits
+    uint8_t  rejected        = 0;     // offered and gated out this step
     uint8_t  suspect         = 0;
     uint16_t resets          = 0;
     float    accel_bias_g    = 0.0f;

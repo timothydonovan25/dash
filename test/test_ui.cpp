@@ -1,5 +1,6 @@
 #include "check.hpp"
 #include "core/gearcal/gearcal.hpp"
+#include "core/fusion/speed.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/shadow.hpp"
@@ -1404,7 +1405,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 5);   // RADIO
+        go_to(fx.app, s.canvas, Mode::Diag, 6);   // RADIO
 
         Frame f = busy_frame();
         fx.app.update(f);
@@ -1436,7 +1437,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 6);   // UPDATE
+        go_to(fx.app, s.canvas, Mode::Diag, 7);   // UPDATE
         CHECK(std::strcmp(fx.app.current().name(), "UPDATE") == 0);
 
         Frame f = busy_frame();
@@ -1831,6 +1832,44 @@ int main() {
             asked |= c.id == core::state::CommandId::LeanPeaksReset;
         }
         CHECK(asked);
+    }
+
+    CASE("DIAG -> FUSION shows what the filter made of each source");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Diag, 2);
+        CHECK(fx.app.current_id() == ScreenId::Fusion);
+        Frame f = busy_frame();
+        f.fused.speed_mph = 54.2f;
+        f.fused.speed_valid = true;
+        f.fused.used = core::fusion::kSrcFront | core::fusion::kSrcGps | core::fusion::kSrcAccel;
+        f.motion.rear_mph = 58.9f;
+        auto shot = [&](const Frame& fr) {
+            render_task_frame(fx.app, s, fr);
+            return s.px;
+        };
+        const auto used = shot(f);
+        Frame gated = f;
+        gated.fused.rejected = core::fusion::kSrcRear;
+        const auto g = shot(gated);
+        Frame suspect = gated;
+        suspect.fused.suspect = core::fusion::kSrcRear;
+        const auto sp = shot(suspect);
+        size_t a = 0, b = 0;
+        for (size_t i = 0; i < used.size(); ++i) {
+            if (used[i] != g[i]) ++a;
+            if (g[i] != sp[i]) ++b;
+        }
+        CHECK(a > 50);      // the rear's state changed on screen
+        CHECK(b > 50);      // and again when it turned suspect
+        // And a partial update still lands what a full repaint would.
+        Screen320x480 whole;
+        fx.app.render(whole.canvas, true);
+        size_t differ = 0;
+        for (size_t i = 0; i < sp.size(); ++i) if (sp[i] != whole.px[i]) ++differ;
+        CHECK(differ == 0);
     }
 
     CASE("key-on splash and sweep: the panel matches a full repaint, frame by frame");

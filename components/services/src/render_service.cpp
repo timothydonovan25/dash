@@ -34,6 +34,7 @@
 // shadow regardless (the scrub), which repairs a panel that lost its memory
 // without a write failing.
 #include "services/services.hpp"
+#include "core/stack.hpp"
 #include "ui/app.hpp"
 #include "ui/blit_plan.hpp"
 #include "ui/framebuffer_canvas.hpp"
@@ -151,6 +152,7 @@ hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
 // screen change sends only what differs, so this does instead, and sooner.
 constexpr uint32_t kScrubEveryMs = 1000;
 
+DASH_BIG_FRAME_BEGIN   // ui::App (~2 kB) is a local; start_render sizes the stack for it
 void render_task(void* arg) {
     auto* pair = static_cast<std::pair<Deps*, CommandQueue*>*>(arg);
     Deps& d = *pair->first;
@@ -368,6 +370,7 @@ void render_task(void* arg) {
 
     }
 }
+DASH_BIG_FRAME_END
 
 std::pair<Deps*, CommandQueue*> g_render_arg;
 

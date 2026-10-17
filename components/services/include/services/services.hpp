@@ -197,6 +197,10 @@ void start_ble(Deps& d);
 // exist below every core-0 task. `report` logs the count even if nothing
 // needed lowering (the bring-up check that the task names still match).
 void demote_radio_tasks(bool report);
+
+// Every task's stack high-water mark into DIAG -> System (the tightest
+// task) and the console (stack_watch.cpp). Once a second, from keeper.
+void watch_stacks(ui::SystemInfo& sys, uint32_t now_ms);
 // The on-demand update hotspot and its page (§11.7). Core 1, priority 3.
 // Off until the rider turns it on. Starts nothing on the radio until then,
 // but needs esp_hosted up, so it goes after start_ble.

@@ -315,6 +315,23 @@ private:
     Widget* list_[1] = {};
 };
 
+// Sensor fusion (core::fusion, docs/fusion.md): the fused road speed and
+// how sure it is, and each source beside it -- what it reads, how far that
+// is from the fused speed, and whether the filter is using it, gating it
+// out this step, or has called it suspect. Then the accelerometer's bias,
+// the wheel sensors' verdicts, and how often the filter has had to restart.
+class FusionScreen final : public Screen {
+public:
+    const char* name() const override { return "FUSION"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    WidgetList widgets() override;
+
+private:
+    Table   table_;
+    Widget* list_[1] = {};
+};
+
 class SystemScreen final : public Screen {
 public:
     const char* name() const override { return "SYSTEM"; }

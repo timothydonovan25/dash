@@ -7,9 +7,11 @@ list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/dash_version.cmake)
 dash_firmware_version(demo)   # PROJECT_VER, from firmware.txt
 
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/dash_stack.cmake)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # Named "dash", like the real firmware, because the stable/dev slot code
 # refuses any other project name (core/ota check_header, tools/flash_dev.py)
 # and testing that code on this board is what this build is for.
 project(dash)
 dash_firmware_outputs()      # build date, and build/dash-<version>-...bin
+dash_frame_limit()           # -Wframe-larger-than on our components (cmake/dash_stack.cmake)

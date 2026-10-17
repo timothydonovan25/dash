@@ -1,4 +1,5 @@
 #include "ui/app.hpp"
+#include "core/stack.hpp"
 #include "core/sweep/sweep.hpp"
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
@@ -63,10 +64,11 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
             switch (index) {
                 case 0: return ScreenId::Sensors;
                 case 1: return ScreenId::Gps;
-                case 2: return ScreenId::System;
-                case 3: return ScreenId::Power;
-                case 4: return ScreenId::Bus;
-                case 5: return ScreenId::Radio;
+                case 2: return ScreenId::Fusion;
+                case 3: return ScreenId::System;
+                case 4: return ScreenId::Power;
+                case 5: return ScreenId::Bus;
+                case 6: return ScreenId::Radio;
                 default: return ScreenId::Update;
             }
         case Mode::Config:
@@ -129,6 +131,7 @@ void App::build(ScreenId id) {
         case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
         case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
         case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;
+        case ScreenId::Fusion:     s = make<FusionScreen>(slot_); break;
         case ScreenId::System:     s = make<SystemScreen>(slot_); break;
         case ScreenId::Power:      s = make<PowerScreen>(slot_); break;
         case ScreenId::Bus:        s = make<BusScreen>(slot_); break;
@@ -272,6 +275,7 @@ void App::update_slip(const core::state::Frame& f) {
     if (was && !slip_bar_.active()) restore(kSlipBar);
 }
 
+DASH_BIG_FRAME_BEGIN   // the sweep's Frame copy (1.1 kB); runs on render's 8 kB + App stack
 void App::update(const core::state::Frame& f) {
     if (!active_) return;
     update_alert(f);
@@ -357,6 +361,7 @@ void App::update(const core::state::Frame& f) {
 
     current().update(f);
 }
+DASH_BIG_FRAME_END
 
 void App::render_splash(Canvas& c) {
     c.fill(color::kBg);

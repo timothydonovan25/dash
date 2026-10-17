@@ -17,6 +17,7 @@ idf_component_register(
          "src/settings_store.cpp"
          "src/wifi_service.cpp"
          "src/wifi_page.cpp"
+         "src/stack_watch.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core dash_hal ui bsp drivers esp_timer esp_driver_gpio
     PRIV_REQUIRES bt esp_hosted esp_partition bootloader_support app_update

@@ -152,6 +152,8 @@ void keeper_task(void* arg) {
             if (ok) d.system->chip_temp_c = c;
             d.system->chip_temp_ok = ok;
 
+            watch_stacks(*d.system, now);
+
             // Bus recoveries live in the driver that performs them; the
             // DIAG bus screen is the reason they are counted at all.
             if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) {

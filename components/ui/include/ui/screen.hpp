@@ -58,6 +58,10 @@ struct SystemInfo {
     // with chip_temp_ok: there is no number that means "not read".
     float    chip_temp_c    = 0.0f;
     bool     chip_temp_ok   = false;
+    // The task whose stack has come closest to full, and how close: its
+    // high-water mark in bytes (services::watch_stacks, once a second).
+    char     stack_low_task[12] = {};
+    uint32_t stack_low_free_b   = 0;
 };
 
 struct Context {

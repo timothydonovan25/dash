@@ -22,7 +22,7 @@ struct ScreenStorage {
 using AllScreens = ScreenStorage<
     SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen,
     LapScreen, LapHistoryScreen, TrackMapScreen, AllDataScreen, EngineScreen,
-    AttitudeScreen, SensorsScreen, GpsScreen, SystemScreen, PowerScreen, BusScreen,
+    AttitudeScreen, SensorsScreen, GpsScreen, FusionScreen, SystemScreen, PowerScreen, BusScreen,
     RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen>;
 
 // Which screen is alive. Order follows the modes, but nothing depends on it.
@@ -31,7 +31,7 @@ enum class ScreenId : uint8_t {
     Speed, Media, Trip, TripMap, Nav, Minimal,
     Lap, LapHistory, TrackMap,
     AllData, Engine, Attitude,
-    Sensors, Gps, System, Power, Bus, Radio, Update,
+    Sensors, Gps, Fusion, System, Power, Bus, Radio, Update,
     Config, GearCal,
 };
 

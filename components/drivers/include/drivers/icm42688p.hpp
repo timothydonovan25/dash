@@ -27,6 +27,12 @@ private:
     hal::Status read_regs(uint8_t reg, uint8_t* out, size_t len);
 
     void*  dev_ = nullptr;         // spi_device_handle_t
+    // read_regs()'s transfer buffers: a FIFO drain is up to 512 bytes plus
+    // the address. Members, not locals, because they were 1 kB of the imu
+    // task's 4 kB stack; only that task reads this part.
+    static constexpr size_t kMaxRead = 512;
+    uint8_t tx_[kMaxRead + 8] = {};
+    uint8_t rx_[kMaxRead + 8] = {};
     float  bias_[3] = {0.0f, 0.0f, 0.0f};
     float  gyro_scale_ = 0.0f;     // LSB -> dps
     float  accel_scale_ = 0.0f;    // LSB -> g

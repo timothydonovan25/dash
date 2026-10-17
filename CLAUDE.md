@@ -241,6 +241,15 @@ lost its memory without a write failing. Render, the demo, the sim and
 - Header guards: `#pragma once`.
 - Public headers live in `include/<component>/`.
 - No exceptions, no RTTI, no dynamic allocation after boot.
+- **No stack frame over 1 kB** (1.28). The firmware builds our components
+  with `-Wframe-larger-than=1024` under `-Werror` (`cmake/dash_stack.cmake`;
+  never ESP-IDF's): a big local fits every host test and overflows a 3-8 kB
+  task stack only on the board, as 1.26's `LogicState` did to the demo. Make
+  big state a static, a member or PSRAM; a function that needs a big frame
+  on purpose is wrapped in `DASH_BIG_FRAME_BEGIN`/`END` (`core/stack.hpp`)
+  with the reason, and its task sized for it (today: both render tasks and
+  `App::update`). At run time `services::watch_stacks` puts the tightest
+  task's high-water mark on DIAG → System and logs every task's at 10 s.
 - Physical units in the name: `_ms`, `_ft`, `_mph`, `_deg`, `_g`.
 
 ## Testing
@@ -346,7 +355,10 @@ the media half of step 9 is written. 40 host test suites, all passing.
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.
   `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride.
   `WheelCheck` faults a wheel sensor that reads 0 for 5 s at speed, into
-  the health table as FrontWheel / RearWheel, and `ctrl` skips it
+  the health table as FrontWheel / RearWheel, and `ctrl` skips it.
+  DIAG → FUSION (1.28) shows the fused speed and its sigma, each source's
+  reading and residual and whether it was used, gated or is suspect, the
+  accel bias and the wheel verdicts
 - `wifi/` the update hotspot's policy: idle and moving shut-off, the
   session password, which log names the page may serve
 

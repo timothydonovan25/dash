@@ -61,20 +61,19 @@ hal::Status Icm42688p::write_reg(uint8_t reg, uint8_t value) {
 
 hal::Status Icm42688p::read_regs(uint8_t reg, uint8_t* out, size_t len) {
     if (!dev_) return hal::Status::NotPresent;
-    if (len == 0 || len > 512) return hal::Status::Unsupported;
+    if (len == 0 || len > kMaxRead) return hal::Status::Unsupported;
 
-    uint8_t tx[520] = {};
-    uint8_t rx[520] = {};
-    tx[0] = static_cast<uint8_t>(reg | kReadBit);
+    tx_[0] = static_cast<uint8_t>(reg | kReadBit);
+    for (size_t i = 1; i <= len; ++i) tx_[i] = 0;
 
     spi_transaction_t t = {};
     t.length = 8 * (len + 1);
-    t.tx_buffer = tx;
-    t.rx_buffer = rx;
+    t.tx_buffer = tx_;
+    t.rx_buffer = rx_;
     const hal::Status s = from_esp(spi_device_transmit(
         static_cast<spi_device_handle_t>(dev_), &t));
     if (hal::ok(s)) {
-        for (size_t i = 0; i < len; ++i) out[i] = rx[i + 1];
+        for (size_t i = 0; i < len; ++i) out[i] = rx_[i + 1];
     }
     return s;
 }

@@ -116,3 +116,6 @@ CONFIG_ESP_COREDUMP_CHECK_BOOT=n
 # startup creating the main task (app_startup.c:83) and fell back to stable.
 # The flicker is cosmetic, demo-only and upload-only; the bike's i80 panel
 # keeps its own GRAM.
+
+# Per-task stack high-water marks for DIAG -> System (services::watch_stacks).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y

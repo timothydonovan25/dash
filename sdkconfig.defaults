@@ -139,3 +139,6 @@ CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
 # ESP_ERROR_CHECKs (an abort, against rule 5) and installs the blocking
 # console driver. Nothing here uses it.
 CONFIG_ESP_HOSTED_CLI_ENABLED=n
+
+# Per-task stack high-water marks for DIAG -> System (services::watch_stacks).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
