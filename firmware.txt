@@ -9,5 +9,5 @@
 # from which project built it: "bike" (the root) or "demo" (demo_p4/).
 # Every build is also copied to releases/ at the repo root, which keeps them
 # all; a rebuild of the same version on the same day replaces its file.
-version 1.15
-feature sim coverage
+version 1.17
+feature one live screen

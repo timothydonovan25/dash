@@ -1920,6 +1920,143 @@ int main() {
         }
     }
 
+    CASE("the App holds one screen at a time, not all of them");
+    {
+        // 21 screens held at once were 12.9 kB of the render task's stack,
+        // and the demo board's overflowed when they grew. The App is now the
+        // largest screen plus the overlays and bookkeeping.
+        CHECK(AllScreens::size >= sizeof(SpeedScreen));
+        CHECK(sizeof(App) < AllScreens::size + 1024);
+    }
+
+    CASE("leaving a screen and coming back draws the same picture");
+    {
+        // Each screen is destroyed when it is left and built again when it
+        // is entered, so whatever the App hands it -- the traces, the lap
+        // history, the settings -- has to be handed over again, every time.
+        struct Trace final : IPointSource {
+            size_t count() const override { return 40; }
+            bool point(size_t i, float& x, float& y) const override {
+                x = 30.0f * static_cast<float>(i);
+                y = 400.0f * std::sin(static_cast<float>(i) * 0.2f);
+                return true;
+            }
+        } trace;
+        const uint32_t laps[] = {92500, 91250, 90880, 91900};
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        fx.app.set_trip_source(&trace);
+        fx.app.set_track_source(&trace);
+        fx.app.set_lap_history(laps, 4, 90880);
+        const Frame f = busy_frame();
+        const core::nav::Layout counts;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
+                go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
+                fx.app.update(f);
+                fx.app.render(s.canvas, true);
+                const std::vector<Color> first = s.px;
+                const ScreenId id = fx.app.current_id();
+
+                // Away to another mode, which destroys it, and back.
+                const Mode away = m == 0 ? Mode::Diag : Mode::Cruise;
+                go_to(fx.app, s.canvas, away, 0);
+                CHECK(fx.app.current_id() != id);
+                go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
+                CHECK(fx.app.current_id() == id);
+                fx.app.update(f);
+                fx.app.render(s.canvas, true);
+
+                size_t differing = 0;
+                for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != first[i]) ++differing;
+                if (differing != 0) {
+                    std::printf("       %s/%s: %zu px differ after a revisit\n",
+                                fx.app.mode_name(), fx.app.current().name(), differing);
+                }
+                CHECK(differing == 0);
+            }
+        }
+    }
+
+    CASE("a rebuilt map screen still draws the trace the App was handed");
+    {
+        // Both visits above are built after the wiring, so a screen that
+        // never got its trace would match itself. This compares against no
+        // trace at all, on the first visit and after a rebuild.
+        struct Trace final : IPointSource {
+            size_t count() const override { return 40; }
+            bool point(size_t i, float& x, float& y) const override {
+                x = 30.0f * static_cast<float>(i);
+                y = 400.0f * std::sin(static_cast<float>(i) * 0.2f);
+                return true;
+            }
+        } trace;
+        const Frame f = busy_frame();
+        struct Where { Mode m; uint8_t n; };
+        for (const Where w : {Where{Mode::Cruise, 3}, Where{Mode::Track, 2}}) {
+            Fixture bare;
+            Screen320x480 sb;
+            bare.app.begin(sb.canvas);
+            go_to(bare.app, sb.canvas, w.m, w.n);
+            bare.app.update(f);
+            bare.app.render(sb.canvas, true);
+
+            Fixture fx;
+            Screen320x480 s;
+            fx.app.begin(s.canvas);
+            fx.app.set_trip_source(&trace);
+            fx.app.set_track_source(&trace);
+            for (int visit = 0; visit < 2; ++visit) {
+                go_to(fx.app, s.canvas, w.m, w.n);
+                fx.app.update(f);
+                fx.app.render(s.canvas, true);
+                // ink() would not do: the map's panel is lit either way, and
+                // a trace only changes the colour of pixels already counted.
+                size_t differing = 0;
+                for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != sb.px[i]) ++differing;
+                if (differing < 100) {
+                    std::printf("       %s, visit %d: no trace drawn (%zu px differ)\n",
+                                fx.app.current().name(), visit + 1, differing);
+                }
+                CHECK(differing >= 100);
+                go_to(fx.app, s.canvas, Mode::Diag, 0);   // destroys it
+            }
+        }
+    }
+
+    CASE("lap history that changes while LAPS is up reaches the screen");
+    {
+        const uint32_t laps[] = {92500, 91250, 90880, 91900, 90100};
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        // Handed over before LAPS exists: the App gives it to the screen
+        // when it builds it. Against a LAPS that was never given any.
+        fx.app.set_lap_history(laps, 2, 91250);
+        go_to(fx.app, s.canvas, Mode::Track, 1);
+        CHECK(fx.app.current_id() == ScreenId::LapHistory);
+        const Frame f = busy_frame();
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        {
+            Fixture bare;
+            Screen320x480 sb;
+            bare.app.begin(sb.canvas);
+            go_to(bare.app, sb.canvas, Mode::Track, 1);
+            bare.app.update(f);
+            bare.app.render(sb.canvas, true);
+            size_t differing = 0;
+            for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != sb.px[i]) ++differing;
+            CHECK(differing >= 100);
+        }
+        const size_t two = s.ink();
+        fx.app.set_lap_history(laps, 5, 90100);   // a lap scored while watching
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > two);
+    }
+
     CASE("mode and screen names are all present");
     {
         Fixture fx;

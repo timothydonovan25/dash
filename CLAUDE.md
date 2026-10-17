@@ -325,6 +325,13 @@ for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each
 invent their own idea of what a labelled box looks like.
+**`ui::App` keeps one screen alive at a time** (1.17): it is built into one
+slot sized for the largest (`ui::AllScreens`) when entered and destroyed
+when left, so the App is ~1.9 kB on render's stack, not 13 kB, and a new
+screen costs nothing unless it becomes the largest. Add a new screen to
+`AllScreens`, `ScreenId` and `App::build()`. Nothing a screen keeps survives
+leaving it; what must (map traces, lap history, settings, CONFIG's place
+during gear calibration) the App holds and hands back in `build()`.
 
 **`sim/`** — the desktop simulator. `logic_tick.hpp` exists so it executes
 the firmware's decisions rather than a copy of them: a simulator that

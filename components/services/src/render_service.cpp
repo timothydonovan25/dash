@@ -115,8 +115,9 @@ void render_task(void* arg) {
     ctx.commands = &q;
     ctx.system = d.system;
 
-    // On this task's stack, which start_render sizes for it: App is ~11 kB
-    // (every screen and widget). Not a static: .bss comes out of the internal
+    // On this task's stack, which start_render sizes for it: App is about
+    // 1.9 kB, the one live screen plus the overlays (it held all 21 screens,
+    // 13 kB, until 1.17). Not a static: .bss comes out of the internal
     // RAM the boot itself runs in, which ESP-Hosted's buffers already nearly
     // fill, and 11 kB more there left no room to create the idle tasks. A
     // task stack is allocated after the scheduler starts, from the larger

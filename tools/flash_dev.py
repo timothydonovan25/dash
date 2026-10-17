@@ -14,7 +14,11 @@ dash still boots stable. Then DIAG -> Update -> Boot dev once runs it
 
 Refuses a file that is not a dash image for the ESP32-P4 -- the same checks
 as core/ota's check_header(), so the C6's network_adapter.bin on the wrong
-command line does not end up in an app slot.
+command line does not end up in an app slot -- and an image built for the
+other board (`bike` vs `demo`, the second word of the version) than the one
+in the stable slot, as the card and Wi-Fi updates refuse it. A bike image
+on the demo board boots to a dark screen.
+
 """
 import argparse
 import binascii
@@ -31,6 +35,7 @@ VALID, UNDEFINED = 0x2, 0xFFFFFFFF
 STATE_NAMES = {0: "new", 1: "pending verify", 2: "valid", 3: "invalid",
                4: "aborted", 0xFFFFFFFF: "undefined"}
 SLOTS = ("ota_0", "ota_1")
+SLOT_OFFSETS = (0x30000, 0x630000)   # partitions.csv, shared by both boards
 
 IMAGE_MAGIC = 0xE9
 CHIP_ESP32P4 = 0x0012
@@ -49,6 +54,10 @@ def check_image(path):
     """core::ota::check_header(), in Python. Returns the version string."""
     with open(path, "rb") as f:
         head = f.read(APP_DESC + 256)
+    return check_head(head, path)
+
+
+def check_head(head, path):
     if len(head) < APP_DESC + 256:
         sys.exit(f"{path}: too short to be an app image")
     if head[0] != IMAGE_MAGIC or head[1] == 0:
@@ -64,10 +73,31 @@ def check_image(path):
     return head[APP_DESC + 16:APP_DESC + 48].split(b"\0")[0].decode(errors="replace")
 
 
+def board_of(version):
+    """"1.16 bike event driven logic" -> "bike" (cmake/dash_version.cmake)."""
+    words = version.split()
+    return words[1] if len(words) > 1 else None
+
+
+def read_slot_version(port, slot):
+    """The version string of the image in `slot`, or None if it holds none."""
+    with tempfile.NamedTemporaryFile(suffix=".bin") as tmp:
+        # --after no-reset: the write that follows connects again anyway, and
+        # every reset from esptool risks the demo board's ROM boot wedge.
+        subprocess.run([sys.executable, "-m", "esptool", "--port", port,
+                        "--after", "no-reset", "read-flash", hex(SLOT_OFFSETS[slot]), hex(APP_DESC + 256),
+                        tmp.name], check=True, stdout=subprocess.DEVNULL)
+        head = open(tmp.name, "rb").read()
+    try:
+        return check_head(head, SLOTS[slot])
+    except SystemExit:
+        return None
+
+
 def read_otadata(port):
     with tempfile.NamedTemporaryFile(suffix=".bin") as tmp:
         subprocess.run([sys.executable, idf_tool("components", "partition_table", "parttool.py"),
-                        "--port", port, "read_partition", "--partition-name", "otadata",
+                        "--port", port, "--esptool-args=after=no-reset", "read_partition", "--partition-name", "otadata",
                         "--output", tmp.name], check=True)
         return open(tmp.name, "rb").read()
 
@@ -96,6 +126,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("-p", "--port", default="/dev/ttyACM0")
     ap.add_argument("image", nargs="?", default="build/dash.bin")
+    ap.add_argument("--any-board", action="store_true",
+                    help="write the image even if it is for the other board")
     args = ap.parse_args()
 
     version = check_image(args.image)
@@ -103,12 +135,20 @@ def main():
     print("reading otadata from the dash")
     stable = stable_slot(read_otadata(args.port))
     dev = 1 - stable
+    running = read_slot_version(args.port, stable)
+    print(f"stable {SLOTS[stable]}: {running or 'no dash image'}")
+    if running and board_of(running) != board_of(version) and not args.any_board:
+        sys.exit(f"refusing: this is a {board_of(version)} image and the dash runs "
+                 f"{board_of(running)} firmware (--any-board to write it anyway)")
     print(f"stable is {SLOTS[stable]}; writing {SLOTS[dev]}, otadata untouched")
     # parttool, not otatool: IDF v6.0.2's otatool write_ota_partition passes
     # its file as `input=` to a function that takes `input_file`, and dies
     # with a TypeError before writing anything. Same write, by slot name.
     subprocess.run([sys.executable, idf_tool("components", "partition_table", "parttool.py"),
-                    "--port", args.port, "write_partition", "--partition-name", SLOTS[dev],
+                    # A USB reset after the write can wedge a P4 v1.x in its ROM
+                    # until it is unplugged; the RTC watchdog reset is deeper.
+                    "--port", args.port, "--esptool-args=after=watchdog-reset",
+                    "write_partition", "--partition-name", SLOTS[dev],
                     "--input", args.image], check=True)
     print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
           "DIAG -> Update -> Boot dev once to run it.")

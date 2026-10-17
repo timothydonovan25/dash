@@ -228,10 +228,12 @@ RenderArg g_render_arg;
 void start_demo_render(services::Deps& d, services::CommandQueue& q,
                        StateRequest& req) {
     g_render_arg = {&d, &q, &req};
-    // Larger than the real render task's 8192: ui::App (~10.9 kB) lives on
-    // this task's stack here, and overflowed 8192 on first boot.
-    xTaskCreatePinnedToCore(render_task_impl, "render", 16384, &g_render_arg,
-                            6, nullptr, 0);
+    // ui::App lives on this task's stack, so the stack is sized from it, as
+    // the real render task's is. A fixed 16384 overflowed in 1.16, when the
+    // App still held every screen and grew from 11.4 to 13.2 kB; it holds
+    // one screen now, but the size still follows it.
+    xTaskCreatePinnedToCore(render_task_impl, "render", 8192 + sizeof(ui::App),
+                            &g_render_arg, 6, nullptr, 0);
 }
 
 }  // namespace demo

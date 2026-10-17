@@ -4,6 +4,7 @@
 #include "ui/theme.hpp"
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 namespace ui {
 
@@ -28,65 +29,161 @@ constexpr int kMaxPerWidget = 6;
 }  // namespace
 
 App::App(const Context& ctx) : ctx_(ctx) {
-    Screen* all[] = {&speed_, &media_, &minimal_, &trip_, &trip_map_, &nav_screen_, &lap_,
-                     &lap_history_, &track_map_, &all_data_, &engine_,
-                     &attitude_, &sensors_, &gps_, &system_, &power_, &bus_, &radio_,
-                     &update_, &config_, &gearcal_};
-    for (Screen* s : all) s->bind(ctx_);
     alert_.set_bounds(kAlertBox);
     slip_bar_.set_bounds(kSlipBar);
     dev_tag_.set_bounds(kDevTag);
 }
 
-Screen* App::screen_for(Mode m, uint8_t index) {
+App::~App() { destroy_active(); }
+
+ScreenId App::screen_for(Mode m, uint8_t index) const {
     switch (m) {
         case Mode::Cruise:
             switch (index) {
-                case 0: return &speed_;
-                case 1: return &media_;
-                case 2: return &trip_;
-                case 3: return &trip_map_;
-                case 4: return &nav_screen_;
-                default: return &minimal_;
+                case 0: return ScreenId::Speed;
+                case 1: return ScreenId::Media;
+                case 2: return ScreenId::Trip;
+                case 3: return ScreenId::TripMap;
+                case 4: return ScreenId::Nav;
+                default: return ScreenId::Minimal;
             }
         case Mode::Track:
             switch (index) {
-                case 0: return &lap_;
-                case 1: return &lap_history_;
-                default: return &track_map_;
+                case 0: return ScreenId::Lap;
+                case 1: return ScreenId::LapHistory;
+                default: return ScreenId::TrackMap;
             }
         case Mode::Stat:
             switch (index) {
-                case 0: return &all_data_;
-                case 1: return &engine_;
-                default: return &attitude_;
+                case 0: return ScreenId::AllData;
+                case 1: return ScreenId::Engine;
+                default: return ScreenId::Attitude;
             }
         case Mode::Diag:
             switch (index) {
-                case 0: return &sensors_;
-                case 1: return &gps_;
-                case 2: return &system_;
-                case 3: return &power_;
-                case 4: return &bus_;
-                case 5: return &radio_;
-                default: return &update_;
+                case 0: return ScreenId::Sensors;
+                case 1: return ScreenId::Gps;
+                case 2: return ScreenId::System;
+                case 3: return ScreenId::Power;
+                case 4: return ScreenId::Bus;
+                case 5: return ScreenId::Radio;
+                default: return ScreenId::Update;
             }
         case Mode::Config:
         case Mode::Count:
         default:
-            return cal_active_ ? static_cast<Screen*>(&gearcal_) : &config_;
+            return cal_active_ ? ScreenId::GearCal : ScreenId::Config;
     }
 }
 
-Screen& App::current() { return *screen_for(nav_.mode, nav_.screen); }
+void App::destroy_active() {
+    if (!active_) return;
+    if (active_id_ == ScreenId::Config) {
+        config_memo_ = static_cast<ConfigScreen*>(active_)->memo();
+    }
+    active_->leave();
+    active_->~Screen();
+    active_ = nullptr;
+    active_id_ = ScreenId::None;
+}
+
+namespace {
+template <typename T>
+T* make(unsigned char* slot) {
+    static_assert(sizeof(T) <= AllScreens::size && alignof(T) <= AllScreens::align,
+                  "a screen missing from ui::AllScreens");
+    return new (slot) T();
+}
+}  // namespace
+
+void App::build(ScreenId id) {
+    destroy_active();
+    Screen* s = nullptr;
+    switch (id) {
+        case ScreenId::Speed:      s = make<SpeedScreen>(slot_); break;
+        case ScreenId::Media:      s = make<MediaScreen>(slot_); break;
+        case ScreenId::Trip:       s = make<TripScreen>(slot_); break;
+        case ScreenId::TripMap: {
+            auto* t = make<TripMapScreen>(slot_);
+            t->set_source(trip_src_);
+            s = t;
+            break;
+        }
+        case ScreenId::Nav:        s = make<NavScreen>(slot_); break;
+        case ScreenId::Minimal:    s = make<MinimalScreen>(slot_); break;
+        case ScreenId::Lap:        s = make<LapScreen>(slot_); break;
+        case ScreenId::LapHistory: {
+            auto* t = make<LapHistoryScreen>(slot_);
+            t->set_history(laps_, lap_count_, best_lap_);
+            s = t;
+            break;
+        }
+        case ScreenId::TrackMap: {
+            auto* t = make<TrackMapScreen>(slot_);
+            t->set_source(track_src_);
+            s = t;
+            break;
+        }
+        case ScreenId::AllData:    s = make<AllDataScreen>(slot_); break;
+        case ScreenId::Engine:     s = make<EngineScreen>(slot_); break;
+        case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
+        case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
+        case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;
+        case ScreenId::System:     s = make<SystemScreen>(slot_); break;
+        case ScreenId::Power:      s = make<PowerScreen>(slot_); break;
+        case ScreenId::Bus:        s = make<BusScreen>(slot_); break;
+        case ScreenId::Radio:      s = make<RadioScreen>(slot_); break;
+        case ScreenId::Update:     s = make<UpdateScreen>(slot_); break;
+        case ScreenId::GearCal:    s = make<GearCalScreen>(slot_); break;
+        case ScreenId::Config:
+        case ScreenId::None:
+        default: {
+            auto* t = make<ConfigScreen>(slot_);
+            t->bind_settings(settings_);
+            if (config_resume_) {
+                config_resume_ = false;
+                t->resume(config_memo_);
+            }
+            s = t;
+            id = ScreenId::Config;
+            break;
+        }
+    }
+    s->bind(ctx_);
+    active_ = s;
+    active_id_ = id;
+}
 
 void App::enter_current(Canvas& c) {
-    Screen& s = current();
-    if (entered_ == &s) return;
-    if (entered_) entered_->leave();
-    s.enter(c);
-    entered_ = &s;
+    const ScreenId id = screen_for(nav_.mode, nav_.screen);
+    if (active_ && active_id_ == id) return;
+    build(id);
+    active_->enter(c);
     needs_full_ = true;
+}
+
+void App::set_trip_source(const IPointSource* s) {
+    trip_src_ = s;
+    if (active_id_ == ScreenId::TripMap) static_cast<TripMapScreen*>(active_)->set_source(s);
+}
+
+void App::set_track_source(const IPointSource* s) {
+    track_src_ = s;
+    if (active_id_ == ScreenId::TrackMap) static_cast<TrackMapScreen*>(active_)->set_source(s);
+}
+
+void App::set_lap_history(const uint32_t* laps, size_t n, uint32_t best) {
+    laps_ = laps;
+    lap_count_ = n;
+    best_lap_ = best;
+    if (active_id_ == ScreenId::LapHistory) {
+        static_cast<LapHistoryScreen*>(active_)->set_history(laps, n, best);
+    }
+}
+
+void App::bind_settings(core::config::Settings* s) {
+    settings_ = s;
+    if (active_id_ == ScreenId::Config) static_cast<ConfigScreen*>(active_)->bind_settings(s);
 }
 
 void App::begin(Canvas& c) {
@@ -94,6 +191,7 @@ void App::begin(Canvas& c) {
 }
 
 void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
+    if (!active_) return;
 
     // The alert owns E while it is up. A warning the rider has not seen must
     // not be dismissed by a press meant for something else, and a warning
@@ -173,7 +271,7 @@ void App::update_slip(const core::state::Frame& f) {
 }
 
 void App::update(const core::state::Frame& f) {
-    if (!entered_) return;
+    if (!active_) return;
     update_alert(f);
     update_slip(f);
     const bool dev = f.ota.known && f.ota.role != core::ota::Role::Stable;
@@ -189,7 +287,9 @@ void App::update(const core::state::Frame& f) {
     const bool cal = f.gear_cal.phase != 0 && nav_.mode == Mode::Config;
     if (cal != cal_active_) {
         cal_swap_ = true;
-        if (!cal) config_.resume();
+        // CONFIG comes back where it was. Its memo was saved when the
+        // calibration page was built in its place.
+        if (!cal) config_resume_ = true;
         cal_active_ = cal;
         return;
     }
@@ -296,7 +396,7 @@ void App::paint_region(Canvas& c) {
 }
 
 void App::render(Canvas& c, bool full) {
-    if (!entered_) return;
+    if (!active_) return;
     if (cal_swap_) {
         cal_swap_ = false;
         enter_current(c);
@@ -349,7 +449,7 @@ void App::render(Canvas& c, bool full) {
 }
 
 size_t App::damage(Damage* out, size_t max) {
-    if (!entered_ || needs_full_ || max == 0) return 0;
+    if (!active_ || needs_full_ || max == 0) return 0;
     size_t n = 0;
     if (splash_on_) {
         if (splash_bar_dirty_) out[n++] = Damage{nullptr, kSplashBar};
@@ -407,7 +507,9 @@ void App::draw_damage(Canvas& c, const Damage& d) {
 void App::clear_damage() {
     splash_bar_dirty_ = false;
     restore_n_ = 0;
-    for (Widget* w : current().widgets()) if (w) w->clear_dirty();
+    if (active_) {
+        for (Widget* w : current().widgets()) if (w) w->clear_dirty();
+    }
     slip_bar_.clear_dirty();
     alert_.clear_dirty();
     dev_tag_.clear_dirty();

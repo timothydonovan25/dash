@@ -4,15 +4,43 @@
 // belong to. `nav` decides where the rider is, the App decides what that
 // means, and the render task calls `update()` then `render()` once a frame.
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include "ui/screens.hpp"
 #include "core/alert/alert.hpp"
 #include "core/nav/nav.hpp"
 
 namespace ui {
 
+// Every screen type, in one list: the App keeps only the active screen
+// alive, in storage sized and aligned for the largest of these.
+template <typename... T>
+struct ScreenStorage {
+    static constexpr size_t size  = std::max({sizeof(T)...});
+    static constexpr size_t align = std::max({alignof(T)...});
+};
+using AllScreens = ScreenStorage<
+    SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen,
+    LapScreen, LapHistoryScreen, TrackMapScreen, AllDataScreen, EngineScreen,
+    AttitudeScreen, SensorsScreen, GpsScreen, SystemScreen, PowerScreen, BusScreen,
+    RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen>;
+
+// Which screen is alive. Order follows the modes, but nothing depends on it.
+enum class ScreenId : uint8_t {
+    None,
+    Speed, Media, Trip, TripMap, Nav, Minimal,
+    Lap, LapHistory, TrackMap,
+    AllData, Engine, Attitude,
+    Sensors, Gps, System, Power, Bus, Radio, Update,
+    Config, GearCal,
+};
+
 class App {
 public:
     explicit App(const Context& ctx);
+    ~App();
+    App(const App&) = delete;
+    App& operator=(const App&) = delete;
 
     // Lays out the first screen. Must be called before update or render.
     void begin(Canvas& c);
@@ -70,7 +98,12 @@ public:
         restore_n_ = 0;
     }
 
-    Screen& current();
+    // The screen on the panel. Only one screen exists at a time: a screen is
+    // built when it is entered and destroyed when it is left, so a reference
+    // to it does not survive a screen change, and anything a screen keeps
+    // between visits (a cursor, a trace) starts again. Not before begin().
+    Screen& current() { return *active_; }
+    ScreenId current_id() const { return active_id_; }
     const core::nav::State& nav_state() const { return nav_; }
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
 
@@ -79,46 +112,45 @@ public:
     core::alert::Kind alert_kind() const { return alert_kind_; }
     SlipBar& slip_bar() { return slip_bar_; }
 
-    // Wiring for the things a screen reads but does not own.
-    void set_trip_source(const IPointSource* s)  { trip_map_.set_source(s); }
-    void set_track_source(const IPointSource* s) { track_map_.set_source(s); }
-    void set_lap_history(const uint32_t* laps, size_t n, uint32_t best) {
-        lap_history_.set_history(laps, n, best);
-    }
-    void bind_settings(core::config::Settings* s) { config_.bind_settings(s); }
+    // Wiring for the things a screen reads but does not own. The App keeps
+    // it and hands it to the screen each time that screen is built.
+    void set_trip_source(const IPointSource* s);
+    void set_track_source(const IPointSource* s);
+    void set_lap_history(const uint32_t* laps, size_t n, uint32_t best);
+    void bind_settings(core::config::Settings* s);
 
     // Screen count per mode, for tests and for the diag dump.
     const core::nav::Layout& layout() const { return layout_; }
 
 private:
-    Screen* screen_for(core::nav::Mode m, uint8_t index);
-    void    enter_current(Canvas& c);
+    ScreenId screen_for(core::nav::Mode m, uint8_t index) const;
+    void     enter_current(Canvas& c);
+    // Destroys the active screen, if any, and builds `id` in its place.
+    void     build(ScreenId id);
+    void     destroy_active();
 
     const Context&    ctx_;
     core::nav::State  nav_{};
     core::nav::Layout layout_{};
 
-    SpeedScreen      speed_;
-    MediaScreen      media_;
-    MinimalScreen    minimal_;
-    TripScreen       trip_;
-    NavScreen        nav_screen_;
-    TripMapScreen    trip_map_;
-    LapScreen        lap_;
-    LapHistoryScreen lap_history_;
-    TrackMapScreen   track_map_;
-    AllDataScreen    all_data_;
-    EngineScreen     engine_;
-    AttitudeScreen   attitude_;
-    SensorsScreen    sensors_;
-    GpsScreen        gps_;
-    SystemScreen     system_;
-    PowerScreen      power_;
-    BusScreen        bus_;
-    RadioScreen      radio_;
-    UpdateScreen     update_;
-    ConfigScreen     config_;
-    GearCalScreen    gearcal_;
+    // The one live screen. 21 screens held at once were 12.9 kB of the
+    // render task's stack, and every new screen added to it; one at a time
+    // is the largest screen, whatever the count.
+    alignas(AllScreens::align) unsigned char slot_[AllScreens::size];
+    Screen*          active_ = nullptr;
+    ScreenId         active_id_ = ScreenId::None;
+
+    // What the screens are handed when they are built.
+    const IPointSource*     trip_src_ = nullptr;
+    const IPointSource*     track_src_ = nullptr;
+    const uint32_t*         laps_ = nullptr;
+    size_t                  lap_count_ = 0;
+    uint32_t                best_lap_ = 0;
+    core::config::Settings* settings_ = nullptr;
+    // CONFIG's submenu and cursor, kept while the gear calibration page has
+    // its place, and given back when CONFIG is built again.
+    ConfigScreen::Memo      config_memo_{};
+    bool                    config_resume_ = false;
 
     AlertOverlay     alert_;
     // Decides what goes in alert_; see update_alert().
@@ -134,7 +166,6 @@ private:
     // A dev image (§11.7) wears this on every screen.
     DevTag           dev_tag_;
     bool             dev_running_ = false;
-    Screen*          entered_ = nullptr;
     bool             needs_full_ = true;
     // CONFIG shows the gear calibration page instead while a run is open.
     bool             cal_active_ = false;

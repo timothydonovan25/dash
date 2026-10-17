@@ -411,9 +411,25 @@ public:
     // module that keeps a copy can refresh.
     void bind_settings(core::config::Settings* s) { settings_ = s; }
 
-    // Coming back from the gear calibration page: the next enter() keeps the
-    // submenu and the cursor where they were instead of starting over.
-    void resume() { resume_ = true; }
+    // Where CONFIG was: the submenu, the cursor, an edit in progress. The
+    // App saves it when the gear calibration page takes CONFIG's place (and
+    // destroys this screen), and hands it back to the new one.
+    struct Memo {
+        bool    in_group = false;
+        uint8_t group = 0;
+        uint8_t focus = 0;
+        bool    editing = false;
+    };
+    Memo memo() const { return Memo{in_group_, group_, focus_, editing_}; }
+    // Coming back from the gear calibration page: the next enter() puts the
+    // submenu and the cursor back where `m` says instead of starting over.
+    void resume(const Memo& m) {
+        in_group_ = m.in_group;
+        group_ = m.group;
+        focus_ = m.focus;
+        editing_ = m.editing;
+        resume_ = true;
+    }
 
 private:
     bool                    resume_ = false;
