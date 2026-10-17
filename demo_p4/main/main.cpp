@@ -26,6 +26,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+// The demo runs the bike's partition table and boot settings, so it trips
+// the same stale-sdkconfig trap: see main/main.cpp.
+#if CONFIG_PARTITION_TABLE_OFFSET != 0x10000
+#error "CONFIG_PARTITION_TABLE_OFFSET must be 0x10000 (partitions.csv): delete sdkconfig and rebuild"
+#endif
+#if CONFIG_SECURE_BOOT || CONFIG_SECURE_FLASH_ENC_ENABLED
+#error "secure boot / flash encryption are off by decision: see sdkconfig.defaults before enabling"
+#endif
+
 // The same two guards as the real main.cpp: a stale sdkconfig that lost
 // either would build clean and test the wrong thing.
 #if !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE

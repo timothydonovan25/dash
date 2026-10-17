@@ -84,7 +84,7 @@ that's fixed, do it by hand once:
 . ~/.espressif/tools/activate_idf_v6.0.2.sh
 idf.py -C c6_cp -B c6_cp/build build
 python3 -m esptool --chip esp32p4 -p /dev/ttyACM0 write-flash --force \
-    0x610000 c6_cp/build/network_adapter.bin
+    0xC40000 c6_cp/build/network_adapter.bin   # slave_fw, from ../partitions.csv
 ```
 
 After that, `ota_slave.cpp` keeps the C6 current on every boot — no need

@@ -1019,16 +1019,29 @@ screen. Losing air is worth interrupting the trip map for.
 The table is `partitions.csv`, and it must be final before the first flash:
 moving NVS later erases it, and NVS holds the odometer.
 
+The table itself is at 0x10000 (`CONFIG_PARTITION_TABLE_OFFSET`), not IDF's
+0x8000. The bootloader at 0x2000 runs up to the table, and nothing updates
+it over the air, so the bike keeps the bootloader it is first flashed with;
+at 0x8000 that bootloader had 1.1 kB to spare, at 0x10000 it has 33 kB.
+Moved on 2026-10-17, before the bike's first flash. Both `main.cpp`s refuse
+to build with any other offset, since a bootloader looking for the table in
+the wrong place does not boot.
+
 ```
 # name     type  subtype   offset     size
-nvs        data  nvs       0x9000     0x10000    # settings, odometer, BLE bonds
-otadata    data  ota       0x19000    0x2000     # which app slot boots
-coredump   data  coredump  0x1B000    0x15000
-ota_0      app   ota_0     0x30000    0x600000   # 6 MB
-ota_1      app   ota_1     0x630000   0x600000   # 6 MB
-slave_fw   data  0x40      0xC30000   0x200000   # the C6's firmware
-# 0xE30000-0x1000000 (1.8 MB) unallocated: room for an assets partition
+nvs        data  nvs       0x11000    0x10000    # settings, odometer, BLE bonds
+otadata    data  ota       0x21000    0x2000     # which app slot boots
+coredump   data  coredump  0x23000    0x1D000
+ota_0      app   ota_0     0x40000    0x600000   # 6 MB
+ota_1      app   ota_1     0x640000   0x600000   # 6 MB
+slave_fw   data  0x40      0xC40000   0x200000   # the C6's firmware
+# 0xE40000-0x1000000 (1.75 MB) unallocated: room for an assets partition
 ```
+
+Secure boot and flash encryption are off by decision: both burn eFuses for
+good, and either would end USB recovery, `tools/flash_dev.py` and Wi-Fi
+uploads to the dev slot. `sdkconfig.defaults` says so and `main.cpp`
+refuses to build with either on.
 
 `dash.bin` is about 1.1 MB, so a slot is under a fifth full.
 

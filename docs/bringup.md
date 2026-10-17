@@ -31,7 +31,10 @@ mismatched panel can destroy it. Do this before anything else.
 **Set the partition table before the first flash.** Changing it later
 erases NVS, and NVS holds your odometer. `partitions.csv` is already in
 the tree and `sdkconfig.defaults` points at it; just confirm it is what
-you want before the first `idf.py flash`.
+you want before the first `idf.py flash`. The table sits at 0x10000, not
+IDF's 0x8000, to give the bootloader room (it is never updated over the
+air); `main.cpp` will not build with a stale `sdkconfig` that says 0x8000.
+Secure boot and flash encryption stay off: see `sdkconfig.defaults`.
 
 **Rollback has to be in the first bootloader.** Stable/dev firmware
 (architecture §11.7) depends on `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, and

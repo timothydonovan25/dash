@@ -42,6 +42,21 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #error "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE must be on: delete sdkconfig and rebuild"
 #endif
 
+// The partition table moved to 0x10000 to give the bootloader room
+// (partitions.csv). A stale sdkconfig still saying 0x8000 builds a
+// bootloader that looks for the table where it is not: a board that does
+// not boot until it is reflashed over USB.
+#if CONFIG_PARTITION_TABLE_OFFSET != 0x10000
+#error "CONFIG_PARTITION_TABLE_OFFSET must be 0x10000 (partitions.csv): delete sdkconfig and rebuild"
+#endif
+
+// Secure boot and flash encryption are off by decision (sdkconfig.defaults):
+// both burn eFuses for good and would end USB recovery, flash_dev.py and
+// Wi-Fi updates to the dev slot. Changing that is a decision, not a setting.
+#if CONFIG_SECURE_BOOT || CONFIG_SECURE_FLASH_ENC_ENABLED
+#error "secure boot / flash encryption are off by decision: see sdkconfig.defaults before enabling"
+#endif
+
 extern "C" void app_main() {
     ESP_LOGI(kTag, "dash v2 — %u config items",
              static_cast<unsigned>(core::config::item_count()));

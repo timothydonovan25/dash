@@ -364,8 +364,12 @@ to stable. DIAG → Update drives all of it; power-on always boots stable,
 with no chooser, so nothing slows the boot. `tools/flash_dev.py` writes the dev slot over USB; `idf.py
 flash` makes a new stable; the Wi-Fi page (below) uploads into the dev slot.
 **Rollback must be in the
-first bootloader flashed** — `main.cpp` will not build without it — and the
-bootloader has about 1.1 kB left.
+first bootloader flashed** — `main.cpp` will not build without it. Nothing
+updates the bootloader over the air, so the partition table is at **0x10000**,
+not 0x8000, giving it 56 kB (33 kB free) instead of 1.1 kB; `main.cpp` will
+not build with any other `CONFIG_PARTITION_TABLE_OFFSET`. **Secure boot and
+flash encryption are off by decision** (they burn eFuses and would end USB
+recovery and dev-slot uploads); `main.cpp` refuses them too.
 
 **Versions.** `firmware.txt` is the version and a one-to-three-word feature.
 Every build of either board is copied to `releases/` as

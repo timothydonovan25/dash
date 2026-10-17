@@ -35,7 +35,24 @@ VALID, UNDEFINED = 0x2, 0xFFFFFFFF
 STATE_NAMES = {0: "new", 1: "pending verify", 2: "valid", 3: "invalid",
                4: "aborted", 0xFFFFFFFF: "undefined"}
 SLOTS = ("ota_0", "ota_1")
-SLOT_OFFSETS = (0x30000, 0x630000)   # partitions.csv, shared by both boards
+
+
+def slot_offsets():
+    """ota_0 and ota_1's offsets, from partitions.csv (both boards share it),
+    so a moved table cannot leave this reading the wrong place."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "partitions.csv")
+    found = {}
+    with open(path) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            cols = [c.strip() for c in line.split(",")]
+            if len(cols) >= 4 and cols[0] in SLOTS:
+                found[cols[0]] = int(cols[3], 0)
+    if set(found) != set(SLOTS):
+        sys.exit(f"{path}: no offsets for {', '.join(sorted(set(SLOTS) - set(found)))}")
+    return tuple(found[s] for s in SLOTS)
 
 IMAGE_MAGIC = 0xE9
 CHIP_ESP32P4 = 0x0012
@@ -85,7 +102,7 @@ def read_slot_version(port, slot):
         # --after no-reset: the write that follows connects again anyway, and
         # every reset from esptool risks the demo board's ROM boot wedge.
         subprocess.run([sys.executable, "-m", "esptool", "--port", port,
-                        "--after", "no-reset", "read-flash", hex(SLOT_OFFSETS[slot]), hex(APP_DESC + 256),
+                        "--after", "no-reset", "read-flash", hex(slot_offsets()[slot]), hex(APP_DESC + 256),
                         tmp.name], check=True, stdout=subprocess.DEVNULL)
         head = open(tmp.name, "rb").read()
     try:
