@@ -54,6 +54,17 @@ def slot_offsets():
         sys.exit(f"{path}: no offsets for {', '.join(sorted(set(SLOTS) - set(found)))}")
     return tuple(found[s] for s in SLOTS)
 
+def table_offset():
+    """Where the partition table is, from sdkconfig.defaults (both boards
+    put it at the same place). parttool assumes 0x8000 and, since the table
+    moved to 0x10000 in 1.20, found nothing there."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sdkconfig.defaults")
+    with open(path) as f:
+        for line in f:
+            if line.startswith("CONFIG_PARTITION_TABLE_OFFSET="):
+                return line.split("=", 1)[1].strip()
+    sys.exit(f"{path}: no CONFIG_PARTITION_TABLE_OFFSET")
+
 IMAGE_MAGIC = 0xE9
 CHIP_ESP32P4 = 0x0012
 APP_DESC_MAGIC = 0xABCD5432
@@ -114,7 +125,8 @@ def read_slot_version(port, slot):
 def read_otadata(port):
     with tempfile.NamedTemporaryFile(suffix=".bin") as tmp:
         subprocess.run([sys.executable, idf_tool("components", "partition_table", "parttool.py"),
-                        "--port", port, "--esptool-args=after=no-reset", "read_partition", "--partition-name", "otadata",
+                        "--port", port, "--partition-table-offset", table_offset(),
+                        "--esptool-args=after=no-reset", "read_partition", "--partition-name", "otadata",
                         "--output", tmp.name], check=True)
         return open(tmp.name, "rb").read()
 
@@ -158,15 +170,16 @@ def main():
         sys.exit(f"refusing: this is a {board_of(version)} image and the dash runs "
                  f"{board_of(running)} firmware (--any-board to write it anyway)")
     print(f"stable is {SLOTS[stable]}; writing {SLOTS[dev]}, otadata untouched")
-    # parttool, not otatool: IDF v6.0.2's otatool write_ota_partition passes
-    # its file as `input=` to a function that takes `input_file`, and dies
-    # with a TypeError before writing anything. Same write, by slot name.
-    subprocess.run([sys.executable, idf_tool("components", "partition_table", "parttool.py"),
-                    # A USB reset after the write can wedge a P4 v1.x in its ROM
-                    # until it is unplugged; the RTC watchdog reset is deeper.
-                    "--port", args.port, "--esptool-args=after=watchdog-reset",
-                    "write_partition", "--partition-name", SLOTS[dev],
-                    "--input", args.image], check=True)
+    # One esptool session, at the slot's offset from partitions.csv. Not
+    # parttool's write_partition: that is three esptool runs (read the table,
+    # erase, write), each ending in a reset, and the next one found the port
+    # gone while USB came back. Not otatool either: IDF v6.0.2's
+    # write_ota_partition dies with a TypeError before writing anything.
+    # A USB reset after the write can wedge a P4 v1.x in its ROM until it is
+    # unplugged; the RTC watchdog reset is deeper.
+    subprocess.run([sys.executable, "-m", "esptool", "--chip", "esp32p4", "--port", args.port,
+                    "-b", "460800", "--before", "default-reset", "--after", "watchdog-reset",
+                    "write-flash", hex(slot_offsets()[dev]), args.image], check=True)
     print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
           "DIAG -> Update -> Boot dev once to run it.")
 

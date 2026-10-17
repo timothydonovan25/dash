@@ -57,6 +57,9 @@ public:
         for (int i = 0; i < n; ++i) queue(strips[i], canvas);
     }
 
+    // Exactly `r`, one transfer: a part ui::Shadow::diff() found changed.
+    void queue_part(const ui::Rect& r, const ui::Color* canvas) { queue(r, canvas); }
+
     // The whole screen in fixed bands, as the full-repaint branch does.
     void queue_full(const ui::Color* canvas) {
         for (int16_t y = 0; y < ui::kScreenH; y = static_cast<int16_t>(y + band_lines_)) {

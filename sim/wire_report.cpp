@@ -9,11 +9,14 @@
 //
 // No hardware, no ESP-IDF, and no second copy of the render loop: the strip
 // split comes from ui/blit_plan.hpp, which is the same function the render
-// task blits through.
+// task blits through, and each strip goes through ui::Shadow, as there, so
+// only its changed pixels are priced. The TOTAL line also says what the
+// frame would cost with each damage rectangle sent whole.
 #include "core/shift/shift.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/wire_cost.hpp"
+#include "ui/shadow.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -190,6 +193,32 @@ int main(int argc, char** argv) {
     app.bind_settings(&settings);
     app.begin(canvas);
 
+    std::vector<Color> glass(px.size(), 0);
+    Shadow shadow(glass.data());
+    std::vector<Color> strip_px;
+    const uint32_t overhead = wire::overhead_px(p);
+    // One damage rectangle as render_service sends it: strip by strip, each
+    // compared with the glass and only its changed parts priced.
+    auto send = [&](const Rect& dr, wire::Model& a, wire::Model& b) {
+        Rect strips[kMaxStrips];
+        const int ns = plan_strips(dr, kBandPixels, strips, kMaxStrips);
+        for (int k = 0; k < ns; ++k) {
+            const Rect& r = strips[k];
+            strip_px.resize(static_cast<size_t>(r.w) * r.h);
+            for (int16_t y = 0; y < r.h; ++y) {
+                const Color* src = px.data() + static_cast<size_t>(r.y + y) * kScreenW + r.x;
+                std::copy(src, src + r.w, strip_px.begin() + static_cast<size_t>(y) * r.w);
+            }
+            Rect parts[Shadow::kMaxParts];
+            const int np = shadow.diff(r, strip_px.data(), parts, Shadow::kMaxParts, overhead);
+            for (int j = 0; j < np; ++j) { a.transfer(parts[j]); b.transfer(parts[j]); }
+        }
+    };
+    auto record_all = [&] {
+        shadow.record(Rect{0, 0, kScreenW, kScreenH}, px.data());
+        shadow.validate();
+    };
+
     // Walk every screen in every mode.
     const core::nav::Layout& layout = app.layout();
     for (uint8_t mode = 0; mode < core::nav::kModeCount; ++mode) {
@@ -203,6 +232,7 @@ int main(int argc, char** argv) {
             app.update(f);
             app.render(canvas, true);
             app.clear_full_repaint();
+            record_all();
 
             WidgetList ws = app.current().widgets();
             std::vector<Row> rows;
@@ -212,6 +242,7 @@ int main(int argc, char** argv) {
             }
 
             wire::Model m(p, kBandPixels, kBandLines);
+            wire::Model whole(p, kBandPixels, kBandLines);   // without the shadow
             uint32_t full_frames = 0;
 
             for (int n = 1; n <= frames; ++n) {
@@ -220,12 +251,21 @@ int main(int argc, char** argv) {
 
                 if (app.needs_full_repaint()) {
                     m.full_repaint();
+                    whole.full_repaint();
                     ++full_frames;
+                    app.render(canvas, true);
+                    app.clear_full_repaint();
+                    record_all();
                 } else {
                     // Exactly what render_service sends: App::damage(), which
-                    // is the changed part of each widget, not its bounds.
+                    // is the changed part of each widget, not its bounds,
+                    // and of that only what differs from the glass. Taken
+                    // before render(), which clears the flags; diffed after
+                    // it, against the pixels render() drew.
                     App::Damage dmg[App::kMaxDamage];
                     const size_t nd = app.damage(dmg, App::kMaxDamage);
+                    app.render(canvas, true);
+                    app.clear_full_repaint();
                     size_t i = 0;
                     for (Widget* w : ws) {
                         // Price this widget alone, so the per-widget
@@ -234,7 +274,8 @@ int main(int argc, char** argv) {
                         bool any = false;
                         for (size_t k = 0; k < nd; ++k) {
                             if (!w || dmg[k].w != w) continue;
-                            one.region(dmg[k].r);
+                            send(dmg[k].r, one, m);
+                            whole.region(dmg[k].r);
                             any = true;
                         }
                         if (any) {
@@ -242,15 +283,23 @@ int main(int argc, char** argv) {
                             rows[i].pixels    += c.pixels;
                             rows[i].transfers += c.transfers;
                             rows[i].ms        += c.ms();
-                            rows[i].dirty_frames++;
+                            if (c.pixels) rows[i].dirty_frames++;
                         }
                         ++i;
                     }
-                    for (size_t k = 0; k < nd; ++k) m.region(dmg[k].r);
+                    // Damage that belongs to no widget on the list (the
+                    // alert box, the slip bar) still goes on the wire.
+                    for (size_t k = 0; k < nd; ++k) {
+                        bool listed = false;
+                        for (Widget* w : ws) listed |= (w && dmg[k].w == w);
+                        if (listed) continue;
+                        wire::Model none(p, kBandPixels, kBandLines);
+                        send(dmg[k].r, none, m);
+                        whole.region(dmg[k].r);
+                    }
                 }
-                app.render(canvas, true);
-                app.clear_full_repaint();
                 m.end_frame();
+                whole.end_frame();
             }
 
             std::printf("\n%s / %s — %d frames of riding\n",
@@ -299,6 +348,9 @@ int main(int argc, char** argv) {
                 std::printf("\n  nothing moved: this screen costs no wire time "
                             "between full repaints\n");
             }
+            std::printf("  without the shadow: %.0f px, %.2f ms/frame\n",
+                        static_cast<double>(whole.total().pixels) / frames,
+                        static_cast<double>(whole.mean_ms()));
             std::printf("  peak %.2f ms   full repaints %u   unsendable %u\n",
                         m.peak().ms(), full_frames, m.unsendable());
             if (m.total().oversized) {

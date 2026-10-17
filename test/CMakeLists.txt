@@ -64,7 +64,8 @@ add_library(ui STATIC
     ${UI}/src/screens_diag.cpp
     ${UI}/src/screen_config.cpp
     ${UI}/src/screen_gearcal.cpp
-    ${UI}/src/app.cpp)
+    ${UI}/src/app.cpp
+    ${UI}/src/shadow.cpp)
 target_include_directories(ui PUBLIC ${UI}/include)
 target_link_libraries(ui PUBLIC core)
 
@@ -73,7 +74,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -105,7 +106,7 @@ target_include_directories(test_logic_waypoint PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(test_logic_waypoint PRIVATE core ui hal)
 add_test(NAME logic_waypoint COMMAND test_logic_waypoint)
 
-foreach(t ui wire)
+foreach(t ui wire shadow)
     target_link_libraries(test_${t} PRIVATE ui hal)
 endforeach()
 

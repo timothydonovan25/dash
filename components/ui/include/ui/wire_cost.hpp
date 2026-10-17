@@ -105,6 +105,17 @@ inline Cost transfer_cost(const Panel& p, uint32_t pixels) {
     return c;
 }
 
+// What one more transfer costs, in pixels' worth of bus: the point at which
+// sending some unchanged pixels beats splitting a region in two
+// (ui::Shadow::diff). About 30 on the P4 board at 10 MHz.
+inline uint32_t overhead_px(const Panel& p) {
+    const uint64_t per_byte_ns =
+        1000000000ull / (static_cast<uint64_t>(p.clock_hz) * p.bits_per_clock / 8u);
+    const uint64_t px_ns = per_byte_ns * p.bytes_per_px + p.convert_ns_per_px;
+    const uint64_t fixed_ns = p.overhead_ns + per_byte_ns * p.cmd_bytes;
+    return px_ns ? static_cast<uint32_t>(fixed_ns / px_ns) : 0;
+}
+
 // Accumulates a frame, then a run of frames.
 //
 // Feed it the same decisions the render task makes: `full_repaint()` when
@@ -126,6 +137,13 @@ public:
                 panel_, static_cast<uint32_t>(strips[i].w) * strips[i].h);
         }
         return true;
+    }
+
+    // One transfer of exactly `r`, already clipped and inside the band:
+    // what render sends for each part ui::Shadow::diff() finds.
+    void transfer(const Rect& r) {
+        if (r.empty()) return;
+        frame_ += transfer_cost(panel_, static_cast<uint32_t>(r.w) * r.h);
     }
 
     // The whole screen, band by band. Mirrors the full-repaint branch of

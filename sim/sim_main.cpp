@@ -52,6 +52,7 @@
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/wire_cost.hpp"
+#include "ui/shadow.hpp"
 
 #include <chrono>
 #include <ctime>
@@ -521,6 +522,11 @@ int main() {
     ui::wire::Panel wire_panel = ui::wire::i80_8bit(10000000u);   // bsp::kTftWrHz
     wire_panel.bus_limit_bytes = kBusLimitBytes;
     ui::wire::Model wire(wire_panel, kBandPixels, kBandLines);
+    // render_service's copy of the glass, and its merge rule.
+    std::vector<ui::Color> glass(static_cast<size_t>(ui::kScreenW) * ui::kScreenH, 0);
+    ui::Shadow shadow(glass.data());
+    std::vector<ui::Color> strip_px;
+    const uint32_t overhead_px = ui::wire::overhead_px(wire_panel);
     // What the glass shows: the canvas as the bus has delivered it so far.
     sim::PanelSim panel(kBandPixels, kBandLines);
     panel.set_bus_limit(kBusLimitBytes);
@@ -774,23 +780,15 @@ int main() {
                                 lap_history.best_ms);
             app.update(core::state::snapshot(slots, now));
 
-            // Price the frame before rendering it: `update` is what sets the
+            // Take the damage before rendering it: `update` is what sets the
             // dirty flags and `render` is what clears them, so this is the
             // one moment the real set of moved widgets exists. The decision
-            // mirrors render_service's — full repaint or dirty widgets.
+            // mirrors render_service's -- full repaint or dirty widgets --
+            // and so does what goes on the wire: each damaged strip compared
+            // with the glass (ui::Shadow) and only its changed parts sent.
             const bool full = app.needs_full_repaint();
-            std::vector<ui::Rect> sent;
-            if (full) {
-                wire.full_repaint();
-            } else {
-                ui::App::Damage dmg[ui::App::kMaxDamage];
-                const size_t n = app.damage(dmg, ui::App::kMaxDamage);
-                for (size_t i = 0; i < n; ++i) {
-                    wire.region(dmg[i].r);
-                    sent.push_back(dmg[i].r);
-                }
-            }
-            cost = wire.end_frame();
+            ui::App::Damage dmg[ui::App::kMaxDamage];
+            const size_t ndmg = full ? 0 : app.damage(dmg, ui::App::kMaxDamage);
 
             // The canvas is the firmware's idea of the screen and is always
             // whole. Only what was costed goes down the bus; the rest of the
@@ -798,8 +796,36 @@ int main() {
             // made a widget goes visibly stale.
             app.render(canvas, true);
             app.clear_full_repaint();
-            if (full) panel.queue_full(px.data());
-            else for (const ui::Rect& r : sent) panel.queue_region(r, px.data());
+            if (full) {
+                wire.full_repaint();
+                panel.queue_full(px.data());
+                shadow.record(ui::Rect{0, 0, ui::kScreenW, ui::kScreenH}, px.data());
+                shadow.validate();
+            } else {
+                for (size_t i = 0; i < ndmg; ++i) {
+                    ui::Rect strips[ui::kMaxStrips];
+                    const int ns = ui::plan_strips(dmg[i].r, kBandPixels, strips,
+                                                   ui::kMaxStrips);
+                    for (int k = 0; k < ns; ++k) {
+                        const ui::Rect& r = strips[k];
+                        strip_px.resize(static_cast<size_t>(r.w) * r.h);
+                        for (int16_t y = 0; y < r.h; ++y) {
+                            const ui::Color* src = px.data() +
+                                static_cast<size_t>(r.y + y) * ui::kScreenW + r.x;
+                            std::copy(src, src + r.w,
+                                      strip_px.begin() + static_cast<size_t>(y) * r.w);
+                        }
+                        ui::Rect parts[ui::Shadow::kMaxParts];
+                        const int np = shadow.diff(r, strip_px.data(), parts,
+                                                   ui::Shadow::kMaxParts, overhead_px);
+                        for (int j = 0; j < np; ++j) {
+                            wire.transfer(parts[j]);
+                            panel.queue_part(parts[j], px.data());
+                        }
+                    }
+                }
+            }
+            cost = wire.end_frame();
         }
         if (system.first_frame_ms == 0) system.first_frame_ms = now ? now : 1;
 

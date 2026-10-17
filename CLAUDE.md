@@ -223,6 +223,12 @@ changed — and only the part that changed, where a widget can say
 is redrawn on a full repaint and never in between, so live data painted
 there stops moving. `test_ui` checks that a partial update lands the same
 pixels as a full repaint, which is the property that catches it.
+Narrower again, `ui::Shadow` (1.21) keeps a copy of the glass in PSRAM and
+each drawn strip goes out only where it differs from it (CPU for bus: SPEED's
+riding frame is ~1 ms on the wire, ~2 without). Anything that leaves the glass
+unknown — a failed blit, a panel re-init — must `invalidate()` it; a full
+repaint `record()`s and `validate()`s it. Render, the demo, the sim and
+`sim/wire_report` all send through it.
 
 ## Conventions
 

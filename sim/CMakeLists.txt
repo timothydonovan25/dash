@@ -36,7 +36,8 @@ add_library(ui STATIC
     ${UI}/src/widgets.cpp    ${UI}/src/app.cpp
     ${UI}/src/screens_cruise.cpp ${UI}/src/screens_track.cpp
     ${UI}/src/screens_stat.cpp   ${UI}/src/screens_diag.cpp
-    ${UI}/src/screen_config.cpp ${UI}/src/screen_gearcal.cpp)
+    ${UI}/src/screen_config.cpp ${UI}/src/screen_gearcal.cpp
+    ${UI}/src/shadow.cpp)
 target_include_directories(ui PUBLIC ${UI}/include)
 target_link_libraries(ui PUBLIC core)
 

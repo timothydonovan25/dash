@@ -2,6 +2,8 @@
 #include "core/gearcal/gearcal.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
+#include "ui/shadow.hpp"
+#include "ui/wire_cost.hpp"
 #include "core/state/track_buffer.hpp"
 #include <cmath>
 #include <cstdio>
@@ -37,6 +39,18 @@ struct Screen320x480 {
     void wipe() { for (Color& c : px) c = 0; }
 };
 
+// The render loops reuse one buffer for every rectangle, so a pixel a widget
+// does not paint goes out as whatever was there before. Zeros would hide that
+// wherever the right colour happens to be black; this does not.
+void junk(std::vector<Color>& buf, size_t n) {
+    static uint32_t seed = 0x9E3779B9u;
+    buf.resize(n);
+    for (Color& c : buf) {
+        seed = seed * 1664525u + 1013904223u;
+        c = static_cast<Color>(seed >> 16);
+    }
+}
+
 // A partial update the way the render task makes one: App::damage(), each
 // rectangle drawn by draw_damage() into a canvas windowed onto just that
 // rectangle, and only those pixels written to the "panel". Anything a
@@ -48,7 +62,7 @@ size_t send_damage(App& app, std::vector<Color>& panel) {
     for (size_t i = 0; i < n; ++i) {
         const Rect r = d[i].r.clipped_to(Rect{0, 0, kScreenW, kScreenH});
         if (r.empty()) continue;
-        buf.assign(static_cast<size_t>(r.w) * r.h, 0);
+        junk(buf, static_cast<size_t>(r.w) * r.h);
         FrameBufferCanvas c(buf.data(), r.w, r.h);
         c.set_window(r.x, r.y, r.w, r.h);
         app.draw_damage(c, d[i]);
@@ -61,6 +75,51 @@ size_t send_damage(App& app, std::vector<Color>& panel) {
     }
     app.clear_damage();
     return n;
+}
+
+// send_damage() through a ui::Shadow, as render_service and demo_render do:
+// each rectangle drawn, compared with what the glass holds, and only the
+// changed parts packed and sent. Returns the pixels sent; `whole_px` gets
+// what send_damage() would have sent for the same damage.
+size_t send_damage_diffed(App& app, std::vector<Color>& panel, Shadow& sh,
+                          size_t* whole_px = nullptr) {
+    App::Damage d[App::kMaxDamage];
+    const size_t n = app.damage(d, App::kMaxDamage);
+    const uint32_t overhead = wire::overhead_px(wire::i80_8bit(10000000u));
+    std::vector<Color> buf;
+    size_t sent = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const Rect r = d[i].r.clipped_to(Rect{0, 0, kScreenW, kScreenH});
+        if (r.empty()) continue;
+        if (whole_px) *whole_px += static_cast<size_t>(r.w) * r.h;
+        junk(buf, static_cast<size_t>(r.w) * r.h);
+        FrameBufferCanvas c(buf.data(), r.w, r.h);
+        c.set_window(r.x, r.y, r.w, r.h);
+        app.draw_damage(c, d[i]);
+        Rect parts[Shadow::kMaxParts];
+        const int np = sh.diff(r, buf.data(), parts, Shadow::kMaxParts, overhead);
+        for (int k = 0; k < np; ++k) {
+            const Rect& p = parts[k];
+            Shadow::pack(r, buf.data(), p);
+            for (int16_t y = 0; y < p.h; ++y) {
+                for (int16_t x = 0; x < p.w; ++x) {
+                    panel[static_cast<size_t>(p.y + y) * kScreenW + p.x + x] =
+                        buf[static_cast<size_t>(y) * p.w + x];
+                }
+            }
+            sent += static_cast<size_t>(p.w) * p.h;
+        }
+    }
+    app.clear_damage();
+    return sent;
+}
+
+// A full repaint through a Shadow: all of it sent, all of it remembered.
+void full_repaint_diffed(App& app, Screen320x480& s, Shadow& sh) {
+    app.render(s.canvas, true);
+    app.clear_full_repaint();
+    sh.record(Rect{0, 0, kScreenW, kScreenH}, s.px.data());
+    sh.validate();
 }
 
 // One frame the way every render loop runs it (render_service, demo_render,
@@ -1530,6 +1589,122 @@ int main() {
             }
         }
         CHECK(screens >= 20);
+    }
+
+    CASE("the same ride through a shadow: still matches whole, sends less");
+    {
+        // ui::Shadow sends only the changed part of each damage rectangle.
+        // A part it wrongly thinks unchanged is a pixel the glass never gets,
+        // so the property is the one above, with the diff in the loop; and
+        // it has to be worth having, so it must also send less.
+        uint32_t seed = 12345;
+        auto rnd = [&](float lo, float hi) {
+            seed = seed * 1664525u + 1013904223u;
+            return lo + (hi - lo) * static_cast<float>(seed >> 8) / 16777216.0f;
+        };
+        const core::nav::Layout counts;
+        int screens = 0;
+        size_t total_sent = 0, total_whole = 0;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t sn = 0; sn < counts.screens[m]; ++sn) {
+                Fixture fx;
+                fx.settings.gauge_sweep = false;
+                Screen320x480 panel;
+                std::vector<Color> store(static_cast<size_t>(kScreenW) * kScreenH, 0);
+                Shadow sh(store.data());
+                fx.app.begin(panel.canvas);
+                go_to(fx.app, panel.canvas, static_cast<Mode>(m), sn);
+                Frame f = busy_frame();
+                f.waypoint.pts[0].set = true;
+                f.waypoint.pts[0].lat = f.gnss.lat + 0.01;
+                f.waypoint.pts[0].lon = f.gnss.lon + 0.01;
+                fx.app.update(f);
+                full_repaint_diffed(fx.app, panel, sh);
+                size_t worst = 0;
+                for (int i = 0; i < 300; ++i) {
+                    f.t_ms += 17;
+                    f.motion.best_mph = rnd(0.0f, 1.0f) < 0.1f ? rnd(0, 120) : f.motion.best_mph + rnd(-2, 2);
+                    if (f.motion.best_mph < 0) f.motion.best_mph = 0;
+                    f.engine.rpm = rnd(1200, 11000);
+                    f.att.lean_deg = rnd(0.0f, 1.0f) < 0.05f ? rnd(-90, 90) : f.att.lean_deg + rnd(-4, 4);
+                    f.health[Dev::Imu].state = rnd(0.0f, 1.0f) > 0.02f ? DevState::Ok : DevState::Fault;
+                    f.gnss.course_deg = rnd(0, 360);
+                    f.gnss.speed_mph = rnd(0, 60);
+                    f.lap.current_ms += static_cast<uint32_t>(rnd(0, 40));
+                    if (rnd(0.0f, 1.0f) < 0.02f) f.lap.current_ms = static_cast<uint32_t>(rnd(0, 700000));
+                    f.trip.trip_a_mi += rnd(0, 0.02f);
+                    fx.app.update(f);
+                    if (fx.app.needs_full_repaint()) {
+                        full_repaint_diffed(fx.app, panel, sh);
+                    } else {
+                        total_sent += send_damage_diffed(fx.app, panel.px, sh, &total_whole);
+                    }
+                    if (i % 25 != 24) continue;
+                    Screen320x480 whole;
+                    fx.app.render(whole.canvas, true);
+                    size_t differing = 0;
+                    for (size_t k = 0; k < panel.px.size(); ++k) {
+                        if (panel.px[k] != whole.px[k]) ++differing;
+                    }
+                    if (differing > worst) worst = differing;
+                }
+                if (worst) {
+                    std::printf("       %s/%s: up to %zu px differ\n",
+                                fx.app.mode_name(), fx.app.current().name(), worst);
+                }
+                CHECK(worst == 0);
+                ++screens;
+            }
+        }
+        CHECK(screens >= 20);
+        std::printf("       shadow: %zu of %zu damaged px sent (%.0f%%)\n", total_sent,
+                    total_whole, 100.0 * static_cast<double>(total_sent) /
+                                     static_cast<double>(total_whole ? total_whole : 1));
+        CHECK(total_sent < total_whole);
+    }
+
+    CASE("key-on splash and sweep: the panel matches a full repaint, frame by frame");
+    {
+        // Every ride case turns the sweep off, so this is the only one that
+        // sends it: rpm, speed and gear to full scale and back in about a
+        // second, on whatever screen the dash wakes on. Both ways the render
+        // loops send it -- whole damage rectangles, and through a Shadow --
+        // compared with a full repaint after every frame.
+        for (int diffed = 0; diffed < 2; ++diffed) {
+            Fixture fx;
+            fx.settings.splash = true;
+            fx.settings.gauge_sweep = true;
+            Screen320x480 panel;
+            std::vector<Color> store(static_cast<size_t>(kScreenW) * kScreenH, 0);
+            Shadow sh(store.data());
+            fx.app.begin(panel.canvas);
+            Frame f = busy_frame();
+            size_t worst = 0;
+            int worst_at = -1;
+            for (int i = 0; i < 500; ++i) {           // 4 s at 120 Hz
+                f.t_ms += 8;
+                fx.app.update(f);
+                if (fx.app.needs_full_repaint()) {
+                    full_repaint_diffed(fx.app, panel, sh);
+                } else if (diffed) {
+                    send_damage_diffed(fx.app, panel.px, sh);
+                } else {
+                    send_damage(fx.app, panel.px);
+                }
+                Screen320x480 whole;
+                fx.app.render(whole.canvas, true);
+                size_t differing = 0;
+                for (size_t k = 0; k < panel.px.size(); ++k) {
+                    if (panel.px[k] != whole.px[k]) ++differing;
+                }
+                if (differing > worst) { worst = differing; worst_at = i; }
+            }
+            if (worst) {
+                std::printf("       %s: up to %zu px differ (first worst at frame %d)\n",
+                            diffed ? "shadow" : "whole rects", worst, worst_at);
+            }
+            CHECK(worst == 0);
+        }
     }
 
     CASE("riding frames send only what moved: SPEED, MINIMAL and LAP");

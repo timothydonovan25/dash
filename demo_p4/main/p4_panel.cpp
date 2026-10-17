@@ -385,10 +385,19 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     // rect (not the source ones), so every output pixel gets written even
     // though 1.5x means some source pixels cover a 2x2 block and others a
     // 1x1 — walking the source the other way round would leave gaps.
-    const int dst_x0 = x * kScaleNum / kScaleDen;
-    const int dst_x1 = (x + w) * kScaleNum / kScaleDen;
-    const int dst_y0 = y * kScaleNum / kScaleDen;
-    const int dst_y1 = (y + h) * kScaleNum / kScaleDen;
+    //
+    // Rounded up at both ends: destination d shows source floor(d / 1.5), so
+    // source s owns [ceil(1.5 s), ceil(1.5 (s + 1))). Rounded down, a
+    // rectangle starting at an odd x or y began one destination pixel early,
+    // on its left neighbour's pixel, and read it from before its own buffer
+    // -- a column of garbage at a negative index, a row of it from far past
+    // the end. Widgets mostly start even, so it hid until 1.21's Shadow sent
+    // small parts starting anywhere, and the start-up sweep smeared.
+    const auto up = [](int v) { return (v * kScaleNum + kScaleDen - 1) / kScaleDen; };
+    const int dst_x0 = up(x);
+    const int dst_x1 = up(x + w);
+    const int dst_y0 = up(y);
+    const int dst_y1 = up(y + h);
     if (dst_x1 <= dst_x0 || dst_y1 <= dst_y0) return hal::Status::Ok;
 
     // The whole destination must land on the panel; checked once at the
@@ -407,6 +416,7 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     static_assert(sizeof src_row_ / sizeof src_row_[0] >= kViewH, "src_row_ too small");
     for (int dvy = dst_y0; dvy < dst_y1; ++dvy) {
         int sy = dvy * kScaleDen / kScaleNum;
+        if (sy < y) sy = y;                 // cannot happen; never read before the buffer
         if (sy > y + h - 1) sy = y + h - 1;
         src_row[dvy - dst_y0] = static_cast<uint16_t>(sy - y);
     }
@@ -418,6 +428,7 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     const int step = kRotateCw ? 1 : -1;
     for (int dvx = dst_x0; dvx < dst_x1; ++dvx) {
         int sx = dvx * kScaleDen / kScaleNum;
+        if (sx < x) sx = x;
         if (sx > x + w - 1) sx = x + w - 1;
         const uint16_t* col = pixels + (sx - x);
         uint16_t* out = fb_ + native_index(kMarginY + dst_y0, kMarginX + dvx);

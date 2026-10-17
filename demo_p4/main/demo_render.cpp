@@ -2,6 +2,8 @@
 #include "esp_log.h"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
+#include "ui/shadow.hpp"
+#include "ui/wire_cost.hpp"
 #include "drivers/chip_temp.hpp"
 #include "core/wifi/wifi.hpp"
 
@@ -95,6 +97,20 @@ void render_task_impl(void* arg) {
 
     ui::FrameBufferCanvas canvas(buf, ui::kScreenW, ui::kScreenH);
     app.begin(canvas);
+
+    // What the glass shows, so a redrawn widget sends only the pixels that
+    // changed (ui::Shadow), as the bike's render task does. Here the saving
+    // is CPU and PSRAM writes -- every pixel blit() takes is scaled 1.5x and
+    // turned -- rather than bus time, but it is the same code path, and this
+    // is the board it can be watched on.
+    auto* glass = static_cast<ui::Color*>(
+        heap_caps_malloc(static_cast<size_t>(ui::kScreenW) * ui::kScreenH *
+                         sizeof(ui::Color), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!glass) ESP_LOGW("render", "no PSRAM for the shadow: sending damage whole");
+    ui::Shadow shadow(glass);
+    // The bike's bus, priced: the demo has none, and uses the bike's merge
+    // rule so the parts it sends are the ones the bike would.
+    const uint32_t overhead_px = ui::wire::overhead_px(ui::wire::i80_8bit(10000000u));
     if (d.panel) d.panel->set_backlight(d.settings->brightness_pct);
     uint8_t applied_brightness = d.settings->brightness_pct;
 
@@ -151,7 +167,13 @@ void render_task_impl(void* arg) {
             app.render(canvas, true);
             if (d.panel) s = d.panel->blit(0, 0, ui::kScreenW, ui::kScreenH, buf);
             sent = true;
-            if (hal::ok(s)) app.clear_full_repaint();
+            shadow.record(screen, buf);
+            if (hal::ok(s)) {
+                app.clear_full_repaint();
+                shadow.validate();
+            } else {
+                shadow.invalidate();
+            }
             if (d.system && d.system->first_frame_ms == 0) {
                 d.system->first_frame_ms = now ? now : 1;
                 ESP_LOGI("render", "first frame at %u ms", static_cast<unsigned>(now));
@@ -166,14 +188,29 @@ void render_task_impl(void* arg) {
                 const ui::Rect r = dmg[i].r.clipped_to(screen);
                 if (r.empty() || !canvas.set_window(r.x, r.y, r.w, r.h)) continue;
                 app.draw_damage(canvas, dmg[i]);
-                if (d.panel) {
-                    s = d.panel->blit(static_cast<uint16_t>(r.x), static_cast<uint16_t>(r.y),
-                                      static_cast<uint16_t>(r.w), static_cast<uint16_t>(r.h),
-                                      buf);
+                // Only where it differs from the glass, each part packed to
+                // the front of the buffer and written before the next.
+                ui::Rect parts[ui::Shadow::kMaxParts];
+                const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, overhead_px);
+                for (int k = 0; k < np && hal::ok(s); ++k) {
+                    const ui::Rect& p = parts[k];
+                    ui::Shadow::pack(r, buf, p);
+                    if (d.panel) {
+                        s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
+                                          static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h),
+                                          buf);
+                    }
+                    sent = true;
                 }
-                sent = true;
             }
-            if (hal::ok(s)) app.clear_damage();
+            // A failed write leaves the glass unknown where the shadow says
+            // it was sent: a whole frame next, which puts them back in step.
+            if (hal::ok(s)) {
+                app.clear_damage();
+            } else {
+                shadow.invalidate();
+                app.invalidate();
+            }
         }
 
         // As on the bike: only a transfer says anything about the panel,

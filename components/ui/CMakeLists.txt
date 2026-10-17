@@ -12,5 +12,6 @@ idf_component_register(
          "src/screen_config.cpp"
          "src/screen_gearcal.cpp"
          "src/app.cpp"
+         "src/shadow.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core)

@@ -12,11 +12,18 @@
 // periods. The widget dirty flags are what make a high rate possible, and the
 // widgets' own damage() narrows them to the part that changed: the lean
 // marker and its number, the digits of a speed or a lap time that moved.
-// sim/wire_report prices a riding frame on SPEED at about 2 ms (5.6 peak);
-// it was 6.6 (10 peak) while those went whole. A full repaint simply takes
+// sim/wire_report prices a riding frame on SPEED at about 1 ms (4.8 peak)
+// with the shadow below; 2 ms (5.6) without it, and 6.6 (10 peak) while
+// those went whole. A full repaint simply takes
 // several periods, and the deadline below skips ahead rather than trying to
 // catch up. On the S3 board's SPI the same frame was 92 ms, and the dirty
 // flags were the difference between 11 fps and 30.
+//
+// Narrower still, `ui::Shadow` keeps a copy of the glass in PSRAM and each
+// strip, once drawn, is compared against it: only the rows and columns that
+// actually differ are sent. A speed going from 47 to 48 redraws its readout
+// but sends little more than the digit that changed. Comparing is a fraction
+// of a millisecond of CPU; that is the trade, CPU for bus.
 //
 // A whole frame still goes out on a screen change and at boot — anything
 // where the panel's contents are unknown. An alert being dismissed or the
@@ -25,6 +32,8 @@
 #include "ui/app.hpp"
 #include "ui/blit_plan.hpp"
 #include "ui/framebuffer_canvas.hpp"
+#include "ui/shadow.hpp"
+#include "ui/wire_cost.hpp"
 #include "bsp/pins.hpp"
 
 #include "esp_log.h"
@@ -78,9 +87,19 @@ private:
 
 // Push one damaged rectangle, in horizontal strips that fit the one band
 // buffer. A tall widget becomes a few transfers rather than needing a
-// framebuffer the size of the screen.
+// framebuffer the size of the screen. Each strip, once drawn, goes out only
+// where it differs from what the glass already shows (ui::Shadow), packed to
+// the front of the band; the panel copies a transfer into its own staging
+// buffer before blit() returns, so the band is free for the next part.
+// `sent` is set when anything went on the wire.
 hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
-                        ui::Color* buf, const ui::App::Damage& dmg) {
+                        ui::Color* buf, ui::Shadow& shadow,
+                        const ui::App::Damage& dmg, bool& sent) {
+    // What one more transfer costs in pixels: below it, sending unchanged
+    // pixels between two changes beats splitting them. BRINGUP: the
+    // per-transfer overhead in ui::wire is a guess until it is scoped.
+    static const uint32_t kOverheadPx =
+        ui::wire::overhead_px(ui::wire::i80_8bit(bsp::kTftWrHz));
     // The clip and the strip split are in ui/blit_plan.hpp so that the
     // wire-cost model prices exactly what this sends, rather than its own
     // idea of it.
@@ -94,11 +113,15 @@ hal::Status blit_damage(Deps& d, ui::App& app, ui::FrameBufferCanvas& canvas,
         const ui::Rect& r = strips[i];
         if (!canvas.set_window(r.x, r.y, r.w, r.h)) return hal::Status::Unsupported;
         app.draw_damage(canvas, dmg);
-        if (d.panel) {
-            s = d.panel->blit(static_cast<uint16_t>(r.x),
-                              static_cast<uint16_t>(r.y),
-                              static_cast<uint16_t>(r.w),
-                              static_cast<uint16_t>(r.h), buf);
+        ui::Rect parts[ui::Shadow::kMaxParts];
+        const int np = shadow.diff(r, buf, parts, ui::Shadow::kMaxParts, kOverheadPx);
+        for (int k = 0; k < np; ++k) {
+            const ui::Rect& p = parts[k];
+            ui::Shadow::pack(r, buf, p);
+            sent = true;
+            if (!d.panel) continue;
+            s = d.panel->blit(static_cast<uint16_t>(p.x), static_cast<uint16_t>(p.y),
+                              static_cast<uint16_t>(p.w), static_cast<uint16_t>(p.h), buf);
             if (!hal::ok(s)) return s;
         }
     }
@@ -147,6 +170,15 @@ void render_task(void* arg) {
 
     ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
     app.begin(canvas);
+
+    // The copy of the glass, 300 kB, in PSRAM: it is read once per strip
+    // sent, not per pixel drawn. Without it render works as it did before
+    // there was one, sending every damaged rectangle whole.
+    auto* glass = static_cast<ui::Color*>(
+        heap_caps_malloc(static_cast<size_t>(ui::kScreenW) * ui::kScreenH *
+                         sizeof(ui::Color), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!glass) ESP_LOGW(kTag, "no PSRAM for the shadow: sending damage whole");
+    ui::Shadow shadow(glass);
 
 
 
@@ -198,6 +230,7 @@ void render_task(void* arg) {
         if (take_retry(d, core::state::Dev::Display) && d.panel) {
             d.panel->init();
             app.invalidate();
+            shadow.invalidate();
         }
 
         // The history grows as laps are scored, so the view is handed over
@@ -225,10 +258,16 @@ void render_task(void* arg) {
                     blit_status = d.panel->blit(0, static_cast<uint16_t>(y),
                                                 ui::kScreenW, kBandLines, band);
                 }
+                shadow.record(ui::Rect{0, y, ui::kScreenW, kBandLines}, band);
             }
             // A band that did not go out leaves the panel unknown: repaint
             // again next frame rather than call it done.
-            if (hal::ok(blit_status)) app.clear_full_repaint();
+            if (hal::ok(blit_status)) {
+                app.clear_full_repaint();
+                shadow.validate();
+            } else {
+                shadow.invalidate();
+            }
             if (d.system && d.system->first_frame_ms == 0) {
                 d.system->first_frame_ms = now ? now : 1;
                 // The boot-time number: switch to a picture, less the rails.
@@ -242,11 +281,17 @@ void render_task(void* arg) {
             ui::App::Damage dmg[ui::App::kMaxDamage];
             const size_t n = app.damage(dmg, ui::App::kMaxDamage);
             for (size_t i = 0; i < n && hal::ok(blit_status); ++i) {
-                blit_status = blit_damage(d, app, canvas, band, dmg[i]);
-                sent = true;
+                blit_status = blit_damage(d, app, canvas, band, shadow, dmg[i], sent);
             }
-            // A failed send leaves it all dirty, to go again next frame.
-            if (hal::ok(blit_status)) app.clear_damage();
+            // A failed send leaves the glass unknown where it was going, and
+            // the shadow already counted it as sent; so the whole frame goes
+            // again, which is also what puts the shadow back in step.
+            if (hal::ok(blit_status)) {
+                app.clear_damage();
+            } else {
+                shadow.invalidate();
+                app.invalidate();
+            }
         }
 
         // Only a transfer says anything about the panel. Reporting Ok on
