@@ -33,21 +33,21 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-**Two machines share this folder.** The repo is synced by Syncthing
-(`.stfolder`) between the desktop (`Desktop`) and a laptop, and there is no
-`.stignore`, so everything syncs — `build/`, `build-host/`, `build-sim/`,
-`sdkconfig`, and `.git` itself. Consequences:
+**Two machines, two clones.** The desktop (`Desktop`) and a laptop are
+separate clones of `git@github.com:timothydonovan25/dash.git` (private,
+default branch `main`). Work moves between them by commit, push and pull —
+uncommitted work does not follow you. Commit and push before switching
+machines; `git pull` on arrival. (Until 2026-10-17 the folder was synced by
+Syncthing, `.git` and `build/` included; that is gone.)
 
-- `build/` belongs to whichever machine last configured it. The laptop's
-  ESP-IDF Python env is `idf6.0_py3.14_env`, the desktop's is
-  `idf6.0_py3.12_env`, so on the wrong machine `idf.py build` stops with
-  "*… is currently active in the environment while the project was
-  configured with …*". That is not a broken install. Do not `fullclean` it
-  without asking — it is the other machine's build tree. Build elsewhere
-  instead: `idf.py -B /tmp/build-p4 build` (no `set-target` needed; it
-  reads `sdkconfig`).
-- Do not run git, or a build, on both machines at once: Syncthing will merge
-  the two halves of `.git` or a CMake cache into a conflict.
+- `build/`, `build-host/` and `build-sim/` are in `.gitignore`, so each
+  machine has its own. The laptop's ESP-IDF Python env is
+  `idf6.0_py3.14_env`, the desktop's is `idf6.0_py3.12_env`. A build tree
+  left over from the Syncthing days may still be configured by the other
+  machine, and `idf.py build` stops with "*… is currently active in the
+  environment while the project was configured with …*". That is not a
+  broken install; the tree is now local, so `idf.py fullclean` on that
+  machine fixes it.
 - Both machines have ESP-IDF v6.0.2 from EIM. On the desktop the
   `export.sh` line above works as of 2026-10-16 (its Python env was
   installed with `idf_tools.py install-python-env`), and EIM's
