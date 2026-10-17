@@ -290,6 +290,27 @@ private:
 
 // --- Diag ---------------------------------------------------------------
 
+// DIAG's front page: its pages as a list, like CONFIG's submenus, each with
+// a one-word reading of how it stands. C and D move, E opens a page, and B
+// on a page comes back here with the cursor where it was (ui::App), so a
+// page eight screens along is not eight presses of B away.
+class DiagMenuScreen final : public Screen {
+public:
+    static constexpr uint8_t kPages = 8;
+    const char* name() const override { return "MENU"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    WidgetList widgets() override;
+    uint8_t focus_count() const override { return kPages; }
+    void set_focus(uint8_t f) override;
+
+private:
+    Table   table_;
+    Widget* list_[1] = {};
+    uint8_t focus_ = 0;
+};
+
 class SensorsScreen final : public Screen {
 public:
     void draw_background(Canvas& c) override;

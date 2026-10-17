@@ -29,6 +29,93 @@ void fmt_bytes(char* buf, size_t n, uint32_t bytes) {
 }
 }  // namespace
 
+// --- DiagMenuScreen -----------------------------------------------------
+namespace {
+constexpr Rect kMenuTable {14, 40, 452, 240};
+// In the order the App opens them: row k is DIAG screen k + 1.
+constexpr const char* kPageNames[DiagMenuScreen::kPages] = {
+    "Sensors", "GPS", "Fusion", "System", "Power", "Bus", "Radio", "Update"};
+}  // namespace
+
+void DiagMenuScreen::enter(Canvas&) {
+    table_.set_bounds(kMenuTable);
+    table_.configure(kPages, 2);
+    table_.set_focus(focus_);
+    list_[0] = &table_;
+}
+
+void DiagMenuScreen::set_focus(uint8_t f) {
+    focus_ = f < kPages ? f : 0;
+    table_.set_focus(focus_);
+}
+
+void DiagMenuScreen::update(const Frame& f) {
+    // Each page's one-word state, so the menu says where to look first.
+    char v[24];
+    for (uint8_t i = 0; i < kPages; ++i) {
+        v[0] = '\0';
+        switch (i) {
+            case 0: {   // Sensors: anything in fault, or degraded
+                int fault = 0, degraded = 0;
+                for (uint8_t d = 0; d < core::state::kDevCount; ++d) {
+                    const auto st = f.health.dev[d].state;
+                    if (st == core::state::DevState::Fault) ++fault;
+                    else if (st == core::state::DevState::Degraded) ++degraded;
+                }
+                if (fault) std::snprintf(v, sizeof v, "%d FAULT", fault);
+                else if (degraded) std::snprintf(v, sizeof v, "%d degraded", degraded);
+                else std::strcpy(v, "all ok");
+                break;
+            }
+            case 1:     // GPS
+                if (f.gnss.fix) std::snprintf(v, sizeof v, "%u sats", f.gnss.sats);
+                else std::strcpy(v, "no fix");
+                break;
+            case 2: {   // Fusion: the fused speed, unless a source is suspect
+                if (f.fused.suspect) {
+                    std::strcpy(v, "SUSPECT");
+                } else if (f.fused.speed_valid) {
+                    const char* unit = "mph";
+                    const float sp = u::speed_for_display(f.fused.speed_mph, units(), &unit);
+                    const size_t k = u::fmt_float(v, sizeof v, sp, 0);
+                    std::snprintf(v + k, sizeof v - k, " %s", unit);
+                } else {
+                    std::strcpy(v, "--");
+                }
+                break;
+            }
+            case 3: {   // System: the tightest stack
+                const SystemInfo* si = has_ctx() ? ctx().system : nullptr;
+                if (si && si->stack_low_task[0]) {
+                    std::snprintf(v, sizeof v, "stack %u B",
+                                  static_cast<unsigned>(si->stack_low_free_b));
+                }
+                break;
+            }
+            case 4:     // Power: the battery verdict
+                std::strcpy(v, core::battery::verdict_name(
+                                   static_cast<core::battery::Verdict>(f.battery.verdict)));
+                break;
+            case 7:     // Update: which image this is
+                if (f.ota.known) {
+                    std::strcpy(v, f.ota.role == core::ota::Role::Dev ? "running dev" : "stable");
+                }
+                break;
+            default:
+                break;
+        }
+        table_.set_row(i, kPageNames[i], v);
+    }
+    table_.set_row_count(kPages);
+}
+
+void DiagMenuScreen::draw_background(Canvas& c) {
+    c.draw_text(14, 292, "C/D move   E open   B on a page: back here",
+                theme::secondary, 1, Align::Left);
+}
+
+WidgetList DiagMenuScreen::widgets() { return WidgetList{list_, 1}; }
+
 // --- SensorsScreen ------------------------------------------------------
 //
 // The whole health table, one device per row. This is the bring-up tool when

@@ -21,7 +21,9 @@ struct InputEvent {
 // How many screens each mode owns. Config always has exactly one: the
 // generated ConfigItem list.
 struct Layout {
-    uint8_t screens[kModeCount] = {6, 3, 3, 8, 1};
+    // DIAG's are its menu and eight pages, reached from the menu rather than
+    // walked with B (ui::App).
+    uint8_t screens[kModeCount] = {6, 3, 3, 9, 1};
 };
 
 struct State {

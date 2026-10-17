@@ -62,13 +62,14 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
             }
         case Mode::Diag:
             switch (index) {
-                case 0: return ScreenId::Sensors;
-                case 1: return ScreenId::Gps;
-                case 2: return ScreenId::Fusion;
-                case 3: return ScreenId::System;
-                case 4: return ScreenId::Power;
-                case 5: return ScreenId::Bus;
-                case 6: return ScreenId::Radio;
+                case 0: return ScreenId::DiagMenu;
+                case 1: return ScreenId::Sensors;
+                case 2: return ScreenId::Gps;
+                case 3: return ScreenId::Fusion;
+                case 4: return ScreenId::System;
+                case 5: return ScreenId::Power;
+                case 6: return ScreenId::Bus;
+                case 7: return ScreenId::Radio;
                 default: return ScreenId::Update;
             }
         case Mode::Config:
@@ -129,6 +130,7 @@ void App::build(ScreenId id) {
         case ScreenId::AllData:    s = make<AllDataScreen>(slot_); break;
         case ScreenId::Engine:     s = make<EngineScreen>(slot_); break;
         case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
+        case ScreenId::DiagMenu:   s = make<DiagMenuScreen>(slot_); break;
         case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
         case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;
         case ScreenId::Fusion:     s = make<FusionScreen>(slot_); break;
@@ -218,6 +220,24 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
         return;
     }
 
+    // DIAG is a menu, not a carousel: E on the menu opens the page under the
+    // cursor, B on a page comes back to the menu with the cursor on it, and
+    // B on the menu has nothing to walk to. After the page's own handle(),
+    // so a page that wants E (UPDATE's actions) still has it.
+    if (nav_.mode == core::nav::Mode::Diag) {
+        using core::nav::Press;
+        if (nav_.screen == 0 && e.button == Button::E && e.press == Press::Short) {
+            go_screen(static_cast<uint8_t>(nav_.focus + 1), 0, c);
+            return;
+        }
+        if (e.button == Button::B) {
+            if (nav_.screen != 0) {
+                go_screen(0, static_cast<uint8_t>(nav_.screen - 1), c);
+            }
+            return;
+        }
+    }
+
     const uint8_t focus = s.focus_count();
     const core::nav::State before = nav_;
     nav_ = core::nav::step(nav_, e, layout_, focus);
@@ -227,6 +247,13 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
         enter_current(c);
         current().set_focus(nav_.focus);
     }
+}
+
+void App::go_screen(uint8_t screen, uint8_t focus, Canvas& c) {
+    nav_.screen = screen;
+    nav_.focus = focus;
+    enter_current(c);
+    current().set_focus(focus);
 }
 
 void App::update_alert(const core::state::Frame& f) {

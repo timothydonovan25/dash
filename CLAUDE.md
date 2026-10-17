@@ -270,7 +270,9 @@ the media half of step 9 is written. 40 host test suites, all passing.
   buffers, not a seqlock: a seqlock reader that preempted its writer on the
   same core spun forever (ctrl at 18 reading gnss at 12). A reader never
   waits on a writer that has stopped half way
-- `nav/` mode and screen machine · `shift/` RPM to lamp pattern, with an
+- `nav/` mode and screen machine (DIAG's screen 0 is a menu of its eight
+  pages since 1.29: `ui::App` turns E there into "open the page under the
+  cursor" and B on a page into "back to the menu", so B never walks DIAG) · `shift/` RPM to lamp pattern, with an
   optional lead (CONFIG → Shift → Lead time, off by default): the lamps go by
   where the rpm will be, from `tach::RateEstimator`'s slope, less a noise floor
 - `geo/` distance, bearing, finish-line crossing with sub-sample interpolation

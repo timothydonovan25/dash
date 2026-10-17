@@ -266,6 +266,17 @@ void go_to(App& app, Canvas& c, Mode m, uint8_t screen) {
     for (int i = 0; i < 8 && app.nav_state().mode != m; ++i) {
         app.on_input(InputEvent{Button::A, Press::Short}, c);
     }
+    if (m == Mode::Diag) {
+        // DIAG is a menu: back to it, the cursor to the page, E to open it.
+        if (app.nav_state().screen == screen) return;
+        if (app.nav_state().screen != 0) app.on_input(InputEvent{Button::B, Press::Short}, c);
+        if (screen == 0) return;
+        for (int i = 0; i < 16 && app.nav_state().focus != screen - 1; ++i) {
+            app.on_input(InputEvent{Button::D, Press::Short}, c);
+        }
+        app.on_input(InputEvent{Button::E, Press::Short}, c);
+        return;
+    }
     for (int i = 0; i < 8 && app.nav_state().screen != screen; ++i) {
         app.on_input(InputEvent{Button::B, Press::Short}, c);
     }
@@ -1405,7 +1416,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 6);   // RADIO
+        go_to(fx.app, s.canvas, Mode::Diag, 7);   // RADIO
 
         Frame f = busy_frame();
         fx.app.update(f);
@@ -1437,7 +1448,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 7);   // UPDATE
+        go_to(fx.app, s.canvas, Mode::Diag, 8);   // UPDATE
         CHECK(std::strcmp(fx.app.current().name(), "UPDATE") == 0);
 
         Frame f = busy_frame();
@@ -1834,12 +1845,57 @@ int main() {
         CHECK(asked);
     }
 
+    CASE("DIAG opens on a menu: E opens a page, B comes back to it");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Diag, 0);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+        auto press = [&](Button b, Press p = Press::Short) {
+            fx.app.on_input(InputEvent{b, p}, s.canvas);
+        };
+        // B on the menu walks nowhere.
+        press(Button::B);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+        press(Button::B, Press::Long);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+        // Down three to Power... (Sensors, GPS, Fusion, System, Power)
+        for (int i = 0; i < 4; ++i) press(Button::D);
+        press(Button::E);
+        CHECK(fx.app.current_id() == ScreenId::Power);
+        // ...and B back, with the cursor still on it.
+        press(Button::B);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+        CHECK(fx.app.nav_state().focus == 4);
+        press(Button::E);
+        CHECK(fx.app.current_id() == ScreenId::Power);
+        // Long B from a page is back too, not the previous page.
+        press(Button::B, Press::Long);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+        // C wraps to the last page: Update, whose own E still belongs to it.
+        while (fx.app.nav_state().focus != 0) press(Button::C);
+        press(Button::C);
+        CHECK(fx.app.nav_state().focus == DiagMenuScreen::kPages - 1);
+        press(Button::E);
+        CHECK(fx.app.current_id() == ScreenId::Update);
+        fx.sink.posted.clear();
+        press(Button::E);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.app.current_id() == ScreenId::Update);
+        // A still leaves DIAG, and coming back starts at the menu.
+        press(Button::A);
+        CHECK(fx.app.nav_state().mode == Mode::Config);
+        for (int i = 0; i < 4; ++i) press(Button::A);
+        CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+    }
+
     CASE("DIAG -> FUSION shows what the filter made of each source");
     {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Diag, 2);
+        go_to(fx.app, s.canvas, Mode::Diag, 3);
         CHECK(fx.app.current_id() == ScreenId::Fusion);
         Frame f = busy_frame();
         f.fused.speed_mph = 54.2f;

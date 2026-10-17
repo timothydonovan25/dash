@@ -59,6 +59,17 @@ void go_to(App& app, Canvas& c, core::nav::Mode m, uint8_t screen) {
     for (int i = 0; i < 8 && app.nav_state().mode != m; ++i) {
         app.on_input(InputEvent{Button::A, Press::Short}, c);
     }
+    if (m == core::nav::Mode::Diag) {
+        // DIAG is a menu (ui::App): back to it, cursor to the page, E.
+        if (app.nav_state().screen == screen) return;
+        if (app.nav_state().screen != 0) app.on_input(InputEvent{Button::B, Press::Short}, c);
+        if (screen == 0) return;
+        for (int i = 0; i < 16 && app.nav_state().focus != screen - 1; ++i) {
+            app.on_input(InputEvent{Button::D, Press::Short}, c);
+        }
+        app.on_input(InputEvent{Button::E, Press::Short}, c);
+        return;
+    }
     for (int i = 0; i < 8 && app.nav_state().screen != screen; ++i) {
         app.on_input(InputEvent{Button::B, Press::Short}, c);
     }
