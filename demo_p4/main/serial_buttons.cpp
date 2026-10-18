@@ -7,6 +7,7 @@
 
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_system.h"
 #include "soc/hp_sys_clkrst_reg.h"
 #include "soc/soc.h"
@@ -39,6 +40,12 @@ void handle(const char* line, StateRequest& req) {
     if (std::strcmp(line, "regs") == 0) return dump_crypto_regs();
     if (std::strcmp(line, "state") == 0) {
         req.pending.store(true);
+        return;
+    }
+    if (std::strcmp(line, "inputs") == 0) {
+        req.trace_inputs_until_ms.store(
+            static_cast<uint32_t>(esp_timer_get_time() / 1000) + 30000);
+        ESP_LOGI(kTag, "tracing inputs for 30 s");
         return;
     }
     core::nav::Press press;

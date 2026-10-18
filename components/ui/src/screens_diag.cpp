@@ -45,7 +45,7 @@ void DiagMenuScreen::enter(Canvas&) {
 }
 
 void DiagMenuScreen::set_focus(uint8_t f) {
-    focus_ = f < kPages ? f : 0;
+    focus_ = f < rows() ? f : 0;
     table_.set_focus(focus_);
 }
 
@@ -106,7 +106,9 @@ void DiagMenuScreen::update(const Frame& f) {
         }
         table_.set_row(i, kPageNames[i], v);
     }
-    table_.set_row_count(kPages);
+    // The program, if this build has one: eight rows show, so it scrolls in.
+    if (rows() > kPages) table_.set_row(kPages, ctx().program->name(), ctx().program->state());
+    table_.set_row_count(rows());
 }
 
 void DiagMenuScreen::draw_background(Canvas& c) {

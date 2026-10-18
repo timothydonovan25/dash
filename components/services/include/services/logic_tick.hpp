@@ -16,7 +16,9 @@
 #include "core/lap/lap.hpp"
 #include "core/lap/sectors.hpp"
 #include "core/fixtime/fixtime.hpp"
+#include "core/perf/perf.hpp"
 #include "core/session/session.hpp"
+#include "core/stunt/stunt.hpp"
 #include "core/track/track.hpp"
 #include "core/trip/trip.hpp"
 #include "core/waypoint/waypoint.hpp"
@@ -108,6 +110,11 @@ struct LogicState {
 
     // The ride so far, for TRACK -> SESSION.
     core::session::Tracker session;
+
+    // Performance timers off the fused speed, and wheelies and stoppies
+    // scored (STAT -> PERF and STUNT, and the toast).
+    core::perf::Timer   perf;
+    core::stunt::Scorer stunt;
 
     // Gear calibration: the guided run, and the learner that runs the rest
     // of the time (core/gearcal). `logic` is the one writer of both and of

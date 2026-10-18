@@ -106,9 +106,11 @@ struct Event {
     uint16_t conn;      // Connect: the handle
     int32_t  code;      // Disconnect / Reset: NimBLE's reason; Encrypted: status
     core::ble::PeerId peer;   // Encrypted: the peer's identity address
-    // A tag, a space and the longest field (59 bytes) is 61. Anything past
-    // this would be cut by core::media anyway.
-    uint8_t  data[64];
+    // The longest line is a notification (§11.1 `N`, 130 bytes); a media
+    // field is 61. Anything past this would be cut by core::media anyway.
+    // Sixteen of these are the queue: 2.3 kB of internal RAM, 1.1 more than
+    // when only media came this way.
+    uint8_t  data[core::media::kMaxNotifyLine];
 };
 
 struct Ctx {
@@ -546,6 +548,8 @@ void ble_task(void* arg) {
     demote_radio_tasks(true);
 
     core::state::Media media;
+    // The phone's last notification (§11.1 `N`): this task is its one writer.
+    core::state::Notify notify;
     uint16_t conn = BLE_HS_CONN_HANDLE_NONE;
     bool subscribed = false;
     bool synced = false;
@@ -580,6 +584,15 @@ void ble_task(void* arg) {
                         diag.last_tag = tag;
                         media_dirty = diag_dirty = true;
                         d.health->report_ok(Dev::Phone, now);
+                    } else if (core::media::apply_notify(notify, e.data, e.len, now)) {
+                        // One line each, so a call that never shows can be
+                        // traced to this end or the phone's (logcat DashNotify).
+                        ESP_LOGI(kTag, "notification %c from \"%s\"%s", notify.kind, notify.who,
+                                 notify.ringing ? ", ringing" : "");
+                        diag.last_tag = 'N';
+                        diag_dirty = true;
+                        d.slots->notify.publish(notify);
+                        d.health->report_ok(Dev::Phone, now);
                     }
                     break;
                 case Event::Connect:
@@ -605,6 +618,11 @@ void ble_task(void* arg) {
                     // Out of range is normal, not a fault.
                     d.health->set_absent(Dev::Phone);
                     dropped_at_disconnect_ms = now != 0 ? now : 1;
+                    // A call cannot ring on a phone the dash cannot hear.
+                    if (notify.ringing) {
+                        notify.ringing = false;
+                        d.slots->notify.publish(notify);
+                    }
                     break;
                 case Event::Subscribe:
                     subscribed = e.flag;

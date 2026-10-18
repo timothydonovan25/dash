@@ -78,6 +78,16 @@ public:
 
     // Fails rather than overwrite an existing `to`.
     virtual Status rename(const char* from, const char* to) = 0;
+
+    // One piece of a file too big to hold whole, for the Wi-Fi page's game
+    // upload: offset 0 creates or empties the file, any other offset must be
+    // its current size. Each call opens and closes it, as read_at does.
+    // Unsupported on a card that has no use for it.
+    virtual Status write_at(const char* path, size_t offset, const void* data,
+                            size_t len) {
+        (void)path; (void)offset; (void)data; (void)len;
+        return Status::Unsupported;
+    }
 };
 
 }  // namespace hal

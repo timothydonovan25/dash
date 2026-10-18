@@ -1,4 +1,5 @@
 #include "ui/screens.hpp"
+#include "core/stunt/stunt.hpp"
 #include "core/geo/geo.hpp"
 #include "core/health/health.hpp"
 #include "core/units/units.hpp"
@@ -54,6 +55,8 @@ constexpr Rect kLean      {116,  94, 248, 126};
 // How long the lean gauge shows the last jump after landing (LeanGauge's
 // landed face) before it goes back to lean.
 constexpr uint32_t kJumpShowMs = 4000;
+// And a scored wheelie or stoppie, as long as the toast holds one elsewhere.
+constexpr uint32_t kTrickShowMs = 3500;
 constexpr Rect kFault     { 28, 222, 120,  16};
 constexpr Rect kFaultWhat { 28, 242, 120,  10};
 constexpr Rect kSats      { 28, 266, 120,  10};
@@ -175,7 +178,9 @@ void SpeedScreen::update(const Frame& f) {
     speed_.set(shown, speed_ok);
 
     rpm_.set(u::rpm_for_display(f.engine.rpm), f.engine.rpm > 0.0f || f.engine.neutral);
-    shift_.set(f.engine.shift_mask, f.engine.shift_flash);
+    // The held lamp too, as the handlebar shows it (Engine::shift_hold).
+    shift_.set(static_cast<uint8_t>(f.engine.shift_mask | f.engine.shift_hold),
+               f.engine.shift_flash);
 
     // Neutral is sensed; the gear is inferred. An unknown gear is a dash
     // rather than a stale digit.
@@ -203,6 +208,11 @@ void SpeedScreen::update(const Frame& f) {
     const float frac = base > 0 ? f.engine.rpm / static_cast<float>(base) : 0.0f;
     bar_stem_.set(frac);
     bar_flare_.set(frac);
+    // Where it got to before the shift, held a moment (core::shift::PeakHold).
+    const float peak = base > 0 && f.engine.rpm_peak > 0.0f
+                           ? f.engine.rpm_peak / static_cast<float>(base) : 0.0f;
+    bar_stem_.set_peak(peak);
+    bar_flare_.set_peak(peak);
     bar_stem_.set_scale(base);
     bar_flare_.set_scale(base);
 
@@ -212,14 +222,61 @@ void SpeedScreen::update(const Frame& f) {
     // result for a few seconds after the landing. core/jump owns the
     // detection; `land_ms` is what lets a Frame, which has no history, know
     // how long ago that was. A dead IMU shows lean as `--`, not a jump.
+    //
+    // Wheelies and stoppies (core::stunt) take it too, here rather than as
+    // the toast every other screen shows (ui::App): the trick under way,
+    // then the score for a few seconds. In the air is always the jump; after
+    // that, whichever of a landing and a scored trick is newer. CONFIG ->
+    // Display -> Popups turns the trick faces off with the toast.
     using Face = LeanGauge::Face;
+    namespace st = core::stunt;
+    const core::state::Stunt& s = f.stunt;
+    const bool tricks = imu_ok && (!has_ctx() || !ctx().settings || ctx().settings->popups);
+    const bool landed = imu_ok && f.att.land_ms != 0 && f.t_ms - f.att.land_ms < kJumpShowMs;
+    const bool scored = tricks && s.seq != 0 && s.done_ms != 0 && f.t_ms - s.done_ms < kTrickShowMs;
     Face face = Face::Lean;
     if (imu_ok && f.att.airborne) {
         face = Face::Air;
-    } else if (imu_ok && f.att.land_ms != 0 && f.t_ms - f.att.land_ms < kJumpShowMs) {
+    } else if (tricks && s.live_kind != st::None) {
+        face = Face::Trick;
+    } else if (landed && scored) {
+        face = f.att.land_ms - s.done_ms < 0x80000000u ? Face::Landed : Face::TrickDone;
+    } else if (landed) {
         face = Face::Landed;
+    } else if (scored) {
+        face = Face::TrickDone;
     }
-    lean_.set_jump(face, f.att.airtime_ms, f.att.last_land_g);
+
+    if (face == Face::Trick) {
+        char big[12], detail[24], t[12];
+        const size_t k = u::fmt_float(t, sizeof t, s.live_ms / 1000.0f, 1);
+        std::snprintf(big, sizeof big, "%.*ss", static_cast<int>(k), t);
+        const float deg = s.live_kind == st::Stoppie ? -s.live_deg : s.live_deg;
+        std::snprintf(detail, sizeof detail, "%d deg  +%u", static_cast<int>(deg + 0.5f),
+                      static_cast<unsigned>(s.live_points * s.combo_x10 / 10.0f));
+        lean_.set_trick(face, s.live_kind == st::Stoppie ? "STOPPIE" : "WHEELIE",
+                        s.live_balance ? color::kWarn : color::kAccent, big, detail);
+    } else if (face == Face::TrickDone) {
+        char big[12], detail[24], t[12];
+        std::snprintf(big, sizeof big, "+%u", static_cast<unsigned>(s.points));
+        const size_t k = u::fmt_float(t, sizeof t, s.ms / 1000.0f, 1);
+        if (s.kind == st::Looped) {
+            std::snprintf(detail, sizeof detail, "combo lost");
+        } else if (s.mult_x10 > 10) {
+            std::snprintf(detail, sizeof detail, "%.*ss %d deg x%u.%u", static_cast<int>(k), t,
+                          static_cast<int>(s.peak_deg + 0.5f), s.mult_x10 / 10u,
+                          s.mult_x10 % 10u);
+        } else {
+            const char* land = st::landing_name(s.landing);
+            std::snprintf(detail, sizeof detail, "%.*ss %d deg %s", static_cast<int>(k), t,
+                          static_cast<int>(s.peak_deg + 0.5f), land);
+        }
+        const Color c = s.kind == st::Looped ? color::kAlarm
+                      : s.record ? color::kWarn : color::kGood;
+        lean_.set_trick(face, st::grade_name(s.kind, s.grade), c, big, detail);
+    } else {
+        lean_.set_jump(face, f.att.airtime_ms, f.att.last_land_g);
+    }
 
     // The fault line. Blank when everything fitted is healthy, which means
     // the space costs nothing on a normal ride and the screen stops

@@ -48,6 +48,22 @@ inline constexpr int     kPodSda  = kTouchSda;
 inline constexpr int     kPodScl  = kTouchScl;
 inline constexpr uint8_t kPodAddr = 0x20;   // A2..A0 low, as on the bike
 
+// The microSD slot (J1): 4-bit SDMMC on the P4's slot 0, whose pins are fixed
+// in the IOMUX, not SPI. From Guition's schematic, sheet 01 "TF-card", via
+// github.com/ultramcu/guition-jc4880p443c-i-w, which also has it mounting on
+// this board. The card's VDD (TF_VCC) is the P4's on-chip LDO VO4 through an
+// always-on P-FET (Q1; R13 holds its gate low, and the GPIO45 enable, R10,
+// is not fitted), so the card has no power until firmware turns VO4 on.
+// 5.1k pull-ups on the data lines are on the board (R11, R12, R2).
+inline constexpr int kSdClk = 43;
+inline constexpr int kSdCmd = 44;
+inline constexpr int kSdD0  = 39;
+inline constexpr int kSdD1  = 40;
+inline constexpr int kSdD2  = 41;
+inline constexpr int kSdD3  = 42;
+inline constexpr int kSdLdoChannel = 4;      // VO4; the DSI PHY has VO3
+inline constexpr int kSdLdoMv      = 3300;
+
 // The panel's native resolution as manufactured (portrait). The board is
 // physically rotated to landscape for this demo, so the driver swaps these
 // when it talks to the DSI/DPI panel and reports width()/height() in the

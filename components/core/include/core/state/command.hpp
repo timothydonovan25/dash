@@ -40,6 +40,8 @@ enum class CommandId : uint8_t {
     GearCalReset,     // the table back to its calibrated base
     LeanPeaksReset,   // IMU's short E: the session's lean peaks back to zero
     TrackForget,      // delete the saved track this line belongs to (core::track)
+    PerfReset,        // PERF's E: forget the performance timers' bests
+    StuntReset,       // STUNT's E: a new session score (core::stunt)
 };
 
 struct Command {

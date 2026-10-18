@@ -36,6 +36,12 @@ public:
     virtual int16_t width() const = 0;
     virtual int16_t height() const = 0;
 
+    // Smoothed glyphs at the small scale too (ui/font_aa.hpp's opt-in
+    // sizes), until turned off again. For a widget that is read as a
+    // sentence, like MEDIA's lyric; it sets this around its own drawing and
+    // puts it back. A canvas without smoothed glyphs ignores it.
+    virtual void set_smooth_small(bool) {}
+
     virtual void fill(Color c) = 0;
     virtual void fill_rect(const Rect& r, Color c) = 0;
     virtual void draw_rect(const Rect& r, Color c) = 0;

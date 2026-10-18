@@ -35,4 +35,6 @@ idf_component_register(
          "src/flash.cpp"
          "src/track.cpp"
          "src/session.cpp"
+         "src/perf.cpp"
+         "src/stunt.cpp"
     INCLUDE_DIRS "include")

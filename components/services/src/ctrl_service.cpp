@@ -84,6 +84,12 @@ void ctrl_task(void* arg) {
     // lag to the one number that must not have any.
     core::shift::Config sc;
     uint16_t lamp_rpm = 0;
+    // The rpm before the last shift (core::shift::PeakHold), from the same
+    // displayed rpm the screens draw, and its one lamp. Decided once a tick;
+    // an edge wake between ticks keeps it.
+    core::shift::PeakHold peak_hold;
+    float   rpm_peak = 0.0f;
+    uint8_t hold_bits = 0;
     auto decide_mask = [&]() -> uint8_t {
         const core::config::ShiftView sv = core::config::shift_view(*d.settings);
         sc.base_rpm = sv.base_rpm;
@@ -114,8 +120,8 @@ void ctrl_task(void* arg) {
             }
         }
         const uint8_t m = core::shift::pattern(lamp_rpm, sc, prev_mask);
-        prev_mask = m;
-        return m;
+        prev_mask = m;   // the hysteresis is the pattern's alone
+        return static_cast<uint8_t>(m | hold_bits);
     };
 
     // After a failed lamp write, the next attempt waits kRetryTicks.
@@ -137,6 +143,14 @@ void ctrl_task(void* arg) {
         tach.update(c.tach_pulses, c.tach_edge_us, c.t_us, tach_config());
         front.update(c.front_pulses, c.front_edge_us, c.t_us, fc);
         rear.update(c.rear_pulses, c.rear_edge_us, c.t_us, rc);
+
+        // The held peak first, so this tick's lamps carry it. Not during the
+        // start-up sweep, which owns the lamps.
+        rpm_peak = sweep_done ? peak_hold.update(tach.rpm(), d.clock->now_ms(),
+                                                 d.settings->shift_peak_hold_ms)
+                              : 0.0f;
+        hold_bits = rpm_peak > 0.0f
+            ? core::shift::hold_lamp(static_cast<uint16_t>(rpm_peak), sc) : 0;
 
         // Lamps first, before publishing anything. The rider's shift point
         // does not wait on a struct copy.
@@ -248,7 +262,9 @@ void ctrl_task(void* arg) {
             m.gps_mph, g.fix);
 
         core::state::Engine e;
-        e.shift_mask = mask;
+        e.shift_mask = prev_mask;   // what the rpm lights; the held lamp apart
+        e.shift_hold = static_cast<uint8_t>(hold_bits & ~prev_mask);
+        e.rpm_peak = rpm_peak;
         e.shift_flash = core::shift::over_limit(lamp_rpm, sc);
         e.rpm = tach.rpm();
         e.neutral = c.neutral;

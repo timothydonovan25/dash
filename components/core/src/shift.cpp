@@ -38,4 +38,36 @@ uint16_t lamp_rpm(float rpm, float rpm_per_s, const Config& c) {
     return r >= 65535.0f ? 65535 : static_cast<uint16_t>(r);
 }
 
+float PeakHold::update(float rpm, uint32_t t_ms, uint32_t hold_ms, float gap_rpm) {
+    if (hold_ms == 0) {
+        reset();
+        return 0.0f;
+    }
+    if (rpm >= peak_) {
+        // Climbing, or level: this is the peak now.
+        peak_ = rpm;
+        at_ms_ = t_ms;
+        released_ = false;
+    } else if (released_ || t_ms - at_ms_ > hold_ms) {
+        // Let go: follow it down until it climbs again.
+        released_ = true;
+        peak_ = rpm;
+    }
+    return !released_ && peak_ - rpm >= gap_rpm ? peak_ : 0.0f;
+}
+
+void PeakHold::reset() {
+    peak_ = 0.0f;
+    at_ms_ = 0;
+    released_ = true;
+}
+
+uint8_t hold_lamp(uint16_t peak_rpm, const Config& c) {
+    if (peak_rpm >= c.flash_rpm) return static_cast<uint8_t>(1u << (kLampCount - 1));
+    for (int i = kLampCount - 1; i >= 0; --i) {
+        if (peak_rpm >= threshold(c, i)) return static_cast<uint8_t>(1u << i);
+    }
+    return 0;
+}
+
 }  // namespace core::shift

@@ -790,6 +790,7 @@ S 1
 | `S` | State | `0` stop, `1` play, `2` pause |
 | `D` | Duration | track length, decimal ASCII milliseconds; `0`/absent is unknown |
 | `P` | Position | decimal ASCII milliseconds, **an anchor, not a live value** — see below |
+| `N` | Notification | `N<kind> <who>` 0x1F `<text>`, one write — see below |
 
 Rules the firmware side depends on:
 
@@ -828,6 +829,20 @@ Rules the firmware side depends on:
   lyric file: it holds exactly the line it was last told, same as any
   other `Media` field, and a title change clears it immediately rather
   than leaving the old track's last line on screen under a new song.
+
+- **`N` is a notification, not media** (1.32). One write carries a whole
+  one: a kind byte, the caller/sender/app (31 bytes), ASCII's unit
+  separator 0x1F, and the message (95 bytes, absent for a call). Kinds:
+  `C` an incoming call, ringing; `E` that call ended (answered, rejected,
+  gone), which changes nothing but the ringing; `X` missed call; `M`
+  message; `O` other. It lands in its own `Notify` slot (`ble` its one
+  writer, parsed by `core::media::apply_notify`), so a new song does not
+  clear it and a disconnect only stops a call ringing; a call also stops
+  after 45 s with no `E`. The phone sends calls, missed calls and messages
+  only (`Notify.kt`'s `NotifyFilter`), and sanitises both fields so 0x1F
+  can only be the separator. The dash shows it as a toast and on CRUISE →
+  PHONE, with the message text only when stopped unless CONFIG → Phone →
+  Text moving is on.
 
 `Media.src` records which path fed the data, so the DIAG screen can say.
 There is only one path today; the field stays because a second one would

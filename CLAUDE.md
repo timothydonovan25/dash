@@ -261,7 +261,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 46 host tests, all passing.
+the media half of step 9 is written. 48 host tests, all passing.
 
 **`core/`** — all host-tested:
 
@@ -381,11 +381,34 @@ the media half of step 9 is written. 46 host tests, all passing.
   reading and residual and whether it was used, gated or is suspect, the
   accel bias and the wheel verdicts
 - `wifi/` the update hotspot's policy: idle and moving shut-off, the
-  session password, which log names the page may serve
+  session password, which log names the page may serve, and which `.wad`
+  names it may upload into `games/` (`valid_game_name`)
+- `perf/` (1.32) performance timers off the fused speed, in `logic` every
+  pass: 0-30/0-60 (0-50/0-100 km/h when metric), 60 ft, 330 ft and 1/8 mile
+  with trap speed from a stop held 1 s, and 30-0/60-0 braking distance.
+  Thresholds interpolated between passes; distance integrated from speed,
+  not GPS. Session bests (PERF's E clears them). STAT → PERF; a new best
+  toasts
+- `stunt/` (1.32) wheelies and stoppies, scored. Lift is IMU pitch minus
+  the path's angle, asin(climb/speed), the climb rate from a small
+  inertial + GPS-altitude filter (the accelerometer turned into the world
+  frame), so a hill is not a wheelie and the climb filter is suspended in
+  the air (a jump is not one either). 10° for 250 ms starts one, under 4°
+  for 120 ms ends it, under 0.5 s scores nothing, past 70° is a loop-out.
+  Points run up with angle and speed, 1.5x in the 30-50° balance band;
+  landings are smooth (+20 %) or slammed (-30 %) by vertical g; tricks
+  within 4 s chain into a combo, +0.5x each to 4x; grades POP … LEGENDARY.
+  Every threshold is a guess that has never seen a real wheelie. Session
+  only, nothing saved. STAT → STUNT (E: new session) and the toast
+- the toast (1.32): `ui::Toast`, a strip along the bottom of every screen,
+  under the alert. A ringing call, then a notification (8 s), then a trick
+  under way (live), then a finished trick (3.5 s) or a new perf best (4 s).
+  Not on STUNT/PERF for their own events. CONFIG → Display → Popups and
+  → Phone → Notifications switch it off
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 21 widgets, every screen, the render loop, laid out
+**`ui/`** — canvas, 22 widgets, every screen, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each
@@ -406,7 +429,10 @@ screen costs nothing unless it becomes the largest. Add a new screen to
 leaving it; what must (map traces, lap history, settings, CONFIG's place
 during gear calibration) the App holds and hands back in `build()`.
 
-**`sim/`** — the desktop simulator. `logic_tick.hpp` exists so it executes
+**`sim/`** — the desktop simulator. `cmd wheelie` / `cmd stoppie` play a
+trick as the IMU would see one (the sim's accelerometer turns with pitch
+since 1.32), and `notify <kind>\t<who>\t<text>` runs a phone's `N` line
+through the firmware's parser; the window has buttons for both. `logic_tick.hpp` exists so it executes
 the firmware's decisions rather than a copy of them: a simulator that
 mirrors the code instead of running it drifts, and then stops being
 evidence of anything.
@@ -492,7 +518,7 @@ Wi-Fi page also exports any log as a GPX track,
 converted in the page's own JavaScript so the dash does no work. DIAG →
 System shows the P4's die temperature (`drivers::ChipTemp`, keeper, 1 Hz)
 and the IMU's, from its FIFO packets.
-**Startup** shows a 1.5 s splash before the gauge sweep (CONFIG → Startup).
+**Startup** shows a 0.5 s splash before the gauge sweep (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
 shows "safe to pull" until the card comes out. One lock in
@@ -504,12 +530,34 @@ brings up ESP-Hosted to the C6, NimBLE on core 1, and the §11.1 Dash Media
 service (Feed in, Ctrl out). The phone must bond: Feed needs an encrypted
 link, and `core/ble/` decides which phone may (first one freely, then only
 in CONFIG's pairing window; Forget phone clears them). NimBLE's callbacks only queue;
-`ble` is the one writer of `media` and `ble_diag`, and the line parser is
+`ble` is the one writer of `media`, `notify` and `ble_diag`, and the line parser is
 `core/media/`, host-tested. ESP-Hosted makes its SDIO/RPC tasks at
 priority 23 with no core affinity and no Kconfig for either, so `ble`
 lowers them to 8 by name. **If esp_hosted is upgraded, check the boot log
 still says it found them.** It also pushes `demo_p4/c6_cp`'s firmware to the C6
 from `slave_fw` when the C6 is older than 2.12; build that project first.
+
+**Phone notifications** (§11.1 tag `N`, 1.32): calls, missed calls and
+messages, forwarded by the phone app's `NotifListener` (its `NotifyFilter`
+is JVM-tested) and shown as a toast and on CRUISE → PHONE. Neither end has
+talked to the other over this tag.
+
+**Doom on the demo board** (1.32, `demo_p4/` only). DIAG's menu has a
+ninth row from `ui::IProgram`, which only the demo sets; E on it hands the
+panel to doomgeneric (`demo_p4/components/doomgeneric`, GPL-2.0, vendored)
+and the board is reset to leave. The WAD is the first `.wad` in `games/` on
+the card, uploaded from the Wi-Fi page's Games section (`Deps::games`).
+Buttons are raw held state: A/B forward/back, C/D turn, E fire/select/yes,
+A+B menu, C+D use. Doom's big arrays are in PSRAM by `DG_EXTRAM`
+(src/dg_dash.h: IDF v6.0.2's ldgen emits nothing for a `* (extram_bss)`
+mapping) and `states` is read from flash; it costs ~64 kB of internal RAM.
+The demo's SD card is the Guition's microSD, 4-bit SDMMC slot 0 (CLK 43,
+CMD 44, D0-3 39-42) powered from LDO VO4: `demo_p4/main/sdcard_sdmmc.cpp`
+is the mount, everything else is the bike's `drivers::SdCard` (its mount
+is `sdcard_spi.cpp` now, behind `sdcard_mount.hpp`). ESP-Hosted owns the
+one SDMMC controller for the C6, so the card only adds slot 0 and never
+inits or deinits the host. Serial `inputs` on the demo traces the raw pod
+pins, touch zones and decoded presses for 30 s.
 
 ### What is deliberately not here
 

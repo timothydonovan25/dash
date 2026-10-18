@@ -64,10 +64,27 @@ struct SystemInfo {
     uint32_t stack_low_free_b   = 0;
 };
 
+// A program DIAG's menu can start that is not a screen: it takes the panel
+// over from the render task, so nothing about it is drawn from a Frame. Only
+// a build that has one sets Context::program (the demo board's Doom); the
+// bike's menu is the eight pages and nothing else.
+class IProgram {
+public:
+    virtual ~IProgram() = default;
+    // The menu row's label, and its one-word reading ("ready", "no WAD").
+    virtual const char* name() const = 0;
+    virtual const char* state() const = 0;
+    // Asked from render's on_input. The render task looks for the request
+    // after it and hands the panel over; false if it cannot start (nothing
+    // to run), and the menu stays as it was.
+    virtual bool launch() = 0;
+};
+
 struct Context {
     const core::config::Settings* settings = nullptr;
     ICommandSink*                 commands = nullptr;
     const SystemInfo*             system   = nullptr;
+    IProgram*                     program  = nullptr;
 };
 
 class Screen {

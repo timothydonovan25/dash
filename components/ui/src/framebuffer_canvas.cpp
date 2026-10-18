@@ -339,7 +339,7 @@ void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
 
     // The large sizes have smoothed glyphs in the same cells (ui/font_aa.hpp).
     // A character that set leaves out is drawn from the bitmap.
-    const AaFont* aa = antialias_ ? aa_font(scale) : nullptr;
+    const AaFont* aa = antialias_ ? aa_font(scale, smooth_small_) : nullptr;
 
     for (const char* ch = text; *ch; ++ch) {
         const uint8_t code = static_cast<uint8_t>(*ch);

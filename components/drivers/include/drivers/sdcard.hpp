@@ -1,4 +1,6 @@
-// The SD card, in SPI mode, on the shared SPI2 bus.
+// The SD card, in SPI mode, on the shared SPI2 bus. (The mount is the one
+// board-specific part, src/sdcard_spi.cpp; the Guition demo links its own,
+// over SDMMC — src/sdcard_mount.hpp.)
 //
 // Not SDMMC: the card socket is wired to the same three SPI pins as the IMU,
 // with its own chip select. That is slower than a 4-bit SDMMC bus and it is
@@ -49,6 +51,8 @@ public:
     // rather than overwrite an existing `to`.
     hal::Status rename(const char* from, const char* to) override;
     hal::Status write_file(const char* path, const void* data, size_t len) override;
+    hal::Status write_at(const char* path, size_t offset, const void* data,
+                         size_t len) override;
     bool exists(const char* path);
 
     // Reads the socket's card-detect switch. Configures the pin on first

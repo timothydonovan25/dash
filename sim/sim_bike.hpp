@@ -85,6 +85,8 @@ struct Controls {
     // `ctrl` does before it publishes.
     uint8_t shift_mask  = 0;
     bool    shift_flash = false;
+    float   rpm_peak    = 0.0f;   // core::shift::PeakHold, as `ctrl` publishes it
+    uint8_t shift_hold  = 0;
     uint8_t gear        = 0;
 };
 
@@ -118,6 +120,14 @@ public:
     // to make. What the engine does once it catches is the rpm and battery
     // sliders, which the front end moves when it sends this.
     void trigger_crank(uint32_t now_ms, float rest_v);
+    // A wheelie or a stoppie, as the IMU would see one: the nose up (or
+    // down) on top of the pitch slider, with the accelerometer turning with
+    // the bike, and the front's landing at the end. core::stunt decides
+    // what it was and scores it; it needs the bike moving (3 mph or more).
+    // The wheelie climbs to ~35 degrees, wanders through the balance band
+    // for three seconds and comes down; the stoppie is 1.3 s at -16.
+    enum class Trick : uint8_t { Wheelie, Stoppie };
+    void trigger_trick(Trick kind, uint32_t now_ms);
 
     // What the engine and battery are doing right now: the sliders, or the
     // starter while it runs.
@@ -149,6 +159,9 @@ private:
     float    rpm_ = 0.0f;
     float    vbat_ = 12.6f;
     uint32_t spike_until_ms_ = 0;
+    uint32_t trick_at_ms_ = 0;     // 0: none under way
+    Trick    trick_ = Trick::Wheelie;
+    float    trick_pitch(uint32_t now_ms, float& land_g);
 
     core::jump::Detector jump_;
     core::battery::Monitor battery_;   // as `power` runs it, on the slider's VIN

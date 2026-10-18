@@ -161,5 +161,67 @@ int main() {
         CHECK(ctrl_line(0xFF, out) == 0);
     }
 
+    CASE("N: a message is kind, who and text, and moves seq");
+    {
+        core::state::Notify n;
+        const char line[] = "NM Alex\x1fRunning late, start without me";
+        CHECK(core::media::apply_notify(n, reinterpret_cast<const uint8_t*>(line),
+                                        sizeof line - 1, 500));
+        CHECK(n.kind == 'M');
+        CHECK(std::strcmp(n.who, "Alex") == 0);
+        CHECK(std::strcmp(n.text, "Running late, start without me") == 0);
+        CHECK(n.seq == 1);
+        CHECK(n.at_ms == 500);
+        CHECK(!n.ringing);
+        // Not media: apply_line leaves N alone, and apply_notify leaves T.
+        Media m;
+        CHECK(apply_line(m, reinterpret_cast<const uint8_t*>(line), sizeof line - 1, 1) == 0);
+        const char t[] = "T Song";
+        CHECK(!core::media::apply_notify(n, reinterpret_cast<const uint8_t*>(t), sizeof t - 1, 1));
+        CHECK(n.seq == 1);
+    }
+
+    CASE("N: a call rings until E, or until the timeout");
+    {
+        core::state::Notify n;
+        const auto put = [&](const char* s, uint32_t at) {
+            return core::media::apply_notify(n, reinterpret_cast<const uint8_t*>(s),
+                                             std::strlen(s), at);
+        };
+        CHECK(put("NC Mum", 1000));
+        CHECK(n.kind == 'C' && n.ringing && n.text[0] == '\0');
+        CHECK(core::media::ringing(n, 1000 + 30000));
+        CHECK(!core::media::ringing(n, 1000 + core::media::kRingTimeoutMs));
+        CHECK(put("NE", 5000));
+        CHECK(!n.ringing);
+        CHECK(std::strcmp(n.who, "Mum") == 0);   // still says who it was
+        CHECK(n.seq == 1);                        // an end is not a new one
+        CHECK(put("NX Mum", 6000));
+        CHECK(n.kind == 'X' && !n.ringing && n.seq == 2);
+    }
+
+    CASE("N: unknown kinds, short lines and control bytes");
+    {
+        core::state::Notify n;
+        const auto put = [&](const char* s, size_t len) {
+            return core::media::apply_notify(n, reinterpret_cast<const uint8_t*>(s), len, 1);
+        };
+        CHECK(!put("NZ who", 6));
+        CHECK(!put("N", 1));
+        CHECK(n.seq == 0);
+        const char tabs[] = "NO Gmail\x1fline one\nline two\tend\n";
+        CHECK(put(tabs, sizeof tabs - 1));
+        CHECK(std::strcmp(n.text, "line one line two end") == 0);
+        // Cut to fit, on a character boundary: 95 bytes of text, then an é.
+        char big[200] = "NM x\x1f";
+        size_t k = std::strlen(big);
+        for (int i = 0; i < 94; ++i) big[k++] = 'a';
+        big[k++] = static_cast<char>(0xC3);
+        big[k++] = static_cast<char>(0xA9);
+        CHECK(put(big, k));
+        CHECK(std::strlen(n.text) == 94);
+        CHECK(core::media::kMaxNotifyLine == 3 + 31 + 1 + 95);
+    }
+
     return check::report("media");
 }

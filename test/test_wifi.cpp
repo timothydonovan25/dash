@@ -57,6 +57,24 @@ int main() {
         CHECK(!valid_log_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.csv"));
     }
 
+    CASE("game files in games/ are .wad in either case, and nothing else");
+    {
+        CHECK(valid_game_name("doom1.wad"));
+        CHECK(valid_game_name("DOOM1.WAD"));
+        CHECK(valid_game_name("freedoom-2.Wad"));
+        CHECK(!valid_game_name(nullptr));
+        CHECK(!valid_game_name(""));
+        CHECK(!valid_game_name(".wad"));
+        CHECK(!valid_game_name("../doom1.wad"));
+        CHECK(!valid_game_name("a/doom1.wad"));
+        CHECK(!valid_game_name("doom1.wad.part"));
+        CHECK(!valid_game_name("doom1.csv"));
+        CHECK(!valid_game_name("default.cfg"));
+        CHECK(!valid_game_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.wad"));
+        // and the log rule stayed case-exact
+        CHECK(!valid_log_name("S000.CSV"));
+    }
+
     CASE("every state has a name");
     {
         CHECK(std::strcmp(state_name(State::On), "on") == 0);

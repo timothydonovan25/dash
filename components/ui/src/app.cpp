@@ -3,6 +3,9 @@
 #include "core/sweep/sweep.hpp"
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
+#include "core/media/feed.hpp"
+#include "core/stunt/stunt.hpp"
+#include "core/units/units.hpp"
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -19,6 +22,17 @@ namespace {
 constexpr Rect kAlertBox{20, 170, 280, 120};
 // Across the whole top, where the eye already goes for the tach.
 constexpr Rect kSlipBar{0, 0, kScreenW, 30};
+// Along the bottom, the full width: under the eye's path to the speed, and
+// clear of the tach and the slip bar at the top.
+constexpr Rect kToastBox{0, 266, kScreenW, 54};
+// How long a finished event stays up.
+constexpr uint32_t kPerfToastMs = 4000;
+constexpr uint32_t kStuntToastMs = 3500;
+constexpr uint32_t kNotifyToastMs = 8000;
+// A text message waits longer, for E: a minute, or until it is cleared.
+constexpr uint32_t kMessageToastMs = 60000;
+// Riding, for whether a message's text shows (Settings::notify_text_moving).
+constexpr float kMovingMph = 3.0f;
 // Top-right corner: small, but on every screen.
 constexpr Rect kDevTag{448, 0, 32, 11};
 // The splash's progress bar: a track that fills over kSplashMs.
@@ -32,6 +46,7 @@ constexpr int kMaxPerWidget = 6;
 App::App(const Context& ctx) : ctx_(ctx) {
     alert_.set_bounds(kAlertBox);
     slip_bar_.set_bounds(kSlipBar);
+    toast_.set_bounds(kToastBox);
     dev_tag_.set_bounds(kDevTag);
 }
 
@@ -46,7 +61,8 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
                 case 2: return ScreenId::Trip;
                 case 3: return ScreenId::TripMap;
                 case 4: return ScreenId::Nav;
-                default: return ScreenId::Minimal;
+                case 5: return ScreenId::Minimal;
+                default: return ScreenId::Phone;
             }
         case Mode::Track:
             switch (index) {
@@ -60,7 +76,9 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
             switch (index) {
                 case 0: return ScreenId::AllData;
                 case 1: return ScreenId::Engine;
-                default: return ScreenId::Attitude;
+                case 2: return ScreenId::Attitude;
+                case 3: return ScreenId::Perf;
+                default: return ScreenId::Stunt;
             }
         case Mode::Diag:
             switch (index) {
@@ -116,6 +134,7 @@ void App::build(ScreenId id) {
         }
         case ScreenId::Nav:        s = make<NavScreen>(slot_); break;
         case ScreenId::Minimal:    s = make<MinimalScreen>(slot_); break;
+        case ScreenId::Phone:      s = make<PhoneScreen>(slot_); break;
         case ScreenId::Race:       s = make<RaceScreen>(slot_); break;
         case ScreenId::Lap:        s = make<LapScreen>(slot_); break;
         case ScreenId::Session:    s = make<SessionScreen>(slot_); break;
@@ -134,6 +153,8 @@ void App::build(ScreenId id) {
         case ScreenId::AllData:    s = make<AllDataScreen>(slot_); break;
         case ScreenId::Engine:     s = make<EngineScreen>(slot_); break;
         case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
+        case ScreenId::Perf:       s = make<PerfScreen>(slot_); break;
+        case ScreenId::Stunt:      s = make<StuntScreen>(slot_); break;
         case ScreenId::DiagMenu:   s = make<DiagMenuScreen>(slot_); break;
         case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
         case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;
@@ -217,6 +238,18 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
         }
     }
 
+    // A text message on the strip waits for E (or its minute). Short E
+    // clears it and does nothing else; only while it is the one showing, so
+    // a press meant for the screen is never taken by something hidden.
+    if (toast_clearable_ && e.button == Button::E && e.press == Press::Short) {
+        phone_event_.until_ms = 0;
+        phone_event_.clearable = false;
+        toast_clearable_ = false;
+        toast_.hide();
+        restore(kToastBox);
+        return;
+    }
+
     Screen& s = current();
     if (s.handle(e)) {
         const int f = s.focus_now();
@@ -231,6 +264,11 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     if (nav_.mode == core::nav::Mode::Diag) {
         using core::nav::Press;
         if (nav_.screen == 0 && e.button == Button::E && e.press == Press::Short) {
+            // The row below the pages is the build's program, not a page.
+            if (nav_.focus >= DiagMenuScreen::kPages) {
+                if (ctx_.program) ctx_.program->launch();
+                return;
+            }
             go_screen(static_cast<uint8_t>(nav_.focus + 1), 0, c);
             return;
         }
@@ -306,11 +344,196 @@ void App::update_slip(const core::state::Frame& f) {
     if (was && !slip_bar_.active()) restore(kSlipBar);
 }
 
+namespace {
+
+// `src` into `dst`, cut to fit on a UTF-8 boundary, ending "..." when cut:
+// the toast is one line of a fixed width, and the font cuts nothing itself.
+void clip(char* dst, size_t cap, const char* src) {
+    size_t len = std::strlen(src);
+    if (len < cap) {
+        std::memcpy(dst, src, len + 1);
+        return;
+    }
+    size_t n = cap > 4 ? cap - 4 : 0;
+    while (n > 0 && (static_cast<unsigned char>(src[n]) & 0xC0) == 0x80) --n;
+    std::memcpy(dst, src, n);
+    std::memcpy(dst + n, "...", 4);
+}
+
+void fmt_secs(char* buf, size_t n, uint32_t ms, int places) {
+    core::units::fmt_float(buf, n, ms / 1000.0f, places);
+}
+
+}  // namespace
+
+void App::ToastEvent::set(const char* b, const char* s, Color c, uint32_t until) {
+    clip(big, sizeof big, b);
+    clip(small, sizeof small, s);
+    color = c;
+    until_ms = until ? until : 1;
+}
+
+bool App::ToastEvent::live(uint32_t now) const {
+    return until_ms != 0 && static_cast<int32_t>(until_ms - now) > 0;
+}
+
+void App::update_toast(const core::state::Frame& f) {
+    namespace st = core::stunt;
+    using P = core::state::Perf;
+    const core::config::Settings* cfg = ctx_.settings;
+    const bool popups = !cfg || cfg->popups;
+    const bool notify_on = !cfg || cfg->notify_on;
+    const uint32_t now = f.t_ms;
+
+    // Whatever was already there at the first frame is history, not news;
+    // and a counter back at 0 (a source that started over) is nothing new.
+    if (!toast_seen_init_) {
+        toast_seen_init_ = true;
+        seen_perf_ = f.perf.seq;
+        seen_stunt_ = f.stunt.seq;
+        seen_notify_ = f.notify.seq;
+    }
+
+    char big[40], small[64], a[16], b[16];
+    const bool metric = cfg && cfg->unit_system ==
+                                   static_cast<uint8_t>(core::units::System::Metric);
+    const char* dunit = metric ? "km/h" : "mph";
+
+    if (f.perf.seq != seen_perf_) {
+        seen_perf_ = f.perf.seq;
+        const uint8_t m = f.perf.event;
+        const P::Result& r = f.perf.last[m < P::kCount ? m : 0];
+        const bool best = f.perf.event_best;
+        if (m == P::Brake1 || m == P::Brake2) {
+            const float d = metric ? r.x * 0.3048f : r.x;
+            core::units::fmt_float(a, sizeof a, d, 0);
+            fmt_secs(b, sizeof b, r.ms, 2);
+            std::snprintf(big, sizeof big, "%s %s %s", perf_metric_name(m, metric), a, metric ? "M" : "FT");
+            std::snprintf(small, sizeof small, "%s s%s", b, best ? "   NEW BEST" : "");
+        } else {
+            fmt_secs(a, sizeof a, r.ms, 2);
+            std::snprintf(big, sizeof big, "%s %ss", perf_metric_name(m, metric), a);
+            if (m >= P::Ft60) {
+                const float trap = metric ? r.x * 1.609344f : r.x;
+                core::units::fmt_float(b, sizeof b, trap, 0);
+                std::snprintf(small, sizeof small, "trap %s %s%s", b, dunit, best ? "   NEW BEST" : "");
+            } else {
+                std::snprintf(small, sizeof small, "%s", best ? "NEW BEST" : "");
+            }
+        }
+        // Only a new best: every pull-away from a stop is a run, and a
+        // toast for each would be noise. PERF lists them all, and shows them
+        // there itself.
+        if (popups && f.perf.seq != 0 && best && active_id_ != ScreenId::Perf) {
+            game_event_.set(big, small, color::kWarn, now + kPerfToastMs);
+        }
+    }
+
+    // STUNT shows the trick itself, bigger; the strip would only cover its
+    // records. SPEED shows it in the lean gauge's place, as it does a jump.
+    const bool stunt_toasts = popups && active_id_ != ScreenId::Stunt &&
+                              active_id_ != ScreenId::Speed;
+    if (f.stunt.seq != seen_stunt_) {
+        seen_stunt_ = f.stunt.seq;
+        const core::state::Stunt& s = f.stunt;
+        if (s.kind == st::Looped) {
+            std::snprintf(big, sizeof big, "LOOPED OUT!");
+            std::snprintf(small, sizeof small, "no points, combo lost");
+            if (stunt_toasts && s.seq != 0) game_event_.set(big, small, color::kAlarm, now + kStuntToastMs);
+        } else {
+            std::snprintf(big, sizeof big, "%s! +%u", st::grade_name(s.kind, s.grade),
+                          static_cast<unsigned>(s.points));
+            fmt_secs(a, sizeof a, s.ms, 1);
+            const char* land = st::landing_name(s.landing);
+            int k = std::snprintf(small, sizeof small, "%ss %d deg", a,
+                                  static_cast<int>(s.peak_deg + 0.5f));
+            if (land[0] && k < static_cast<int>(sizeof small)) {
+                k += std::snprintf(small + k, sizeof small - k, "  %s", land);
+            }
+            if (s.mult_x10 > 10 && k < static_cast<int>(sizeof small)) {
+                k += std::snprintf(small + k, sizeof small - k, "  x%u.%u",
+                                   s.mult_x10 / 10u, s.mult_x10 % 10u);
+            }
+            if (s.record && k < static_cast<int>(sizeof small)) {
+                std::snprintf(small + k, sizeof small - k, "  RECORD");
+            }
+            if (stunt_toasts && s.seq != 0) {
+                game_event_.set(big, small, s.record ? color::kWarn : color::kGood,
+                                now + kStuntToastMs);
+            }
+        }
+    }
+
+    const core::state::Notify& n = f.notify;
+    const bool moving = f.motion.best_mph >= kMovingMph;
+    if (n.seq != seen_notify_) {
+        seen_notify_ = n.seq;
+        const char* label = n.kind == 'M' ? "MSG " : n.kind == 'X' ? "MISSED " : "";
+        std::snprintf(big, sizeof big, "%s%s", label, n.who);
+        const bool text = n.text[0] && (!moving || (cfg && cfg->notify_text_moving));
+        // The strip holds about 36 characters of the message: a glance.
+        // CRUISE -> PHONE has the rest.
+        clip(small, 37, text ? n.text : n.text[0] ? "stop to read" : "");
+        if (notify_on && n.seq != 0 && n.kind != 'C' && n.kind != 0) {
+            phone_event_.set(big, small, n.kind == 'X' ? color::kWarn : color::kAccent,
+                             now + (n.kind == 'M' ? kMessageToastMs : kNotifyToastMs));
+            phone_event_.clearable = n.kind == 'M';
+        }
+    }
+
+    // What shows now: a ringing call over everything, then a trick under
+    // way, then the newest finished event while it lasts. Never over the
+    // name card or the sweep, and never under an alert.
+    const bool allowed = !splash_on_ && sweep_done_ && !alert_.active();
+    const bool was = toast_.active();
+    bool showing_clearable = false;
+    if (allowed && notify_on && core::media::ringing(n, now)) {
+        std::snprintf(big, sizeof big, "CALL %s", n.who);
+        toast_.show(big, "incoming call", color::kGood);
+    } else if (allowed && phone_event_.live(now)) {
+        // A message waits a minute, so whether its text shows is decided as
+        // it shows, not when it came: stop, and it can be read.
+        const char* line = phone_event_.small;
+        char msg[40];
+        if (phone_event_.clearable && n.kind == 'M' && n.text[0]) {
+            const bool text = !moving || (cfg && cfg->notify_text_moving);
+            clip(msg, 37, text ? n.text : "stop to read");
+            line = msg;
+        }
+        toast_.show(phone_event_.big, line, phone_event_.color,
+                    phone_event_.clearable ? "E: clear" : "");
+        showing_clearable = phone_event_.clearable;
+    } else if (allowed && stunt_toasts && f.stunt.live_kind != st::None) {
+        const core::state::Stunt& s = f.stunt;
+        fmt_secs(a, sizeof a, s.live_ms, 1);
+        std::snprintf(big, sizeof big, "%s %ss", s.live_kind == st::Stoppie ? "STOPPIE" : "WHEELIE", a);
+        int k = std::snprintf(small, sizeof small, "%d deg  +%u",
+                              static_cast<int>((s.live_kind == st::Stoppie ? -s.live_deg : s.live_deg) + 0.5f),
+                              static_cast<unsigned>(s.live_points * s.combo_x10 / 10.0f));
+        if (s.combo_x10 > 10 && k < static_cast<int>(sizeof small)) {
+            k += std::snprintf(small + k, sizeof small - k, "  x%u.%u", s.combo_x10 / 10u,
+                               s.combo_x10 % 10u);
+        }
+        if (s.live_balance && k < static_cast<int>(sizeof small)) {
+            std::snprintf(small + k, sizeof small - k, "  BALANCE!");
+        }
+        toast_.show(big, small, color::kAccent);
+    } else if (allowed && game_event_.live(now)) {
+        toast_.show(game_event_.big, game_event_.small, game_event_.color);
+    } else {
+        toast_.hide();
+    }
+    // What it covered goes back, as for the alert: that strip, not the screen.
+    if (was && !toast_.active()) restore(kToastBox);
+    toast_clearable_ = showing_clearable;
+}
+
 DASH_BIG_FRAME_BEGIN   // the sweep's Frame copy (1.1 kB); runs on render's 8 kB + App stack
 void App::update(const core::state::Frame& f) {
     if (!active_) return;
     update_alert(f);
     update_slip(f);
+    update_toast(f);
     const bool dev = f.ota.known && f.ota.role != core::ota::Role::Stable;
     if (dev != dev_running_) {
         dev_running_ = dev;
@@ -433,6 +656,7 @@ void App::paint_region(Canvas& c) {
         if (w && c.intersects(w->bounds)) w->render(c);
     }
     if (slip_bar_.active() && c.intersects(slip_bar_.bounds)) slip_bar_.render(c);
+    if (toast_.active() && c.intersects(toast_.bounds)) toast_.render(c);
     if (alert_.active() && c.intersects(alert_.bounds)) alert_.render(c);
     if (dev_running_ && c.intersects(dev_tag_.bounds)) dev_tag_.render(c);
 }
@@ -476,6 +700,10 @@ void App::render(Canvas& c, bool full) {
     if (slip_bar_.active()) {
         if (c.intersects(slip_bar_.bounds)) slip_bar_.render(c);
         slip_bar_.clear_dirty();
+    }
+    if (toast_.active()) {
+        if (c.intersects(toast_.bounds)) toast_.render(c);
+        toast_.clear_dirty();
     }
 
     // Last, and over everything: the one widget allowed to break the
@@ -521,6 +749,7 @@ size_t App::damage(Damage* out, size_t max) {
     // The overlays go only when they changed themselves. Where a widget
     // under them changed, draw_damage() has already put them back on top.
     if (slip_bar_.active() && slip_bar_.dirty && n < max) out[n++] = Damage{&slip_bar_, slip_bar_.bounds};
+    if (toast_.active() && toast_.dirty && n < max) out[n++] = Damage{&toast_, toast_.bounds};
     if (alert_.active() && alert_.dirty && n < max) out[n++] = Damage{&alert_, alert_.bounds};
     if (dev_running_ && dev_tag_.dirty && n < max) out[n++] = Damage{&dev_tag_, dev_tag_.bounds};
     return n;
@@ -538,9 +767,13 @@ void App::draw_damage(Canvas& c, const Damage& d) {
     d.w->render(c);
     // Over everything, as on a full repaint: an overlay whose own pixels
     // did not change still has to cover what was just drawn under it.
-    if (d.w != &slip_bar_ && d.w != &alert_ && d.w != &dev_tag_ && slip_bar_.active() &&
-        d.r.intersects(slip_bar_.bounds)) {
+    if (d.w != &slip_bar_ && d.w != &alert_ && d.w != &dev_tag_ && d.w != &toast_ &&
+        slip_bar_.active() && d.r.intersects(slip_bar_.bounds)) {
         slip_bar_.render(c);
+    }
+    if (d.w != &toast_ && d.w != &alert_ && d.w != &dev_tag_ && toast_.active() &&
+        d.r.intersects(toast_.bounds)) {
+        toast_.render(c);
     }
     if (d.w != &alert_ && alert_.active() && d.r.intersects(alert_.bounds)) alert_.render(c);
     if (d.w != &dev_tag_ && dev_running_ && d.r.intersects(dev_tag_.bounds)) dev_tag_.render(c);
@@ -553,6 +786,7 @@ void App::clear_damage() {
         for (Widget* w : current().widgets()) if (w) w->clear_dirty();
     }
     slip_bar_.clear_dirty();
+    toast_.clear_dirty();
     alert_.clear_dirty();
     dev_tag_.clear_dirty();
 }

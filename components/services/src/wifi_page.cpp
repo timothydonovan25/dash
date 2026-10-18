@@ -68,6 +68,19 @@ engine off. Then on the dash: DIAG &rarr; Update &rarr; Boot dev once.</div>
 </div>
 </div>
 
+<div id="gameswrap" hidden>
+<h2>Games</h2>
+<div class="card">
+<div class="dim">A Doom .wad for DIAG &rarr; Doom, kept in games/ on the card
+(the shareware DOOM1.WAD, DOOM.WAD, DOOM2.WAD or Freedoom).</div>
+<div id="games"></div>
+<input type="file" id="gfile" accept=".wad,.WAD">
+<button id="gup" disabled>Upload</button>
+<progress id="gprog" value="0" max="100" hidden></progress>
+<div class="msg" id="gmsg"></div>
+</div>
+</div>
+
 <h2>Settings</h2>
 <div class="card" id="settings"><span class="dim">&hellip;</span></div>
 
@@ -86,8 +99,40 @@ async function status(){
     const s=await (await fetch('/api/status')).json();
     $('run').textContent=s.running+' '+s.running_date+' ('+s.role+', '+s.slot+')';
     $('dev').textContent=s.other?s.other+' '+s.other_date:'empty';
+    if(s.games&&$('gameswrap').hidden){$('gameswrap').hidden=false;games()}
   }catch(e){}
 }
+async function games(){
+  const el=$('games');
+  try{
+    const l=await (await fetch('/api/games')).json();
+    el.innerHTML=l.length?l.map(f=>'<div class="row"><span>'+f.name+'</span><span class="dim">'+kb(f.size)+
+      ' <button data-gdel="'+f.name+'">Delete</button></span></div>').join(''):
+      '<div class="dim">No .wad on the card yet.</div>';
+    el.querySelectorAll('[data-gdel]').forEach(b=>b.onclick=async()=>{
+      const n=b.dataset.gdel;if(!confirm('Delete '+n+' from the card?'))return;
+      b.disabled=true;
+      let r={};try{r=await (await fetch('/games/'+n,{method:'DELETE'})).json()}catch(e){r={error:'connection lost'}}
+      if(r.ok)games();else{alert('Not deleted: '+r.error);b.disabled=false}
+    });
+  }catch(e){el.innerHTML='<span class="bad">Could not list games.</span>'}
+}
+$('gfile').onchange=()=>{$('gup').disabled=!$('gfile').files.length;$('gmsg').textContent=''};
+$('gup').onclick=()=>{
+  const f=$('gfile').files[0];if(!f)return;
+  const x=new XMLHttpRequest(),p=$('gprog'),m=$('gmsg');
+  $('gup').disabled=true;p.hidden=false;p.value=0;m.className='msg dim';m.textContent='Sending…';
+  x.upload.onprogress=e=>{if(e.lengthComputable)p.value=100*e.loaded/e.total;
+    if(e.loaded===e.total)m.textContent='Writing to the card…'};
+  x.onload=()=>{
+    let r={};try{r=JSON.parse(x.responseText)}catch(e){r={ok:false,error:x.responseText||x.status}}
+    m.className='msg '+(r.ok?'good':'bad');
+    m.textContent=r.ok?'On the card. Start it from DIAG → Doom.':'Failed: '+r.error;
+    $('gup').disabled=false;games();
+  };
+  x.onerror=()=>{m.className='msg bad';m.textContent='Connection lost.';$('gup').disabled=false};
+  x.open('PUT','/games/'+encodeURIComponent(f.name));x.send(f);
+};
 async function logs(){
   const el=$('logs');
   try{

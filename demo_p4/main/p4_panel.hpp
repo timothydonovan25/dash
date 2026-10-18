@@ -25,6 +25,12 @@ public:
                      const uint16_t* pixels) override;
     hal::Status set_backlight(uint8_t percent) override;
 
+    // The whole 800x480 view, not the dash's 480x320 canvas scaled 1.5x into
+    // it: for a program that takes the panel over (DIAG -> Doom). Draws a
+    // w x h RGB565 image with its top-left at view (x, y), each pixel a
+    // scale x scale block. Unsupported if any of it would fall off the view.
+    hal::Status blit_view(int x, int y, int w, int h, const uint16_t* pixels, int scale);
+
 private:
     void*    dsi_bus_ = nullptr;    // esp_lcd_dsi_bus_handle_t
     void*    io_      = nullptr;    // esp_lcd_panel_io_handle_t

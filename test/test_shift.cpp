@@ -129,5 +129,62 @@ int main() {
         CHECK_NEAR(on_time - early, 750.0, 200.0); // (6000 - 1000) rpm/s * 0.15 s
     }
 
+    CASE("a shift leaves the peak marked for the hold, then lets it go");
+    {
+        core::shift::PeakHold h;
+        uint32_t t = 1000;
+        float mark = 0.0f;
+        // Up through second to 9000: nothing marked, the mark would be on the needle.
+        for (float rpm = 4000; rpm <= 9000; rpm += 100, t += 10) {
+            mark = h.update(rpm, t, 2000);
+            CHECK(mark == 0.0f);
+        }
+        // The shift: down to 6500 in a few passes.
+        for (float rpm = 8500; rpm >= 6500; rpm -= 500, t += 10) mark = h.update(rpm, t, 2000);
+        CHECK(mark == 9000.0f);
+        // Pulling again in third: still 9000 while the hold lasts...
+        for (float rpm = 6500; rpm <= 7500; rpm += 50, t += 10) mark = h.update(rpm, t, 2000);
+        CHECK(mark == 9000.0f);
+        // ...gone when it runs out, and back to following.
+        t += 2000;
+        CHECK(h.update(7600, t, 2000) == 0.0f);
+        CHECK(h.update(7700, t + 10, 2000) == 0.0f);
+    }
+
+    CASE("catching up with the held peak takes it over; letting go follows down");
+    {
+        core::shift::PeakHold h;
+        uint32_t t = 1000;
+        h.update(8000, t, 2000);
+        CHECK(h.update(7000, t += 10, 2000) == 8000.0f);
+        // Back up past it within the hold: the new peak, marked again only
+        // when the rpm drops away from that.
+        CHECK(h.update(8200, t += 10, 2000) == 0.0f);
+        CHECK(h.update(7600, t += 10, 2000) == 8200.0f);
+        // Rolling off after the hold: no fresh mark at every lower rpm on the
+        // way down.
+        t += 2100;
+        for (float rpm = 7500; rpm >= 2000; rpm -= 100) {
+            CHECK(h.update(rpm, t += 10, 2000) == 0.0f);
+        }
+        // A drop under the gap is not marked: noise, or a gentle change.
+        h.reset();
+        h.update(6000, t += 10, 2000);
+        CHECK(h.update(5700, t += 10, 2000) == 0.0f);
+        // And 0 ms is off.
+        CHECK(h.update(9000, t += 10, 0) == 0.0f);
+        CHECK(h.update(5000, t += 10, 0) == 0.0f);
+    }
+
+    CASE("the held lamp is the highest the peak reached");
+    {
+        core::shift::Config c;   // lamps from 6000 every 300 (2400 / 8), flash 8800
+        CHECK(core::shift::hold_lamp(5900, c) == 0);
+        CHECK(core::shift::hold_lamp(6000, c) == 0x01);
+        CHECK(core::shift::hold_lamp(core::shift::threshold(c, 3), c) == 0x08);
+        CHECK(core::shift::hold_lamp(core::shift::threshold(c, 7), c) == 0x80);
+        CHECK(core::shift::hold_lamp(9500, c) == 0x80);
+    }
+
     return check::report("shift");
 }

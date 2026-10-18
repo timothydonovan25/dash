@@ -48,7 +48,9 @@ add_library(core STATIC
     ${CORE}/src/waypoint.cpp
     ${CORE}/src/flash.cpp
     ${CORE}/src/track.cpp
-    ${CORE}/src/session.cpp)
+    ${CORE}/src/session.cpp
+    ${CORE}/src/perf.cpp
+    ${CORE}/src/stunt.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -65,6 +67,7 @@ add_library(ui STATIC
     ${UI}/src/widgets.cpp
     ${UI}/src/screens_cruise.cpp
     ${UI}/src/screens_track.cpp
+    ${UI}/src/screens_perf.cpp
     ${UI}/src/screens_stat.cpp
     ${UI}/src/screens_diag.cpp
     ${UI}/src/screen_config.cpp
@@ -79,7 +82,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

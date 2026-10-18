@@ -107,6 +107,34 @@ void Bike::trigger_jump(uint32_t now_ms, uint32_t airtime_ms) {
     spike_until_ms_ = air_until_ms_ + 200;
 }
 
+void Bike::trigger_trick(Trick kind, uint32_t now_ms) {
+    trick_ = kind;
+    trick_at_ms_ = now_ms ? now_ms : 1;
+}
+
+// The trick's pitch at `now_ms`, degrees on top of the slider, and the extra
+// vertical g of its landing (0 outside it). Ends itself.
+float Bike::trick_pitch(uint32_t now_ms, float& land_g) {
+    land_g = 0.0f;
+    if (trick_at_ms_ == 0) return 0.0f;
+    const float t = (now_ms - trick_at_ms_) / 1000.0f;
+    if (trick_ == Trick::Wheelie) {
+        // Up in 0.4 s, 3 s riding the balance point, down in 0.3 s, and a
+        // soft landing a sixth of a second long.
+        if (t < 0.4f) return 35.0f * t / 0.4f;
+        if (t < 3.4f) return 36.0f + 6.0f * std::sin((t - 0.4f) * 2.3f);
+        if (t < 3.7f) return 36.0f * (3.7f - t) / 0.3f;
+        if (t < 3.87f) { land_g = 0.35f; return 0.0f; }
+    } else {
+        if (t < 0.15f) return -16.0f * t / 0.15f;
+        if (t < 1.3f) return -16.0f + 2.0f * std::sin(t * 6.0f);
+        if (t < 1.5f) return -16.0f * (1.5f - t) / 0.2f;
+        if (t < 1.65f) { land_g = 0.3f; return 0.0f; }
+    }
+    trick_at_ms_ = 0;
+    return 0.0f;
+}
+
 void Bike::trigger_slip(Slip kind, uint32_t now_ms) {
     slip_at_ms_[static_cast<uint8_t>(kind)] = now_ms ? now_ms : 1;
 }
@@ -204,6 +232,8 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     core::state::Engine e;
     e.shift_mask = c.shift_mask;
     e.shift_flash = c.shift_flash;
+    e.rpm_peak = c.rpm_peak;
+    e.shift_hold = c.shift_hold;
     e.gear = c.gear;
     e.rpm = rpm_;
     e.neutral = c.neutral;
@@ -244,12 +274,19 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     // Over on its side, whichever side the slider last leaned it.
     a.lean_deg = c.down ? (c.lean_deg < 0.0f ? -88.0f : 88.0f) : lean_deg_;
     a.imu_temp_c = c.dash_temp_c - 3.0f;   // the IMU runs a little cooler than the P4
-    a.pitch_deg = c.pitch_deg;
+    float land_g = 0.0f;
+    a.pitch_deg = c.pitch_deg + trick_pitch(now_ms, land_g);
     a.yaw_rate_dps = yaw_rate_dps;
+    // The specific force a strapped-down accelerometer reads: the road
+    // acceleration and 1 g up, turned into the bike's frame by its pitch
+    // and lean. With pitch left out a wheelie read as the bike falling, and
+    // core::stunt's climb filter took it for a cliff.
     const float lean_rad = a.lean_deg * static_cast<float>(kPi) / 180.0f;
-    a.g_lat = std::sin(lean_rad);
-    a.g_vert = std::cos(lean_rad);
-    a.g_lon = accel_g_;
+    const float pitch_rad = a.pitch_deg * static_cast<float>(kPi) / 180.0f;
+    const float up = -accel_g_ * std::sin(pitch_rad) + std::cos(pitch_rad);
+    a.g_lon = accel_g_ * std::cos(pitch_rad) + std::sin(pitch_rad);
+    a.g_lat = up * std::sin(lean_rad);
+    a.g_vert = up * std::cos(lean_rad) + land_g;
 
     // What the accelerometer reads, fed to the firmware's own detector
     // rather than to a flag that says "jumping". In free fall the magnitude

@@ -65,6 +65,9 @@ struct Deps {
     hal::IEngine*      engine  = nullptr;      // NullEngine today
     hal::IStorage*     storage = nullptr;
     hal::ICard*        card    = nullptr;
+    // A build that runs a game off the card (the demo board's Doom): the
+    // Wi-Fi page then lists, uploads and deletes .wad files in games/.
+    bool               games   = false;
     hal::IRailSense*   rails   = nullptr;
 
     core::state::Slots*     slots    = nullptr;

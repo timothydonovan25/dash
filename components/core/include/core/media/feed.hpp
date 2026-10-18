@@ -32,6 +32,33 @@ inline constexpr uint8_t kSrcPhone = 1;
 char apply_line(state::Media& m, const uint8_t* data, size_t len,
                 uint32_t now_ms);
 
+// §11.1 tag `N`: a notification from the phone, in one write.
+//
+//     N<kind> <who><US><text>
+//
+// `kind` is one byte: 'C' an incoming call (ringing), 'E' that call ended
+// (answered, rejected or gone), 'X' a missed call, 'M' a message, 'O' any
+// other app. `who` is the caller, sender or app name, `US` is 0x1F (ASCII's
+// unit separator), and `text` the message, absent for a call. Cut to fit on
+// a UTF-8 boundary like every field; control bytes inside either become
+// spaces, since both are drawn. An 'E' changes nothing but `ringing`, so a
+// call that has stopped still says who it was.
+//
+// Returns true if the line was an `N` this firmware understands; `n` is
+// untouched otherwise. Separate from apply_line() because a notification is
+// not media: it lives in its own slot and survives a new song.
+bool apply_notify(state::Notify& n, const uint8_t* data, size_t len, uint32_t now_ms);
+
+// A call stops ringing when the phone says so, or after this long without
+// hearing: a phone that drops out mid-ring must not ring on the dash forever.
+inline constexpr uint32_t kRingTimeoutMs = 45000;
+bool ringing(const state::Notify& n, uint32_t now_ms);
+
+// The longest `N` write the phone sends: tag, kind, space, `who`, US,
+// `text`. The `ble` task's line buffer is sized from this.
+inline constexpr size_t kMaxNotifyLine =
+    3 + (sizeof(state::Notify::who) - 1) + 1 + (sizeof(state::Notify::text) - 1);
+
 // Copies at most `cap - 1` bytes of `src` into `dst` and terminates it,
 // backing off so the copy never ends inside a UTF-8 sequence. Returns the
 // number of bytes copied.

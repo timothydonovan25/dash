@@ -228,7 +228,10 @@ class MapView : public Widget {
 public:
     void set_source(const IPointSource* src);
     // Called every frame. The marker is drawn on the newest trace point,
-    // which is where the bike is; `valid` is whether to draw it at all.
+    // which is where the bike is, with a pointer the way it was going (from
+    // the trace itself, so it always agrees with the line under it, and
+    // moves when the trace is redrawn rather than on every fix); `valid` is
+    // whether to draw it at all.
     void set_live(bool valid);
     void render(Canvas& c) override;
 
@@ -242,6 +245,10 @@ private:
 
     const IPointSource* src_ = nullptr;
     static constexpr size_t kRedrawPoints = 10;
+public:
+    // Between the frame and the trace, for the marker and its pointer.
+    static constexpr int16_t kMarkerMargin = 14;
+private:
     size_t drawn_total_ = 0;
     bool  valid_ = false;
     bool  fit_stale_ = true;
@@ -271,6 +278,11 @@ public:
 
     void set(float fraction);      // 0..1 of the rev range
 
+    // The rpm before the last shift (Engine::rpm_peak), as the same 0..1:
+    // a white line across the bar where the marker got to. 0 or less for
+    // none. Redrawn as its own rows, apart from the marker's.
+    void set_peak(float fraction);
+
     // A 1px mark at every 1000 rpm up to `base_rpm` (the same full-scale
     // value `fraction` in set() is measured against), drawn over the
     // marker rather than under it — a rider glancing at the bar mid-shift
@@ -283,7 +295,11 @@ public:
     // The rows the marker left and arrived on: ~600 px a move instead of the
     // whole 25x295 stem, which was 1.5 ms of wire nearly every frame.
     int damage(Rect* out, int max) const override;
-    void clear_dirty() override { Widget::clear_dirty(); moved_ = false; }
+    void clear_dirty() override {
+        Widget::clear_dirty();
+        moved_ = false;
+        peak_sent_y_ = peak_y_;
+    }
 
     // How wide the bar is at a given row. One function for the track and the
     // marker both, so the two can never disagree about where the edge is,
@@ -298,6 +314,7 @@ public:
     static constexpr int16_t kFlareW  = 135;
     static constexpr int16_t kMarkerH = 12;
     static constexpr int16_t kTickH   = 1;     // thickness of each 1000-rpm mark
+    static constexpr int16_t kPeakH   = 3;     // the held peak's line
 
 private:
     // A pixel of movement is not worth a repaint of the whole strip.
@@ -320,6 +337,12 @@ private:
     bool    moved_ = false;
     int16_t moved_top_ = 0;
     int16_t moved_bottom_ = 0;
+    // The held peak's top row, and the one on the panel; kNoPeak for none.
+    static constexpr int16_t kNoPeak = -1000;
+    int16_t peak_y_ = kNoPeak;
+    int16_t peak_sent_y_ = kNoPeak;
+    // The rows of a peak line at `y` inside this instance's strip, or empty.
+    Rect    peak_rows(int16_t y) const;
 };
 
 // RACE's tach: a bar across the whole width, filled from the left, lit the
@@ -336,11 +359,19 @@ public:
     // `lamps` and `flash` are what `ctrl` sent the lamps (Engine::shift_mask,
     // shift_flash).
     void set(float rpm, bool lamps, bool flash, bool valid = true);
+    // The rpm before the last shift (Engine::rpm_peak): a white line down
+    // the bar where the fill got to. 0 for none.
+    void set_peak(float rpm);
+    // The rpm as a number, over the left end of the bar in a box of its own,
+    // to the nearest 100. Off unless asked for.
+    void show_number(bool on);
     void render(Canvas& c) override;
     int damage(Rect* out, int max) const override;
-    void clear_dirty() override { Widget::clear_dirty(); moved_ = false; }
 
     static constexpr int16_t kStepPx = 2;
+    // The number's box: inset from the bar's left end, as tall as the bar
+    // allows, wide enough for "12000" at kNumberScale.
+    static constexpr uint8_t kNumberScale = 4;
 
 private:
     enum class Shade : uint8_t { Normal, Lamps, Flash };
@@ -353,6 +384,22 @@ private:
     bool     moved_ = false;
     int16_t  moved_l_ = 0;
     int16_t  moved_r_ = 0;
+    // The held peak's column, and the one on the panel; -1 for none.
+    int16_t  peak_x_ = -1;
+    int16_t  peak_sent_x_ = -1;
+    Rect     peak_cols(int16_t x) const;
+    // The number: shown at the last set(), and on the panel; -1 for none.
+    bool     number_ = false;
+    int32_t  number_rpm_ = -1;
+    int32_t  number_sent_ = -1;
+    Rect     number_box() const;
+public:
+    void clear_dirty() override {
+        Widget::clear_dirty();
+        moved_ = false;
+        peak_sent_x_ = peak_x_;
+        number_sent_ = number_rpm_;
+    }
 };
 
 // The lean gauge on the speed screen: a half annulus with a marker on it and
@@ -366,7 +413,9 @@ private:
 // partial update, which is exactly the invariant test_ui exists to hold.
 class LeanGauge : public Widget {
 public:
-    enum class Face : uint8_t { Lean, Air, Landed };
+    // Lean; a jump (in the air, then landed); a wheelie or stoppie (under
+    // way, then scored), which SPEED shows here instead of as a toast.
+    enum class Face : uint8_t { Lean, Air, Landed, Trick, TrickDone };
 
     void set(float lean_deg, bool valid);
 
@@ -375,6 +424,14 @@ public:
     // clock. In the air the airtime is shown to a tenth, so the tile is
     // redrawn ten times a second rather than on every frame.
     void set_jump(Face face, uint32_t airtime_ms, float landing_g);
+    // The trick faces, as text the screen has already formatted: a label
+    // (WHEELIE, or the grade), the big line (the time, or the points), and
+    // a detail line under it. Redrawn when the face, the label or the big
+    // line changes; under way the big line is the time to a tenth, so the
+    // detail (angle, points) rides along at ten frames a second rather than
+    // costing the whole 248x126 gauge on every frame.
+    void set_trick(Face face, const char* label, Color label_color, const char* big,
+                   const char* detail);
     Face face() const { return face_; }
 
     void render(Canvas& c) override;
@@ -389,6 +446,7 @@ public:
 
 private:
     void render_jump(Canvas& c);
+    void render_trick(Canvas& c);
 
     // The geometry render() draws with, so damage() names the same pixels.
     struct Geom { int16_t cx, cy, r, ri, ov; uint8_t scale; };
@@ -402,6 +460,10 @@ private:
     Face     face_ = Face::Lean;
     uint32_t airtime_ms_ = 0;
     float    landing_g_ = 0.0f;
+    TextBuf<16> trick_label_;
+    TextBuf<12> trick_big_;
+    TextBuf<24> trick_detail_;
+    Color       trick_color_ = color::kAccent;
 };
 
 // One line of what is playing: an icon and a name that scrolls if it is too
@@ -564,6 +626,28 @@ private:
 class DevTag : public Widget {
 public:
     void render(Canvas& c) override;
+};
+
+// A strip along the bottom of every screen, for a few seconds: a trick that
+// landed, a timed run that finished, a call or a message. Under the alert,
+// which outranks it, and gone by itself: unlike the alert it asks for no
+// press, because a rider who has to dismiss a high score will stop wanting
+// them. A big line and a small one, in the colour of what it is.
+class Toast : public Widget {
+public:
+    // `hint`, if any, is a few words at the top-right corner, small: how to
+    // clear one that waits for a press.
+    void show(const char* big, const char* small, Color c, const char* hint = "");
+    void hide();
+    bool active() const { return active_; }
+    void render(Canvas& c) override;
+
+private:
+    TextBuf<28> big_;
+    TextBuf<44> small_;
+    TextBuf<12> hint_;
+    Color       color_ = color::kAccent;
+    bool        active_ = false;
 };
 
 }  // namespace ui

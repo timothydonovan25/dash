@@ -8,7 +8,8 @@
 //   - download the ride logs off the card,
 //   - download the stable and dev firmware images, as a backup,
 //   - delete ride logs,
-//   - read and change every CONFIG setting.
+//   - read and change every CONFIG setting,
+//   - on a build that runs one (Deps::games), upload a game's .wad to games/.
 // It turns itself off after core::wifi::kIdleOffMs without a request, and
 // as soon as the bike moves. The policy is core::wifi; this is the radio
 // and the web server.
@@ -92,6 +93,13 @@ Web g_web;
 // through it a chunk at a time. PSRAM, as ota's g_chunk: the radio is the
 // bottleneck, not the copy through IDF's bounce buffers.
 EXT_RAM_BSS_ATTR uint8_t g_buf[kChunk];
+// A game upload's pieces go to the card this big: each write_at opens the
+// file and seeks to its end, and 4 kB at a time was a thousand of those for
+// one WAD.
+constexpr size_t kGameChunk = 32 * 1024;
+EXT_RAM_BSS_ATTR uint8_t g_game_buf[kGameChunk];
+// Big enough for any IWAD people have (DOOM2.WAD 14 MB, Freedoom's 28 MB).
+constexpr size_t kGameMaxBytes = 64u * 1024 * 1024;
 
 // --- page handlers --------------------------------------------------------
 
@@ -126,14 +134,15 @@ esp_err_t status_get(httpd_req_t* r) {
                   "{\"running\":\"%s\",\"running_date\":\"%s\",\"slot\":\"%s\","
                   "\"role\":\"%s\",\"other\":\"%s\",\"other_date\":\"%s\","
                   "\"install\":%u,\"pct\":%u,\"error\":\"%s\","
-                  "\"image_error\":\"%s\",\"card\":%s}",
+                  "\"image_error\":\"%s\",\"card\":%s,\"games\":%s}",
                   o.running_ver, o.running_date, o.running_slot, core::ota::role_name(o.role),
                   o.other == core::ota::Other::Ready ? o.other_ver : "",
                   o.other == core::ota::Other::Ready ? o.other_date : "",
                   static_cast<unsigned>(o.install), static_cast<unsigned>(o.install_pct),
                   core::ota::install_error_name(o.error),
                   core::ota::image_error_name(o.image_error),
-                  card && card->present() ? "true" : "false");
+                  card && card->present() ? "true" : "false",
+                  g_web.d->games ? "true" : "false");
     return send_json(r, body);
 }
 
@@ -186,11 +195,12 @@ struct ListCtx {
     size_t taken = 0;
     bool   full = false;
     bool   first = true;  // no entry sent yet, so no leading comma
+    bool (*valid)(const char*) = core::wifi::valid_log_name;
 };
 
 void list_one(const char* name, size_t size, void* vctx) {
     auto* c = static_cast<ListCtx*>(vctx);
-    if (!core::wifi::valid_log_name(name) || c->full) return;
+    if (!c->valid(name) || c->full) return;
     if (c->seen++ < c->skip) return;
     char item[96];
     const int n = std::snprintf(item, sizeof item, "%s{\"name\":\"%s\",\"size\":%u}",
@@ -205,7 +215,8 @@ void list_one(const char* name, size_t size, void* vctx) {
     ++c->taken;
 }
 
-esp_err_t logs_list_get(httpd_req_t* r) {
+// One directory's valid names as a JSON array, a page of the listing at a time.
+esp_err_t list_dir(httpd_req_t* r, const char* dir, bool (*valid)(const char*)) {
     g_web.touch();
     hal::ICard* card = g_web.d->card;
     httpd_resp_set_type(r, "application/json");
@@ -221,7 +232,8 @@ esp_err_t logs_list_get(httpd_req_t* r) {
             ctx.cap = kChunk;
             ctx.skip = skip;
             ctx.first = first;
-            card->list("logs", list_one, &ctx);
+            ctx.valid = valid;
+            card->list(dir, list_one, &ctx);
             if (ctx.len) httpd_resp_send_chunk(r, ctx.buf, static_cast<ssize_t>(ctx.len));
             g_web.touch();
             skip += ctx.taken;
@@ -231,6 +243,10 @@ esp_err_t logs_list_get(httpd_req_t* r) {
     }
     httpd_resp_send_chunk(r, "]", 1);
     return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+esp_err_t logs_list_get(httpd_req_t* r) {
+    return list_dir(r, "logs", core::wifi::valid_log_name);
 }
 
 esp_err_t log_get(httpd_req_t* r) {
@@ -288,6 +304,97 @@ esp_err_t log_delete(httpd_req_t* r) {
     }
     if (!hal::ok(st)) {
         return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no such log\"}");
+    }
+    ESP_LOGI(kTag, "deleted %s", path);
+    return send_json(r, "{\"ok\":true}");
+}
+
+// --- games ---------------------------------------------------------------
+//
+// Only on a build with Deps::games. A .wad goes to games/upload.tmp and is
+// renamed over the old one only once every byte is on the card, so a cut-off
+// upload leaves the game that was there. The card is not flash: nothing here
+// stops core 0, and the hotspot is off whenever the bike moves anyway.
+
+constexpr const char* kGameTmp = "games/upload.tmp";
+
+esp_err_t games_list_get(httpd_req_t* r) {
+    if (!g_web.d->games) return httpd_resp_send_err(r, HTTPD_404_NOT_FOUND, "no games");
+    return list_dir(r, "games", core::wifi::valid_game_name);
+}
+
+esp_err_t game_put(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    const char* name = r->uri + std::strlen("/games/");
+    if (!d.games) return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no games\"}");
+    if (!core::wifi::valid_game_name(name)) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"not a .wad name\"}");
+    }
+    if (!d.card || !d.card->present()) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    }
+    const size_t size = r->content_len;
+    if (size == 0 || size > kGameMaxBytes) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"too big for a WAD\"}");
+    }
+
+    size_t at = 0;     // bytes on the card
+    size_t held = 0;   // bytes in g_game_buf, not yet written
+    while (at + held < size) {
+        const size_t room = kGameChunk - held;
+        const size_t left = size - at - held;
+        const int n = httpd_req_recv(r, reinterpret_cast<char*>(g_game_buf + held),
+                                     left < room ? left : room);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (n <= 0) {
+            ESP_LOGW(kTag, "game upload cut off at %u of %u", static_cast<unsigned>(at + held),
+                     static_cast<unsigned>(size));
+            d.card->remove(kGameTmp);
+            return ESP_FAIL;
+        }
+        held += static_cast<size_t>(n);
+        g_web.touch();
+        if (held == kGameChunk || at + held == size) {
+            const hal::Status st = d.card->write_at(kGameTmp, at, g_game_buf, held);
+            if (!hal::ok(st)) {
+                ESP_LOGW(kTag, "game upload: card write at %u: %s", static_cast<unsigned>(at),
+                         hal::status_name(st));
+                d.card->remove(kGameTmp);
+                return send_status(r, "500 Internal Server Error",
+                                   "{\"ok\":false,\"error\":\"the card refused it\"}");
+            }
+            at += held;
+            held = 0;
+        }
+    }
+
+    char path[48];
+    std::snprintf(path, sizeof path, "games/%s", name);
+    d.card->remove(path);   // NotPresent for a first upload, which is fine
+    if (!hal::ok(d.card->rename(kGameTmp, path))) {
+        d.card->remove(kGameTmp);
+        return send_status(r, "500 Internal Server Error",
+                           "{\"ok\":false,\"error\":\"could not rename it on the card\"}");
+    }
+    ESP_LOGI(kTag, "game %s: %u bytes", path, static_cast<unsigned>(size));
+    return send_json(r, "{\"ok\":true}");
+}
+
+esp_err_t game_delete(httpd_req_t* r) {
+    g_web.touch();
+    const char* name = r->uri + std::strlen("/games/");
+    hal::ICard* card = g_web.d->card;
+    if (!g_web.d->games || !core::wifi::valid_game_name(name)) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"not a .wad name\"}");
+    }
+    if (!card || !card->present()) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    }
+    char path[48];
+    std::snprintf(path, sizeof path, "games/%s", name);
+    if (!hal::ok(card->remove(path))) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no such file\"}");
     }
     ESP_LOGI(kTag, "deleted %s", path);
     return send_json(r, "{\"ok\":true}");
@@ -457,7 +564,7 @@ httpd_handle_t start_server() {
     cfg.core_id = 1;
     cfg.task_priority = 3;
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 16;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
@@ -476,6 +583,9 @@ httpd_handle_t start_server() {
         {"/fw/stable.bin", HTTP_GET,  fw_get,        nullptr},
         {"/fw/dev.bin",    HTTP_GET,  fw_get,        nullptr},
         {"/fw",            HTTP_POST, fw_post,       nullptr},
+        {"/api/games",     HTTP_GET,  games_list_get, nullptr},
+        {"/games/*",       HTTP_PUT,  game_put,      nullptr},
+        {"/games/*",       HTTP_DELETE, game_delete, nullptr},
     };
     for (const httpd_uri_t& u : uris) httpd_register_uri_handler(h, &u);
     return h;

@@ -25,7 +25,10 @@ uint32_t off_in_s(uint32_t now_ms, uint32_t last_use_ms) {
     return (kIdleOffMs - used + 999u) / 1000u;
 }
 
-bool valid_log_name(const char* name) {
+namespace {
+// Letters, digits, '-', '_' and exactly one '.', under 32 characters, ending
+// in `ext` (".csv"), compared without case when `any_case`.
+bool valid_name(const char* name, const char* ext4, bool any_case) {
     if (!name || !*name) return false;
     size_t n = 0;
     int dots = 0;
@@ -39,8 +42,18 @@ bool valid_log_name(const char* name) {
     }
     if (dots != 1 || n < 5) return false;
     const char* ext = name + n - 4;
-    return ext[0] == '.' && ext[1] == 'c' && ext[2] == 's' && ext[3] == 'v';
+    for (int i = 0; i < 4; ++i) {
+        char c = ext[i];
+        if (any_case && c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (c != ext4[i]) return false;
+    }
+    return true;
 }
+}  // namespace
+
+bool valid_log_name(const char* name) { return valid_name(name, ".csv", false); }
+
+bool valid_game_name(const char* name) { return valid_name(name, ".wad", true); }
 
 const char* state_name(State s) {
     switch (s) {

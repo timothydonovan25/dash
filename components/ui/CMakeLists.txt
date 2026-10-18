@@ -8,6 +8,7 @@ idf_component_register(
          "src/widgets.cpp"
          "src/screens_cruise.cpp"
          "src/screens_track.cpp"
+         "src/screens_perf.cpp"
          "src/screens_stat.cpp"
          "src/screens_diag.cpp"
          "src/screen_config.cpp"

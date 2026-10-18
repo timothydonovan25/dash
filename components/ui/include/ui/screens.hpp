@@ -69,6 +69,25 @@ private:
 // so this is still useful moving, not just parked. SpeedScreen's own media
 // block stays as it is — a glance while the speed is the point — this is
 // the screen for when the song is the point.
+// The phone's last call or message (§11.1 `N`). The text only when stopped,
+// unless CONFIG -> Phone -> Text moving says otherwise.
+class PhoneScreen final : public Screen {
+public:
+    const char* name() const override { return "PHONE"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    WidgetList widgets() override;
+
+private:
+    static constexpr int kLines = 3;
+    Label   kind_;
+    Label   who_;
+    Label   line_[kLines];
+    Label   age_;
+    Label   link_;
+    Widget* list_[4 + kLines] = {};
+};
+
 class MediaScreen final : public Screen {
 public:
     const char* name() const override { return "MEDIA"; }
@@ -288,6 +307,54 @@ private:
 
 // --- Stat ---------------------------------------------------------------
 
+// "0-60 MPH", "1/8 MILE", "60-0 KM/H": a core::state::Perf::Metric by name,
+// in the thresholds `metric` riders get.
+const char* perf_metric_name(uint8_t m, bool metric);
+
+// The performance timers (core::perf): what the timer is doing, and each
+// run's last and best. E forgets the bests.
+class PerfScreen final : public Screen {
+public:
+    const char* name() const override { return "PERF"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    WidgetList widgets() override;
+    bool handle(const core::nav::InputEvent& e) override;
+
+private:
+    static constexpr int kRows = core::state::Perf::kCount;
+    Label   status_;
+    Label   name_[kRows];
+    Label   last_[kRows];
+    Label   best_[kRows];
+    Widget* list_[1 + 3 * kRows] = {};
+};
+
+// Wheelies and stoppies (core::stunt): the trick under way or the last one,
+// its angle against the balance-point band, the combo, and the session's
+// score and records. E starts a new session score.
+class StuntScreen final : public Screen {
+public:
+    const char* name() const override { return "STUNT"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    WidgetList widgets() override;
+    bool handle(const core::nav::InputEvent& e) override;
+
+private:
+    static constexpr int kTiles = 6;
+    Label   head_;      // WHEELIE, or LAST: SICK
+    Label   time_;      // the trick's time, big
+    Label   detail_;    // angle, points, landing
+    Label   combo_;
+    Label   score_;
+    Bar     angle_;     // lift, 0..70 degrees
+    Label   value_[kTiles];
+    Widget* list_[6 + kTiles] = {};
+};
+
 class AllDataScreen final : public Screen {
 public:
     const char* name() const override { return "ALL"; }
@@ -348,10 +415,15 @@ public:
     void update(const core::state::Frame& f) override;
     void draw_background(Canvas& c) override;
     WidgetList widgets() override;
-    uint8_t focus_count() const override { return kPages; }
+    uint8_t focus_count() const override { return rows(); }
     void set_focus(uint8_t f) override;
 
 private:
+    // A build with a ui::IProgram has it as one more row, below the pages.
+    uint8_t rows() const {
+        return static_cast<uint8_t>(kPages + (has_ctx() && ctx().program ? 1 : 0));
+    }
+
     Table   table_;
     Widget* list_[1] = {};
     uint8_t focus_ = 0;

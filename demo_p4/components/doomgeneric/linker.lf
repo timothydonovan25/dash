@@ -1,0 +1,14 @@
+# info.c's `states` table (~27 kB, every frame of every animation) is
+# initialised data that nothing writes, so it is read from flash like a
+# const instead of taking internal RAM. `mobjinfo` cannot follow it:
+# G_InitNew writes three monsters' missile speeds for -fast and Nightmare.
+# A store into flash faults at once, which is how a write this missed would
+# show. Doom's big zeroed arrays go to PSRAM by DG_EXTRAM (src/dg_dash.h).
+[scheme:doom_data_in_flash]
+entries:
+    data -> flash_rodata
+
+[mapping:doomgeneric]
+archive: libdoomgeneric.a
+entries:
+    info:states (doom_data_in_flash)

@@ -1,8 +1,6 @@
 #include "drivers/sdcard.hpp"
-#include "bsp/pins.hpp"
+#include "sdcard_mount.hpp"
 
-#include "driver/gpio.h"
-#include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include <dirent.h>
@@ -23,36 +21,7 @@ constexpr const char* kMount = "/sd";
 // the machine.
 constexpr uint32_t kSyncEveryWrites = 64;
 
-hal::Status from_esp(esp_err_t err) {
-    switch (err) {
-        case ESP_OK: return hal::Status::Ok;
-        case ESP_ERR_TIMEOUT: return hal::Status::Timeout;
-        case ESP_ERR_NOT_FOUND: return hal::Status::NotPresent;
-        case ESP_ERR_INVALID_STATE: return hal::Status::Busy;
-        default: return hal::Status::IoError;
-    }
-}
-
 }  // namespace
-
-bool SdCard::card_detect() {
-    if (!cd_ready_) {
-        // R16 is the pull-up; the internal one covers it being unpopulated.
-        gpio_config_t cd = {};
-        cd.pin_bit_mask = 1ull << bsp::kSdCardDetect;
-        cd.mode = GPIO_MODE_INPUT;
-        cd.pull_up_en = GPIO_PULLUP_ENABLE;
-        cd.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        cd.intr_type = GPIO_INTR_DISABLE;
-        cd_ready_ = gpio_config(&cd) == ESP_OK;
-        // A pin that would not configure reads as "inserted", so a broken
-        // detect line degrades to "try to mount" rather than "never log".
-        if (!cd_ready_) return detected_ = true;
-    }
-    const int level = gpio_get_level(static_cast<gpio_num_t>(bsp::kSdCardDetect));
-    detected_ = bsp::kSdCardDetectActiveLow ? level == 0 : level != 0;
-    return detected_;
-}
 
 namespace {
 // Held for a whole filesystem call. An SD stall can take hundreds of
@@ -83,37 +52,16 @@ hal::Status SdCard::init() {
     if (!hold.held()) return hal::Status::Busy;
     if (mounted_) return hal::Status::Ok;
 
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI2_HOST;
-    host.max_freq_khz = bsp::kSpiHzSd / 1000;
-
-    sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot.gpio_cs = static_cast<gpio_num_t>(bsp::kCsSd);
-    slot.host_id = SPI2_HOST;
-    // Card detect is read by card_detect() and acted on by the storage task,
-    // which owns the unmount. Handing the pin to sdspi as well would give it
-    // two readers with two ideas of what a pulled card means.
-    slot.gpio_cd = GPIO_NUM_NC;
-    slot.gpio_wp = GPIO_NUM_NC;
-
-    esp_vfs_fat_mount_config_t mount = {};
-    // Never format. A card that will not mount is a card to look at on a
-    // laptop, not one to erase — it may be the only copy of a session.
-    mount.format_if_mount_failed = false;
-    mount.max_files = 4;
-    mount.allocation_unit_size = 16 * 1024;
-
-    sdmmc_card_t* card = nullptr;
-    const esp_err_t err =
-        esp_vfs_fat_sdspi_mount(kMount, &host, &slot, &mount, &card);
-    if (err != ESP_OK) return from_esp(err);
+    void* card = nullptr;
+    const hal::Status st = sdcard_mount(kMount, &card);
+    if (!hal::ok(st)) return st;
 
     card_ = card;
     mounted_ = true;
     // The directories the firmware writes into. fopen() does not make a
     // missing one, so a fresh card would refuse every log and every track.
     // EEXIST on every mount after the first is the normal case.
-    for (const char* dir : {"logs", "tracks"}) {
+    for (const char* dir : {"logs", "tracks", "games"}) {
         char full[32];
         std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
         mkdir(full, 0777);
@@ -250,6 +198,32 @@ hal::Status SdCard::write_file(const char* path, const void* data, size_t len) {
     const bool flushed = std::fflush(f) == 0 && fsync(fileno(f)) == 0;
     const bool closed = std::fclose(f) == 0;
     return written == len && flushed && closed ? hal::Status::Ok : hal::Status::IoError;
+}
+
+hal::Status SdCard::write_at(const char* path, size_t offset, const void* data,
+                             size_t len) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    if (!mounted_) return hal::Status::NotPresent;
+    if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
+    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
+        return hal::Status::Busy;
+    }
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    // Only ever on the end: a piece that does not follow the last is an
+    // upload that lost one, and is refused rather than written with a hole.
+    if (offset != 0) {
+        struct stat st;
+        if (stat(full, &st) != 0 || static_cast<size_t>(st.st_size) != offset) {
+            return hal::Status::Unsupported;
+        }
+    }
+    FILE* f = std::fopen(full, offset == 0 ? "wb" : "ab");
+    if (!f) return hal::Status::IoError;
+    const size_t written = len ? std::fwrite(data, 1, len, f) : 0;
+    const bool closed = std::fclose(f) == 0;
+    return written == len && closed ? hal::Status::Ok : hal::Status::IoError;
 }
 
 bool SdCard::exists(const char* path) {

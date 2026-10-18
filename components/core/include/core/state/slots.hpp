@@ -28,6 +28,9 @@ struct Slots {
     Published<Fused>    fused;      // logic
     Published<GearCal>  gear_cal;   // logic
     Published<Session>  session;    // logic
+    Published<Perf>     perf;       // logic
+    Published<Stunt>    stunt;      // logic
+    Published<Notify>   notify;     // ble
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
@@ -62,10 +65,13 @@ struct Frame {
     Fused    fused;
     GearCal  gear_cal;
     Session  session;
+    Perf     perf;
+    Stunt    stunt;
+    Notify   notify;
     uint32_t t_ms = 0;
 };
 
-// Sixteen seqlock reads. Each slot is internally consistent; the frame as a
+// One read per slot. Each slot is internally consistent; the frame as a
 // whole is not an instant, and does not need to be — the newest lean angle
 // and a 40 ms old lap time on the same screen is not a bug.
 Frame snapshot(const Slots& s, uint32_t t_ms);

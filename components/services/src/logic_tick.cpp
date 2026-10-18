@@ -1,4 +1,5 @@
 #include "services/logic_tick.hpp"
+#include "core/units/units.hpp"
 #include "core/log/log.hpp"
 
 namespace services {
@@ -290,6 +291,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 s.sectors.abort_lap();
                 s.lap_peaks.reset();
                 break;
+            case core::state::CommandId::PerfReset:
+                s.perf.reset_bests();
+                break;
+            case core::state::CommandId::StuntReset:
+                s.stunt.reset_session();
+                break;
             case core::state::CommandId::LeanPeaksReset:
                 s.session_peaks.lean_left_deg = 0.0f;
                 s.session_peaks.lean_right_deg = 0.0f;
@@ -579,6 +586,41 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         si.land_g = att.last_land_g;
         s.session.update(si);
         d.slots->session.publish(s.session.publish());
+    }
+
+    // --- performance timers ---------------------------------------------
+    // Every pass: a threshold is interpolated between passes, so more of
+    // them is finer timing, and the fused speed is fresh on each one.
+    {
+        const bool metric = d.settings && d.settings->unit_system ==
+                                              static_cast<uint8_t>(core::units::System::Metric);
+        core::perf::Input pin;
+        pin.t_ms = now;
+        pin.mph = fo.mph;
+        pin.valid = fo.valid;
+        s.perf.update(pin, core::perf::for_units(metric));
+        d.slots->perf.publish(s.perf.publish(metric));
+    }
+
+    // --- wheelies and stoppies -------------------------------------------
+    // Scheduled passes only: points are an integral over time, and an event
+    // pass would sample the same IMU reading again.
+    if (scheduled) {
+        core::stunt::Input sti;
+        sti.t_ms = now;
+        sti.pitch_deg = att.pitch_deg;
+        sti.lean_deg = att.lean_deg;
+        sti.g_lon = att.g_lon;
+        sti.g_lat = att.g_lat;
+        sti.g_vert = att.g_vert;
+        sti.airborne = att.airborne;
+        sti.imu_ok = health.ok(core::state::Dev::Imu);
+        sti.mph = fo.mph;
+        sti.speed_valid = fo.valid;
+        sti.gps_fix = g.fix;
+        sti.gps_alt_m = g.alt_m;
+        s.stunt.update(sti, core::stunt::Config{});
+        d.slots->stunt.publish(s.stunt.publish());
     }
 
     // --- lap ------------------------------------------------------------

@@ -20,17 +20,17 @@ struct ScreenStorage {
     static constexpr size_t align = std::max({alignof(T)...});
 };
 using AllScreens = ScreenStorage<
-    SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen,
+    SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen, PhoneScreen,
     RaceScreen, LapScreen, LapHistoryScreen, TrackMapScreen, SessionScreen, AllDataScreen, EngineScreen,
-    AttitudeScreen, DiagMenuScreen, SensorsScreen, GpsScreen, FusionScreen, SystemScreen, PowerScreen, BusScreen,
+    AttitudeScreen, PerfScreen, StuntScreen, DiagMenuScreen, SensorsScreen, GpsScreen, FusionScreen, SystemScreen, PowerScreen, BusScreen,
     RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen>;
 
 // Which screen is alive. Order follows the modes, but nothing depends on it.
 enum class ScreenId : uint8_t {
     None,
-    Speed, Media, Trip, TripMap, Nav, Minimal,
+    Speed, Media, Trip, TripMap, Nav, Minimal, Phone,
     Race, Lap, LapHistory, TrackMap, Session,
-    AllData, Engine, Attitude,
+    AllData, Engine, Attitude, Perf, Stunt,
     DiagMenu, Sensors, Gps, Fusion, System, Power, Bus, Radio, Update,
     Config, GearCal,
 };
@@ -90,7 +90,7 @@ public:
     void clear_damage();
 
     // The name card at key-on, before the sweep. Whole milliseconds.
-    static constexpr uint32_t kSplashMs = 1500;
+    static constexpr uint32_t kSplashMs = 500;
     bool splashing() const { return splash_on_; }
     void clear_full_repaint() {
         needs_full_ = false;
@@ -111,6 +111,7 @@ public:
     // Which alert the overlay is showing, None if it is down or dismissed.
     core::alert::Kind alert_kind() const { return alert_kind_; }
     SlipBar& slip_bar() { return slip_bar_; }
+    Toast& toast() { return toast_; }
 
     // Wiring for the things a screen reads but does not own. The App keeps
     // it and hands it to the screen each time that screen is built.
@@ -170,6 +171,29 @@ private:
     core::slip::Meter    slip_meter_;
     void                 update_slip(const core::state::Frame& f);
 
+    // The strip along the bottom: tricks, timed runs, the phone. What it
+    // last showed for an event, so a live trick taking it over for a moment
+    // can hand it back; and which events it has already shown.
+    Toast                toast_;
+    bool                 toast_seen_init_ = false;
+    uint16_t             seen_perf_ = 0, seen_stunt_ = 0, seen_notify_ = 0;
+    // Two kinds of event, so a trick cannot bury a message: the phone's,
+    // and the game's (a trick, a run).
+    struct ToastEvent {
+        uint32_t until_ms = 0;     // 0: nothing to show
+        char     big[28] = {};
+        char     small[44] = {};
+        Color    color = color::kAccent;
+        bool     clearable = false;   // waits for E (a text message)
+        void set(const char* b, const char* s, Color c, uint32_t until);
+        bool live(uint32_t now) const;
+    };
+    ToastEvent           phone_event_;
+    // The strip is showing a message E clears (set by update_toast).
+    bool                 toast_clearable_ = false;
+    ToastEvent           game_event_;
+    void                 update_toast(const core::state::Frame& f);
+
     // A dev image (§11.7) wears this on every screen.
     DevTag           dev_tag_;
     bool             dev_running_ = false;
@@ -189,9 +213,9 @@ private:
     void             render_splash(Canvas& c);
 
     // Patches of screen an overlay has just uncovered (the slip bar, an
-    // alert), repainted as damage rather than as a whole frame: the slip bar
+    // alert, the toast), repainted as damage rather than as a whole frame: the slip bar
     // is 2.9 ms of wire and the alert box 6.7, a full repaint 31.
-    static constexpr int kMaxRestore = 2;
+    static constexpr int kMaxRestore = 3;
     Rect             restore_[kMaxRestore] = {};
     int              restore_n_ = 0;
     void             restore(const Rect& r);

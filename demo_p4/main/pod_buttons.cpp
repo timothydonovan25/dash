@@ -81,6 +81,7 @@ hal::Status PodButtons::configure() {
 
 hal::Status PodButtons::read_mask(uint8_t& mask_out, uint32_t now_ms) {
     mask_out = 0;
+    last_gpa_ = 0;
     if (!dev_) return hal::Status::NotPresent;
 
     if (static_cast<int32_t>(now_ms - next_config_ms_) >= 0) {
@@ -103,6 +104,7 @@ hal::Status PodButtons::read_mask(uint8_t& mask_out, uint32_t now_ms) {
 
     uint8_t gpa = 0;
     const hal::Status s = read_reg(dev_, kGpioA, gpa);
+    last_gpa_ = hal::ok(s) ? gpa : 0;
     if (!hal::ok(s)) {
         configured_ = false;
         next_config_ms_ = now_ms + kRetryMs;

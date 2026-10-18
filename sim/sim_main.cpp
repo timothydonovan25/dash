@@ -22,7 +22,12 @@
 //                                playstate (0 stop 1 play 2 pause),
 //                                bus_mhz (panel write clock, 0 = instant)
 //        btn <A-E> down|up       real debounce and long-press timing
-//        cmd <lapline|laparm|lapclear|tripreset|jump|spin|flock|rlock|crank>
+//        cmd <lapline|laparm|lapclear|tripreset|jump|spin|flock|rlock|crank|
+//             wheelie|stoppie>      a trick, as the IMU would see it
+//        notify <kind>\t<who>\t<text>  the phone's §11.1 `N`, through the
+//                                firmware's own parser: kind C (a call,
+//                                ringing), E (it ended), X (missed),
+//                                M (message), O (other)
 //        dev <imu|gnss|lamps|pod|sd|display> <ok|fail|absent>
 //                                a device working, failing every report, or
 //                                not there (for sd: the card pulled)
@@ -40,6 +45,7 @@
 #include "panel_sim.hpp"
 
 #include "core/alert/alert.hpp"
+#include "core/media/feed.hpp"
 #include "core/config/config.hpp"
 #include "core/health/health.hpp"
 #include "core/input/input.hpp"
@@ -597,6 +603,9 @@ int main() {
     core::input::Config   button_cfg;
     uint8_t button_mask = 0;
     uint8_t lamp_mask = 0;
+    // `ctrl`'s held peak (core::shift::PeakHold), and the lamp it keeps lit.
+    core::shift::PeakHold peak_hold;
+    uint8_t hold_bits = 0;
     // The tach's rate of climb, for predictive lamps: fed the bike's rpm
     // every tick, where ctrl feeds it every tach edge.
     core::tach::RateEstimator rpm_rate;
@@ -655,7 +664,30 @@ int main() {
             float v = 0.0f;
             // Before the sscanf forms: this one takes the rest of the line
             // verbatim, spaces and all, because song titles have spaces in.
-            if (line.rfind("media", 0) == 0) {
+            if (line.rfind("notify", 0) == 0) {
+                // `ble`'s job: the phone's line, parsed by core::media and
+                // published as the Notify slot. Built into the wire format
+                // here so the parser sees exactly what a phone would send.
+                const char* rest = line.c_str() + 6;
+                if (*rest == ' ') ++rest;
+                std::string wire = "N";
+                if (*rest) wire += *rest++;
+                if (*rest == '\t') ++rest;
+                const char* tab = std::strchr(rest, '\t');
+                wire += ' ';
+                if (tab) {
+                    wire.append(rest, static_cast<size_t>(tab - rest));
+                    wire += '\x1f';
+                    wire += tab + 1;
+                } else {
+                    wire += rest;
+                }
+                core::state::Notify n = slots.notify.get();
+                if (core::media::apply_notify(n, reinterpret_cast<const uint8_t*>(wire.data()),
+                                              wire.size(), now)) {
+                    slots.notify.publish(n);
+                }
+            } else if (line.rfind("media", 0) == 0) {
                 const char* rest = line.c_str() + 5;
                 if (*rest == ' ') ++rest;
                 apply_media(controls, rest);
@@ -704,6 +736,8 @@ int main() {
                 else if (std::strcmp(a, "flock") == 0) bike.trigger_slip(sim::Bike::Slip::FrontLock, now);
                 else if (std::strcmp(a, "rlock") == 0) bike.trigger_slip(sim::Bike::Slip::RearLock, now);
                 else if (std::strcmp(a, "crank") == 0) bike.trigger_crank(now, controls.vbat);
+                else if (std::strcmp(a, "wheelie") == 0) bike.trigger_trick(sim::Bike::Trick::Wheelie, now);
+                else if (std::strcmp(a, "stoppie") == 0) bike.trigger_trick(sim::Bike::Trick::Stoppie, now);
             } else if (line.rfind("quit", 0) == 0) {
                 if (log_file) std::fclose(log_file);
                 return 0;
@@ -747,6 +781,7 @@ int main() {
         }
         uint16_t rpm = core::shift::lamp_rpm(bike.rpm(), rpm_rate.rpm_per_s(), sc);
         // ...including the start-up sweep, timed from the first frame.
+        bool sweeping = system.first_frame_ms == 0 && settings.gauge_sweep;
         if (system.first_frame_ms != 0) {
             core::sweep::Config wc;
             wc.enabled = settings.gauge_sweep;
@@ -755,11 +790,19 @@ int main() {
             const float sw = core::sweep::lamp_rpm(now - system.first_frame_ms,
                                                    bike.speed_mph(), wc);
             if (sw > rpm) rpm = static_cast<uint16_t>(sw);
+            sweeping = sw >= 0.0f;
         }
+        // The rpm before a shift, held: as `ctrl` does, from the displayed
+        // rpm, and not while the sweep owns the lamps.
+        const float held = sweeping ? 0.0f
+                                    : peak_hold.update(bike.rpm(), now, settings.shift_peak_hold_ms);
+        hold_bits = held > 0.0f ? core::shift::hold_lamp(static_cast<uint16_t>(held), sc) : 0;
         lamp_mask = core::shift::pattern(rpm, sc, lamp_mask);
         const bool flash = core::shift::over_limit(rpm, sc);
         controls.shift_mask = lamp_mask;
         controls.shift_flash = flash;
+        controls.rpm_peak = held;
+        controls.shift_hold = static_cast<uint8_t>(hold_bits & ~lamp_mask);
         // What `ctrl` does: infer the gear from rpm against road speed.
         controls.gear = core::gear::estimate(bike.rpm(), bike.speed_mph(),
                                              controls.neutral,
@@ -926,7 +969,7 @@ int main() {
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
                     "over=%u busy=%d pend=%u slip=%s/%u alert=%s bl=%u phase=%u track=%d\n",
-                    lamp_mask, flash ? 1 : 0, app.mode_name(),
+                    static_cast<uint8_t>(lamp_mask | hold_bits), flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
                     delta.reference_points(), delta.last_match_ft(),

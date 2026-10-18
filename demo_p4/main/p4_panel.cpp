@@ -454,6 +454,41 @@ hal::Status P4Panel::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     return hal::Status::Ok;
 }
 
+hal::Status P4Panel::blit_view(int x, int y, int w, int h, const uint16_t* pixels,
+                               int scale) {
+    if (!fb_) return hal::Status::NotPresent;
+    if (!pixels || w <= 0 || h <= 0 || scale < 1) return hal::Status::Ok;
+    const int dw = w * scale;
+    const int dh = h * scale;
+    if (x < 0 || y < 0 || x + dw > kViewW || y + dh > kViewH) return hal::Status::Unsupported;
+
+    // As blit(): a view column is a native row, so each destination column
+    // is one run of stores along it, here with every source pixel repeated
+    // `scale` times down the run and every source column `scale` times.
+    const int step = kRotateCw ? 1 : -1;
+    for (int sx = 0; sx < w; ++sx) {
+        const uint16_t* col = pixels + sx;
+        for (int k = 0; k < scale; ++k) {
+            uint16_t* out = fb_ + native_index(y, x + sx * scale + k);
+            for (int sy = 0; sy < h; ++sy) {
+                const uint16_t px = col[static_cast<size_t>(sy) * w];
+                for (int r = 0; r < scale; ++r, out += step) *out = px;
+            }
+        }
+    }
+
+    // Write the touched native rows back past the cache, as blit() does.
+    int lo = native_index(y, x), hi = lo;
+    for (int idx : {native_index(y + dh - 1, x), native_index(y, x + dw - 1),
+                    native_index(y + dh - 1, x + dw - 1)}) {
+        if (idx < lo) lo = idx;
+        if (idx > hi) hi = idx;
+    }
+    esp_cache_msync(fb_ + lo, static_cast<size_t>(hi - lo + 1) * sizeof(uint16_t),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    return hal::Status::Ok;
+}
+
 hal::Status P4Panel::set_backlight(uint8_t percent) {
     if (percent > 100) percent = 100;
     if (backlight_gpio_only_) {

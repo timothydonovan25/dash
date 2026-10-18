@@ -15,6 +15,8 @@
 #include "touch_buttons.hpp"
 #include "pod_buttons.hpp"
 #include "drivers/clock.hpp"
+#include "drivers/sdcard.hpp"
+#include "doom_program.hpp"
 #include "hal/i_engine.hpp"
 #include "core/input/input.hpp"
 #include "core/delta/delta.hpp"
@@ -68,6 +70,9 @@ demo::TouchButtons g_touch;
 demo::PodButtons   g_pod;     // the real pod on CN3, if plugged in
 hal::NullEngine   g_engine;
 drivers::NvsStorage g_storage;   // the real driver: settings and BLE bonds   // no ECU here, same as the real board (§10.1)
+drivers::SdCard     g_card;      // the bike's driver, over this board's SDMMC slot
+demo::RawButtons    g_raw_buttons;   // touch task -> Doom
+demo::DoomProgram   g_doom(g_card, g_panel, g_raw_buttons);   // DIAG -> Doom
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
@@ -91,6 +96,7 @@ void report_pod(hal::Status s, uint32_t now) {
 void touch_input_task(void*) {
     core::input::Decoder decoder;
     core::input::Config  cfg;
+    uint8_t last_touch = 0, last_pod = 0, last_gpa = 0;
 
     for (;;) {
         // Touch zones and the pod OR into one mask, so one Decoder sees
@@ -101,10 +107,31 @@ void touch_input_task(void*) {
         uint8_t touch = 0, pod = 0;
         g_touch.read_mask(touch);
         report_pod(g_pod.read_mask(pod, now), now);
+        g_raw_buttons.mask.store(static_cast<uint8_t>(touch | pod));
         core::nav::InputEvent ev[core::input::kButtonCount];
         const size_t n = decoder.update(touch | pod, now, cfg, ev,
                                         core::input::kButtonCount);
         for (size_t i = 0; i < n; ++i) services::post_input_event(ev[i]);
+
+        // Serial `inputs`: each layer's view of the buttons, as it changes.
+        const uint32_t until = g_state_request.trace_inputs_until_ms.load();
+        if (static_cast<int32_t>(until - now) > 0) {
+            const uint8_t gpa = g_pod.last_gpa();
+            if (touch != last_touch || pod != last_pod || gpa != last_gpa) {
+                ESP_LOGI("inputs", "pod pins %02x  pod ABCDE %c%c%c%c%c  touch ABCDE %c%c%c%c%c",
+                         gpa, pod & 1 ? 'A' : '.', pod & 2 ? 'B' : '.', pod & 4 ? 'C' : '.',
+                         pod & 8 ? 'D' : '.', pod & 16 ? 'E' : '.',
+                         touch & 1 ? 'A' : '.', touch & 2 ? 'B' : '.', touch & 4 ? 'C' : '.',
+                         touch & 8 ? 'D' : '.', touch & 16 ? 'E' : '.');
+            }
+            for (size_t i = 0; i < n; ++i) {
+                ESP_LOGI("inputs", "press %c %s", 'A' + static_cast<int>(ev[i].button),
+                         ev[i].press == core::nav::Press::Long ? "long" : "short");
+            }
+        }
+        last_touch = touch;
+        last_pod = pod;
+        last_gpa = g_pod.last_gpa();
         vTaskDelay(pdMS_TO_TICKS(1000 / kTouchPollHz));
     }
 }
@@ -140,11 +167,25 @@ extern "C" void app_main(void) {
     ESP_LOGI(kTag, "nvs: %s, %u saved settings", hal::status_name(nvs_status),
              static_cast<unsigned>(loaded));
 
+    // The microSD slot. After ESP-Hosted's constructor, which owns the SDMMC
+    // controller this adds a slot to (sdcard_sdmmc.cpp). Once, at boot:
+    // there is no `storage` task here to retry or eject.
+    g_health.begin_init(core::state::Dev::Sd, g_clock.now_ms());
+    const hal::Status card_status = g_card.init();
+    ESP_LOGI(kTag, "sd card: %s", hal::status_name(card_status));
+    if (hal::ok(card_status)) {
+        g_health.report_ok(core::state::Dev::Sd, g_clock.now_ms());
+    } else {
+        // Absent, not faulted: the card is optional here, and a fault would
+        // put the SD alert over the demo for want of one.
+        g_health.set_absent(core::state::Dev::Sd);
+    }
+
     const hal::Status touch_status = g_touch.init();
     ESP_LOGI(kTag, "touch: %s", hal::status_name(touch_status));
     report_pod(g_pod.init(g_touch.bus()), g_clock.now_ms());   // logs its own status
 
-    // No real sensors, no card, no radio — every pointer left null is a
+    // No real sensors, no radio — every pointer left null is a
     // device every service already treats as "not fitted" rather than
     // faulted (see the null checks in render_service.cpp/input_service.cpp
     // that this demo's own demo_render.cpp and main.cpp mirror).
@@ -155,6 +196,10 @@ extern "C" void app_main(void) {
     g_deps.settings = &g_settings;
     g_deps.health   = &g_health;
     g_deps.storage  = hal::ok(nvs_status) ? &g_storage : nullptr;
+    // The card for the Wi-Fi page's logs and games, and for ota's install
+    // from the card. Present or not: every user asks present() first.
+    g_deps.card     = &g_card;
+    g_deps.games    = true;
     g_deps.system   = &g_system;
     g_deps.lap_history = &g_lap_history;
     g_deps.delta       = &g_delta;
@@ -168,7 +213,7 @@ extern "C" void app_main(void) {
     g_commands.begin();
 
     demo::start_ctrl_probe(g_deps);
-    demo::start_demo_render(g_deps, g_commands, g_state_request);
+    demo::start_demo_render(g_deps, g_commands, g_state_request, &g_doom);
     demo::start_demo_bike(g_deps, g_commands);
     xTaskCreatePinnedToCore(touch_input_task, "touch", 3072, nullptr, 9,
                             nullptr, 1);

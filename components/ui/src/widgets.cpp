@@ -3,6 +3,7 @@
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace ui {
@@ -674,7 +675,10 @@ void MapView::render(Canvas& c) {
 
     const float span_x = (fit_max_x_ - fit_min_x_) > 1.0f ? (fit_max_x_ - fit_min_x_) : 1.0f;
     const float span_y = (fit_max_y_ - fit_min_y_) > 1.0f ? (fit_max_y_ - fit_min_y_) : 1.0f;
-    const Rect in = bounds.inset(6);
+    // A margin the rider's marker fits in whole: the newest point is often
+    // on the edge of the fit (the rider is what extends it), and its pointer
+    // reaches 11 px out from there.
+    const Rect in = bounds.inset(kMarkerMargin);
     const float sx = in.w / span_x;
     const float sy = in.h / span_y;
     const float s = sx < sy ? sx : sy;          // square, or the track lies
@@ -706,6 +710,45 @@ void MapView::render(Canvas& c) {
     if (valid_ && src_->point(n - 1, hx, hy)) {
         const int16_t bx = static_cast<int16_t>(in.cx() + (hx - mid_x) * s);
         const int16_t by = static_cast<int16_t>(in.cy() - (hy - mid_y) * s);
+
+        // Which way it was going: from a point far enough back that GPS
+        // jitter between neighbouring fixes does not swing it -- 15 ft, and
+        // 8 px on this map's scale -- to the newest. None that far back (a
+        // trace just begun) is a dot without a pointer.
+        const float min_ft = 8.0f / s > 15.0f ? 8.0f / s : 15.0f;
+        float ux = 0.0f, uy = 0.0f;
+        bool heading = false;
+        for (size_t k = n - 1; k-- > 0;) {
+            float x, y;
+            if (!src_->point(k, x, y)) continue;
+            const float ex = hx - x, ey = hy - y;
+            const float d = std::sqrt(ex * ex + ey * ey);
+            if (d >= min_ft) {
+                ux = ex / d;
+                uy = -ey / d;   // north up, screen y down
+                heading = true;
+                break;
+            }
+        }
+
+        // Inside the frame: a pointer near the edge must not draw where the
+        // next redraw of this widget would not clear it.
+        const ClipGuard clip(c, bounds.inset(1));
+        if (heading) {
+            // An arrowhead ahead of the dot: tip 11 px out, base corners 6 px
+            // either side, 2 px behind the centre, so it reads as the dot's
+            // nose rather than a separate mark.
+            const float tip = 11.0f, back = 2.0f, half = 6.0f;
+            const auto px_at = [&](float along, float side, int16_t& ox, int16_t& oy) {
+                ox = static_cast<int16_t>(std::lround(bx + ux * along - uy * side));
+                oy = static_cast<int16_t>(std::lround(by + uy * along + ux * side));
+            };
+            int16_t x0, y0, x1, y1, x2, y2;
+            px_at(tip, 0.0f, x0, y0);
+            px_at(-back, half, x1, y1);
+            px_at(-back, -half, x2, y2);
+            c.fill_triangle(x0, y0, x1, y1, x2, y2, color::kWarn);
+        }
         c.fill_circle(bx, by, 3, color::kWarn);
     }
 }
@@ -737,6 +780,14 @@ int16_t RevBar::edge_for(float rpm) const {
 }
 
 void RevBar::set(float rpm, bool lamps, bool flash, bool valid) {
+    // The number first: it changes on its own 100 rpm steps, and only its
+    // box goes out when that is all that moved.
+    const int32_t n = number_ && valid && rpm > 0.0f
+                          ? static_cast<int32_t>(rpm / 100.0f + 0.5f) * 100 : -1;
+    if (n != number_rpm_) {
+        number_rpm_ = n;
+        if (number_) touch_part();
+    }
     const Shade shade = flash ? Shade::Flash : lamps ? Shade::Lamps : Shade::Normal;
     // A change of colour or of validity repaints the lot; only a moving
     // edge is worth working out the columns for.
@@ -760,12 +811,46 @@ void RevBar::set(float rpm, bool lamps, bool flash, bool valid) {
     touch_part();
 }
 
+Rect RevBar::number_box() const {
+    const int16_t pad = 4;
+    const int16_t h = static_cast<int16_t>(7 * kNumberScale + 2 * pad);
+    const int16_t w = static_cast<int16_t>(text_width_px("12000", kNumberScale) + 2 * pad);
+    return Rect{static_cast<int16_t>(bounds.x + 6),
+                static_cast<int16_t>(bounds.y + (bounds.h - h) / 2), w, h};
+}
+
+void RevBar::show_number(bool on) {
+    if (assign_t(number_, on)) touch();
+}
+
+Rect RevBar::peak_cols(int16_t x) const {
+    if (x < 0) return Rect{};
+    return Rect{static_cast<int16_t>(bounds.x + x - 1), bounds.y, 3, bounds.h}.clipped_to(bounds);
+}
+
+void RevBar::set_peak(float rpm) {
+    int16_t x = rpm > 0.0f ? edge_for(rpm) : -1;
+    if (x >= bounds.w) x = static_cast<int16_t>(bounds.w - 2);
+    if (x == peak_x_) return;
+    peak_x_ = x;
+    touch_part();
+}
+
 int RevBar::damage(Rect* out, int max) const {
-    (void)max;
-    if (whole_ || !moved_) { out[0] = bounds; return 1; }
-    out[0] = Rect{static_cast<int16_t>(bounds.x + moved_l_), bounds.y,
-                  static_cast<int16_t>(moved_r_ - moved_l_), bounds.h}.clipped_to(bounds);
-    return out[0].empty() ? 0 : 1;
+    if (whole_ || max < 3) { out[0] = bounds; return 1; }
+    int n = 0;
+    if (moved_) {
+        const Rect r = Rect{static_cast<int16_t>(bounds.x + moved_l_), bounds.y,
+                            static_cast<int16_t>(moved_r_ - moved_l_), bounds.h}.clipped_to(bounds);
+        if (!r.empty()) out[n++] = r;
+    }
+    if (peak_x_ != peak_sent_x_) {
+        const Rect was = peak_cols(peak_sent_x_), now = peak_cols(peak_x_);
+        if (!was.empty()) out[n++] = was;
+        if (!now.empty()) out[n++] = now;
+    }
+    if (number_ && number_rpm_ != number_sent_ && n < max) out[n++] = number_box();
+    return n;
 }
 
 void RevBar::render(Canvas& c) {
@@ -787,6 +872,19 @@ void RevBar::render(Canvas& c) {
                                                               full_rpm_);
         const int16_t w = rpm % 5000 == 0 ? 3 : 1;
         c.fill_rect(Rect{static_cast<int16_t>(x - w / 2), bounds.y, w, bounds.h}, color::kBg);
+    }
+    // The held peak over the bar: white, as on SPEED's.
+    if (valid_ && peak_x_ >= 0) c.fill_rect(peak_cols(peak_x_), color::kWhite);
+    // The number over everything, in a box of its own so it reads over the
+    // fill, the track and the marks alike.
+    if (number_ && valid_) {
+        const Rect b = number_box();
+        c.fill_round_rect(b, 4, color::kBg);
+        char num[12];
+        if (number_rpm_ >= 0) std::snprintf(num, sizeof num, "%d", static_cast<int>(number_rpm_));
+        else std::snprintf(num, sizeof num, "0");
+        c.draw_text(static_cast<int16_t>(b.right() - 4), static_cast<int16_t>(b.y + 4), num,
+                    color::kWhite, kNumberScale, Align::Right);
     }
     if (!valid_) {
         c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - 7), "--", color::kDim, 2,
@@ -843,12 +941,43 @@ void TachBar::set(float fraction) {
     touch_part();
 }
 
+Rect TachBar::peak_rows(int16_t y) const {
+    if (y == kNoPeak) return Rect{};
+    return Rect{bounds.x, y, bounds.w, kPeakH}.clipped_to(
+        Rect{bounds.x, y_top_, bounds.w, static_cast<int16_t>(y_bottom_ - y_top_)});
+}
+
+void TachBar::set_peak(float fraction) {
+    int16_t y = kNoPeak;
+    if (fraction > 0.0f) {
+        if (fraction > 1.0f) fraction = 1.0f;
+        // Where the marker's top edge was at that rpm: the line sits on it.
+        const int16_t travel = static_cast<int16_t>(kScreenH - kMarkerH);
+        y = static_cast<int16_t>(travel - fraction * travel);
+        y = static_cast<int16_t>((y / kStepPx) * kStepPx);
+    }
+    if (y == peak_y_) return;
+    const bool mine = !peak_rows(peak_y_).empty() || !peak_rows(y).empty();
+    peak_y_ = y;
+    if (mine) touch_part();
+}
+
 int TachBar::damage(Rect* out, int max) const {
-    (void)max;
-    if (whole_ || !moved_) { out[0] = bounds; return 1; }
-    out[0] = Rect{bounds.x, moved_top_, bounds.w,
-                  static_cast<int16_t>(moved_bottom_ - moved_top_)}.clipped_to(bounds);
-    return out[0].empty() ? 0 : 1;
+    if (whole_ || max < 3) { out[0] = bounds; return 1; }
+    int n = 0;
+    if (moved_) {
+        const Rect r = Rect{bounds.x, moved_top_, bounds.w,
+                            static_cast<int16_t>(moved_bottom_ - moved_top_)}.clipped_to(bounds);
+        if (!r.empty()) out[n++] = r;
+    }
+    // The held peak where it was on the panel and where it is: a line a
+    // shift leaves and the hold takes away, 3 rows each, not the bar.
+    if (peak_y_ != peak_sent_y_) {
+        const Rect was = peak_rows(peak_sent_y_), now = peak_rows(peak_y_);
+        if (!was.empty()) out[n++] = was;
+        if (!now.empty()) out[n++] = now;
+    }
+    return n;
 }
 
 void TachBar::set_scale(uint16_t base_rpm) {
@@ -880,6 +1009,14 @@ void TachBar::render(Canvas& c) {
         for (int16_t y = tick_y_[i]; y < tick_y_[i] + kTickH; ++y) {
             if (y < y_top_ || y >= y_bottom_) continue;
             c.fill_rect(Rect{bounds.x, y, width_at(y), 1}, color::kAlarm);
+        }
+    }
+    // Last, over the marker and the thousands: white, the one colour on the
+    // bar that is neither, so it reads as "you were here" at a glance.
+    if (peak_y_ != kNoPeak) {
+        for (int16_t y = peak_y_; y < peak_y_ + kPeakH; ++y) {
+            if (y < y_top_ || y >= y_bottom_) continue;
+            c.fill_rect(Rect{bounds.x, y, width_at(y), 1}, color::kWhite);
         }
     }
 }
@@ -970,6 +1107,29 @@ void LeanGauge::set_jump(Face face, uint32_t airtime_ms, float landing_g) {
     if (a || b || d) touch();
 }
 
+void LeanGauge::set_trick(Face face, const char* label, Color label_color, const char* big,
+                          const char* detail) {
+    const bool a = assign_t(face_, face);
+    const bool b = trick_label_.set(label);
+    const bool d = assign_t(trick_color_, label_color);
+    const bool e = trick_big_.set(big);
+    const bool g = trick_detail_.set(detail);
+    // Under way the detail changes nearly every frame (the points run up);
+    // it goes out with the next tenth of the time instead.
+    if (a || b || d || e || (g && face == Face::TrickDone)) touch();
+}
+
+void LeanGauge::render_trick(Canvas& c) {
+    // The jump face's layout: a label, the number big, a line under it.
+    const int16_t cx = bounds.cx();
+    c.draw_text(cx, static_cast<int16_t>(bounds.y + 4), trick_label_.s, trick_color_, 2,
+                Align::Center);
+    c.draw_text(cx, static_cast<int16_t>(bounds.y + 24), trick_big_.s,
+                face_ == Face::Trick ? color::kAccent : color::kWhite, 6, Align::Center);
+    c.draw_text(cx, static_cast<int16_t>(bounds.y + 88), trick_detail_.s, color::kText, 2,
+                Align::Center);
+}
+
 void LeanGauge::render_jump(Canvas& c) {
     // Big enough to read from the air, which is the only time the first
     // face is ever up. Laid out for the 248x126 middle band: a label, the
@@ -1003,7 +1163,15 @@ void LeanGauge::render_jump(Canvas& c) {
 }
 
 void LeanGauge::render(Canvas& c) {
+    // Nothing outside its own box: at a lean near the end stops the marker's
+    // corner reached a row below it, which a partial update of this widget
+    // never clears (found by test_ui's random ride).
+    const ClipGuard clip(c, bounds);
     c.fill_rect(bounds, color::kBg);
+    if (face_ == Face::Trick || face_ == Face::TrickDone) {
+        render_trick(c);
+        return;
+    }
     if (face_ != Face::Lean) {
         render_jump(c);
         return;
@@ -1127,6 +1295,15 @@ void MediaRow::render(Canvas& c) {
 
     // Everything below draws deliberately wider than the window it is in.
     const ClipGuard clip(c, Rect{tx, bounds.y, avail, bounds.h});
+
+    // The lyric is read as a sentence, so it gets the smoothed small font;
+    // the other rows, and every other small text, keep the bitmap.
+    struct SmoothGuard {
+        Canvas& c;
+        bool on;
+        SmoothGuard(Canvas& cv, bool o) : c(cv), on(o) { if (on) c.set_smooth_small(true); }
+        ~SmoothGuard() { if (on) c.set_smooth_small(false); }
+    } smooth(c, kind_ == Kind::Lyric);
 
     if (wrap_) {
         const Font& f = font_5x7();
@@ -1309,6 +1486,60 @@ void AlertOverlay::render(Canvas& c) {
                 text_.s, color_, 2, Align::Center);
     c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.bottom() - c.text_height(1) - 4),
                 "E to dismiss", color::kDim, 1, Align::Center);
+}
+
+// --- Toast --------------------------------------------------------------
+
+namespace {
+// At most `chars` bytes of `src`, cut on a UTF-8 boundary with "..." when
+// cut: what fits across the strip at that line's scale.
+void fit(char* dst, size_t chars, const char* src) {
+    size_t len = std::strlen(src);
+    if (len <= chars) {
+        std::memcpy(dst, src, len + 1);
+        return;
+    }
+    size_t n = chars > 3 ? chars - 3 : 0;
+    while (n > 0 && (static_cast<unsigned char>(src[n]) & 0xC0) == 0x80) --n;
+    std::memcpy(dst, src, n);
+    std::memcpy(dst + n, "...", 4);
+}
+// The strip is 480 px less a 16 px margin: 25 characters at scale 3, 38 at 2.
+constexpr size_t kToastBigChars = 25, kToastSmallChars = 38;
+}  // namespace
+
+void Toast::show(const char* big, const char* small, Color c, const char* hint) {
+    char b1[kToastBigChars + 1], s1[kToastSmallChars + 1];
+    // A hint takes the top-right corner: four characters of the big line.
+    fit(b1, hint && hint[0] ? kToastBigChars - 4 : kToastBigChars, big);
+    fit(s1, kToastSmallChars, small);
+    const bool h = hint_.set(hint);
+    const bool a = big_.set(b1) || h;
+    const bool b = small_.set(s1);
+    const bool d = assign_t(color_, c);
+    const bool e = assign_t(active_, true);
+    if (a || b || d || e) touch();
+}
+
+void Toast::hide() { if (assign_t(active_, false)) touch(); }
+
+void Toast::render(Canvas& c) {
+    if (!active_) return;
+    c.fill_rect(bounds, color::kPanel);
+    // A bar of its colour down the left edge and a rule along the top: it
+    // reads as a separate thing over the screen, not part of it.
+    c.fill_rect(Rect{bounds.x, bounds.y, 6, bounds.h}, color_);
+    c.fill_rect(Rect{bounds.x, bounds.y, bounds.w, 2}, color_);
+    const int16_t x = static_cast<int16_t>(bounds.x + 16);
+    c.draw_text(x, static_cast<int16_t>(bounds.y + 6), big_.s, color_, 3, Align::Left);
+    if (!hint_.empty()) {
+        c.draw_text(static_cast<int16_t>(bounds.right() - 8), static_cast<int16_t>(bounds.y + 7),
+                    hint_.s, color::kDim, 1, Align::Right);
+    }
+    if (!small_.empty()) {
+        c.draw_text(x, static_cast<int16_t>(bounds.y + 6 + c.text_height(3) + 5), small_.s,
+                    color::kText, 2, Align::Left);
+    }
 }
 
 // --- DevTag -------------------------------------------------------------

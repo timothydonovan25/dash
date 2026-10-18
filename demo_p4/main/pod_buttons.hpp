@@ -34,6 +34,9 @@ public:
     hal::Status read_mask(uint8_t& mask_out, uint32_t now_ms);
 
     bool present() const { return configured_; }
+    // GPIOA as last read, all eight pins after IPOL (pressed = 1), before
+    // the pin-to-button map: for serial `inputs`. 0 when nothing was read.
+    uint8_t last_gpa() const { return last_gpa_; }
 
 private:
     hal::Status configure();
@@ -41,6 +44,7 @@ private:
     void*    dev_ = nullptr;        // i2c_master_dev_handle_t
     bool     configured_ = false;
     uint32_t next_config_ms_ = 0;
+    uint8_t  last_gpa_ = 0;
 };
 
 }  // namespace demo

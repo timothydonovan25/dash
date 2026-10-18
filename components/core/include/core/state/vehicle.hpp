@@ -29,6 +29,14 @@ struct Engine {
     // the lamps actually lit on the handlebar.
     uint8_t shift_mask  = 0;
     bool    shift_flash = false;
+    // The rpm reached before the last shift, held half a second
+    // (core::shift::PeakHold), and the lamp that keeps it lit on the
+    // handlebar. 0 for none: nothing is held while the engine is climbing
+    // with the needle on its own peak. The lamp is apart from shift_mask, so
+    // RACE's bar, coloured by the lamps the rpm lights, does not stay amber
+    // through every hold; `ctrl` sends the two together.
+    float   rpm_peak    = 0.0f;
+    uint8_t shift_hold  = 0;
 
     // Inferred from rpm against road speed — there is no gear sensor on this
     // bike. 0 means the estimate is not to be trusted right now: clutch in,
@@ -158,6 +166,91 @@ struct Session {
     uint32_t best_air_ms    = 0;     // longest jump, 0 none
     float    hardest_land_g = 0.0f;
     uint16_t jumps          = 0;
+};
+
+// Performance timers (core::perf), for STAT -> PERF. Times in ms, distances
+// in ft, speeds in mph whatever the display units: `metric` only says which
+// thresholds the speed runs were timed to (0-50/0-100 km/h instead of
+// 0-30/0-60 mph), so the screen can label them.
+struct Perf {
+    // The runs, in this order. Speed runs from a stop, distance runs from a
+    // stop with the speed at the line (trap), braking runs to a stop.
+    enum Metric : uint8_t {
+        To1 = 0,    // 0-30 mph / 0-50 km/h
+        To2,        // 0-60 mph / 0-100 km/h
+        Ft60,       // 60 ft
+        Ft330,      // 330 ft
+        Eighth,     // 1/8 mile, 660 ft
+        Brake1,     // 30-0 mph / 50-0 km/h
+        Brake2,     // 60-0 mph / 100-0 km/h
+        kCount
+    };
+    struct Result {
+        uint32_t ms = 0;      // 0: not run yet
+        float    x = 0.0f;    // trap mph for a distance run, ft for a brake run
+    };
+    // What the timer is doing: 0 idle (moving, or not stopped long enough),
+    // 1 armed (stopped, ready to launch), 2 launching, 3 braking.
+    uint8_t  phase   = 0;
+    uint32_t live_ms = 0;     // elapsed in the run under way
+    float    live_ft = 0.0f;
+    bool     metric  = false;
+    Result   last[kCount];
+    Result   best[kCount];
+    // The newest result, for the toast: which, and whether it was a best.
+    // `seq` moves once per result, 0 until the first.
+    uint16_t seq        = 0;
+    uint8_t  event      = 0;   // a Metric
+    bool     event_best = false;
+};
+
+// Wheelies and stoppies, scored (core::stunt), for STAT -> STUNT and the
+// toast. Angles are the bike's pitch against the ground it is riding on,
+// not against level: a hill is not a wheelie.
+struct Stunt {
+    // The trick under way: 0 none, 1 wheelie, 2 stoppie.
+    uint8_t  live_kind   = 0;
+    uint32_t live_ms     = 0;
+    float    live_deg    = 0.0f;   // now, + nose up
+    float    live_points = 0.0f;   // before the combo multiplier
+    bool     live_balance = false; // in the balance-point band right now
+    // The combo: tricks chained within core::stunt::kComboWindowMs of each
+    // other. `combo_x10` is the multiplier the next trick will get, x10.
+    uint8_t  combo       = 0;
+    uint8_t  combo_x10   = 10;
+    // The last trick, finished and scored. `seq` moves once per trick.
+    uint16_t seq         = 0;
+    uint8_t  kind        = 0;      // 1 wheelie, 2 stoppie, 3 looped out
+    uint8_t  grade       = 0;      // core::stunt::grade_name()
+    uint8_t  landing     = 0;      // 0 plain, 1 smooth, 2 slammed
+    uint32_t ms          = 0;
+    float    peak_deg    = 0.0f;
+    uint32_t points      = 0;      // with the multiplier
+    uint8_t  mult_x10    = 10;
+    bool     record      = false;  // the session's best single trick
+    // When it was scored (dash clock): SPEED shows it for a few seconds,
+    // as it does a jump from Attitude::land_ms. 0 until the first.
+    uint32_t done_ms     = 0;
+    // The session.
+    uint32_t total       = 0;
+    uint16_t tricks      = 0;
+    uint32_t best_points = 0;
+    uint32_t longest_ms  = 0;
+    float    highest_deg = 0.0f;
+    uint8_t  best_combo  = 0;
+};
+
+// The phone's last notification (§11.1 tag `N`), for the toast and CRUISE ->
+// PHONE. One, not a list: the Frame is copied every render pass.
+struct Notify {
+    // 'C' incoming call (ringing), 'M' message, 'X' missed call, 'O' other.
+    // A call stops ringing on tag `N` kind 'E' or when the phone goes away.
+    char     kind = 0;
+    bool     ringing = false;
+    char     who[32] = {};      // caller, sender, or the app's name
+    char     text[96] = {};     // the message; empty for a call
+    uint32_t at_ms = 0;         // when it arrived, dash clock
+    uint16_t seq = 0;           // moves once per notification, 0 until one
 };
 
 // One lap's peaks, for LAPS (core::lap::Peaks, as kept per lap by logic).

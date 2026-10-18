@@ -33,9 +33,14 @@ PRINTABLE = "".join(chr(c) for c in range(0x20, 0x7F))
 # numbers: speed, the gear, lap times. Anything else falls back to the
 # bitmap rather than costing flash.
 NUMERIC = " +-.:%0123456789NCFR"
-SCALES = {3: PRINTABLE, 4: PRINTABLE, 5: PRINTABLE, 6: PRINTABLE,
+SCALES = {2: PRINTABLE,
+          3: PRINTABLE, 4: PRINTABLE, 5: PRINTABLE, 6: PRINTABLE,
           8: NUMERIC, 10: NUMERIC,
           20: NUMERIC, 22: NUMERIC}
+# Sizes drawn smooth only where a widget asks (Canvas::set_smooth_small):
+# small text stays the crisp bitmap everywhere else. Scale 2 is for MEDIA's
+# lyric, which is read as a sentence rather than glanced at as a number.
+OPT_IN = {2}
 
 SUPER = 4          # rendered this much larger, then reduced: smoother edges
 
@@ -153,7 +158,10 @@ def main():
         for scale, entries in out:
             o.write(f"    {{{scale}, {len(entries)}, kGlyphs{scale}, kData}},\n")
         o.write("};\n\n}  // namespace\n\n")
-        o.write("const AaFont* aa_font(uint8_t scale) {\n")
+        opt = " || ".join(f"scale == {s}" for s in sorted(OPT_IN)) or "false"
+        o.write("const AaFont* aa_font(uint8_t scale, bool opt_in) {\n")
+        o.write(f"    // Opt-in sizes ({', '.join(str(s) for s in sorted(OPT_IN))}) only when asked for.\n")
+        o.write(f"    if (!opt_in && ({opt})) return nullptr;\n")
         o.write("    for (const AaFont& f : kFonts) {\n")
         o.write("        if (f.scale == scale) return &f;\n")
         o.write("    }\n    return nullptr;\n}\n\n}  // namespace ui\n")

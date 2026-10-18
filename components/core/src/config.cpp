@@ -62,6 +62,7 @@ const ConfigItem kItems[] = {
     boolean(0x0104,"Dim at night", "Display", FIELD(dim_at_night)),
     choice(0x0105, "Speedo",       "Display", FIELD(speedo_source), kSpeedoOptions, 2),
     boolean(0x0106,"Slip bar",     "Display", FIELD(slip_bar)),
+    boolean(0x0107,"Popups",       "Display", FIELD(popups)),
 
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),
@@ -82,6 +83,7 @@ const ConfigItem kItems[] = {
     num(0x0305, "Brightness",  "Shift", Kind::Int,    5,   100,   5, "%",   FIELD(shift_brightness_pct)),
     num(0x0306, "Revs/spark",  "Shift", Kind::Int,    1,     2,   1, "",    FIELD(tach_revs_per_pulse)),
     num(0x0307, "Lead time",   "Shift", Kind::Int,    0,   300,  10, "ms",  FIELD(shift_lead_ms)),
+    num(0x0308, "Peak hold",   "Shift", Kind::Int,    0,  5000, 250, "ms",  FIELD(shift_peak_hold_ms)),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),
@@ -133,6 +135,11 @@ const ConfigItem kItems[] = {
     // without a window; pairing mode lets one more phone bond for a minute.
     action(0x0A01, "Forget phone", "Phone", state::CommandId::BleForgetPhone),
     action(0x0A02, "Pairing mode", "Phone", state::CommandId::BlePairingMode),
+    // Calls and messages from the phone, as a toast. The text itself only
+    // when stopped unless asked for: a sender's name is a glance, a message
+    // is reading.
+    boolean(0x0A03,"Notifications", "Phone", FIELD(notify_on)),
+    boolean(0x0A04,"Text moving",   "Phone", FIELD(notify_text_moving)),
 
     // SD card. Eject flushes the log and unmounts, so the card can come out
     // without a write in flight. Nothing remounts it until it has been

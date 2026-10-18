@@ -29,7 +29,8 @@ add_library(core STATIC
     ${CORE}/src/fusion_speed.cpp ${CORE}/src/gearcal.cpp ${CORE}/src/c6.cpp
     ${CORE}/src/fixtime.cpp
     ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp ${CORE}/src/flash.cpp
-    ${CORE}/src/track.cpp ${CORE}/src/session.cpp)
+    ${CORE}/src/track.cpp ${CORE}/src/session.cpp
+    ${CORE}/src/perf.cpp ${CORE}/src/stunt.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 add_library(ui STATIC
@@ -38,7 +39,7 @@ add_library(ui STATIC
     ${UI}/src/icons.cpp
     ${UI}/src/album_art.cpp  ${UI}/src/album_art_gojira.cpp
     ${UI}/src/widgets.cpp    ${UI}/src/app.cpp
-    ${UI}/src/screens_cruise.cpp ${UI}/src/screens_track.cpp
+    ${UI}/src/screens_cruise.cpp ${UI}/src/screens_track.cpp ${UI}/src/screens_perf.cpp
     ${UI}/src/screens_stat.cpp   ${UI}/src/screens_diag.cpp
     ${UI}/src/screen_config.cpp ${UI}/src/screen_gearcal.cpp
     ${UI}/src/shadow.cpp)

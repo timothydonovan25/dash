@@ -46,6 +46,11 @@ uint32_t off_in_s(uint32_t now_ms, uint32_t last_use_ms);
 // logs directory.
 bool valid_log_name(const char* name);
 
+// The same rule for a game's data file in games/, ending .wad in either
+// case (DOOM1.WAD and doom1.wad are both what people have), for the page's
+// upload and delete on a build that runs one.
+bool valid_game_name(const char* name);
+
 // What the Update screen shows on the Wi-Fi row.
 enum class State : uint8_t {
     Off = 0,

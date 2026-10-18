@@ -9,6 +9,7 @@ idf_component_register(
          "src/vin_sense.cpp"
          "src/nvs_storage.cpp"
          "src/sdcard.cpp"
+         "src/sdcard_spi.cpp"
          "src/chip_temp.cpp"
     INCLUDE_DIRS "include"
     REQUIRES dash_hal bsp core

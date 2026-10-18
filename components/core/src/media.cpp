@@ -103,6 +103,49 @@ char apply_line(state::Media& m, const uint8_t* data, size_t len,
     return tag;
 }
 
+namespace {
+// Drawn text must not hold control bytes: the font has no glyph for them.
+void blank_controls(char* s) {
+    for (; *s; ++s) {
+        if (static_cast<uint8_t>(*s) < 0x20 || *s == 0x7F) *s = ' ';
+    }
+}
+}  // namespace
+
+bool apply_notify(state::Notify& n, const uint8_t* data, size_t len, uint32_t now_ms) {
+    while (len > 0 && (data[len - 1] == '\n' || data[len - 1] == '\r')) --len;
+    if (len < 2 || data[0] != 'N') return false;
+    const char kind = static_cast<char>(data[1]);
+    if (kind != 'C' && kind != 'E' && kind != 'X' && kind != 'M' && kind != 'O') return false;
+    if (kind == 'E') {
+        n.ringing = false;
+        return true;
+    }
+    const uint8_t* v = data + 2;
+    size_t vlen = len - 2;
+    if (vlen > 0 && v[0] == ' ') { ++v; --vlen; }
+    const void* us = std::memchr(v, 0x1F, vlen);
+    const size_t who_len = us ? static_cast<size_t>(static_cast<const uint8_t*>(us) - v) : vlen;
+    copy_field(n.who, sizeof n.who, v, who_len);
+    if (us) {
+        copy_field(n.text, sizeof n.text, v + who_len + 1, vlen - who_len - 1);
+    } else {
+        n.text[0] = '\0';
+    }
+    blank_controls(n.who);
+    blank_controls(n.text);
+    n.kind = kind;
+    n.ringing = kind == 'C';
+    n.at_ms = now_ms != 0 ? now_ms : 1;
+    ++n.seq;
+    if (n.seq == 0) n.seq = 1;
+    return true;
+}
+
+bool ringing(const state::Notify& n, uint32_t now_ms) {
+    return n.ringing && now_ms - n.at_ms < kRingTimeoutMs;
+}
+
 size_t ctrl_line(uint8_t cmd, uint8_t out[3]) {
     if (cmd > 2) return 0;
     out[0] = 'C';

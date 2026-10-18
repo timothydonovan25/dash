@@ -38,6 +38,14 @@ struct Settings {
     bool    dim_at_night   = false;
     // The wheelspin / lockup bar across the top of every screen (core/slip).
     bool    slip_bar       = true;
+    // The toast along the bottom of every screen when a trick lands or a
+    // performance run ends (core::stunt, core::perf). Notifications have
+    // their own switch, under Phone.
+    bool    popups         = true;
+    // The phone's notifications (§11.1 `N`) as a toast; and whether the
+    // message itself shows while moving, or only the sender until stopped.
+    bool    notify_on      = true;
+    bool    notify_text_moving = false;
 
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.
@@ -88,6 +96,9 @@ struct Settings {
     // the bike: the right number is about a reaction time, and nobody's is
     // known yet.
     uint16_t shift_lead_ms = 0;
+    // How long the rpm before a shift stays marked on the tachs and on one
+    // shift lamp (core::shift::PeakHold). 0 turns the mark off.
+    uint16_t shift_peak_hold_ms = 500;
 
     // What VIN reads under the battery: the input diode's drop, 0.3-0.4 V at
     // the dash's current, and whatever the ADC is off by. Added to VIN for

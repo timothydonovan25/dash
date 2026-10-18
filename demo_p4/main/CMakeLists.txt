@@ -7,6 +7,8 @@ idf_component_register(
          "demo_bike_task.cpp"
          "ctrl_probe.cpp"
          "serial_buttons.cpp"
+         "sdcard_sdmmc.cpp"
+         "doom_program.cpp"
          # Hardware-free real firmware code, reused by source rather than by
          # depending on the components/services or components/drivers IDF
          # components — those REQUIRE bsp/drivers, which are wired for the
@@ -26,16 +28,21 @@ idf_component_register(
          "../../components/drivers/src/nvs_storage.cpp"
          "../../components/drivers/src/clock.cpp"
          "../../components/drivers/src/chip_temp.cpp"
+         # The bike's card driver, all but its mount: this board's is
+         # sdcard_sdmmc.cpp (see components/drivers/src/sdcard_mount.hpp).
+         "../../components/drivers/src/sdcard.cpp"
     INCLUDE_DIRS "."
                  "../../components/services/include"
                  "../../components/services/src"
                  "../../components/drivers/include"
+                 "../../components/drivers/src"
     REQUIRES core dash_hal ui p4_restart_fix
              esp_lcd esp_mm esp_driver_tsens esp_driver_i2c esp_driver_gpio esp_driver_ledc
              esp_timer freertos esp_driver_usb_serial_jtag
              esp_hosted bt esp_partition bootloader_support
              app_update esp_app_format nvs_flash
-             esp_wifi esp_wifi_remote esp_netif esp_event esp_http_server)
+             esp_wifi esp_wifi_remote esp_netif esp_event esp_http_server
+             fatfs vfs sdmmc esp_driver_sdmmc esp_hw_support doomgeneric)
 
 # Pushes demo_p4/c6_cp's built firmware into the slave_fw data partition
 # (see ../partitions.csv) with `idf.py c6-flash`, so the production

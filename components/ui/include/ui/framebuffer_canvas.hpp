@@ -75,6 +75,7 @@ public:
     // Smoothed glyphs for the large scales (ui/font_aa.hpp); on unless a
     // caller wants the bitmap everywhere, to compare.
     void set_antialias(bool on) { antialias_ = on; }
+    void set_smooth_small(bool on) override { smooth_small_ = on; }
 
 private:
     void put(int16_t x, int16_t y, Color c);
@@ -83,6 +84,7 @@ private:
     void draw_aa_glyph(const AaFont& font, const AaGlyph& g, int16_t cx,
                        int16_t cy, Color c, const Rect& vis);
     bool    antialias_ = true;
+    bool    smooth_small_ = false;
 
     Color*  px_;
     int16_t w_;

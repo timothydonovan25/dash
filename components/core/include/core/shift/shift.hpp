@@ -46,6 +46,32 @@ uint16_t threshold(const Config& c, int lamp);
 // what makes the hysteresis work — pass 0 on the first call.
 uint8_t pattern(uint16_t rpm, const Config& c, uint8_t prev);
 
+// The rpm the engine got up to before a shift, held a while after it.
+//
+// It follows the rpm up; when the rpm falls away from it (a shift, a roll
+// off) it stays where it was for `hold_ms`, then lets go and follows the rpm
+// down until it climbs again. What is marked is only the held part, and only
+// once the rpm is `gap_rpm` below it: in gear and climbing, the mark would
+// sit on the needle and say nothing.
+//
+// One of these runs in `ctrl`, on the tach's displayed rpm, and its answer is
+// published (Engine::rpm_peak, shift_hold) for the lamps and both tachs.
+class PeakHold {
+public:
+    // Returns the rpm to mark, or 0 for none. `hold_ms` of 0 is off.
+    float update(float rpm, uint32_t t_ms, uint32_t hold_ms, float gap_rpm = 400.0f);
+    void reset();
+
+private:
+    float    peak_ = 0.0f;
+    uint32_t at_ms_ = 0;       // when the rpm was last at the peak
+    bool     released_ = true; // the hold has run out; following the rpm down
+};
+
+// The one lamp a held peak keeps lit: the highest lamp `peak_rpm` reaches,
+// as a mask bit (lamp 8 above the flash), 0 below the first lamp.
+uint8_t hold_lamp(uint16_t peak_rpm, const Config& c);
+
 // True when RPM is past flash_rpm. The caller decides the blink rate, so
 // this stays free of any notion of time.
 bool over_limit(uint16_t rpm, const Config& c);

@@ -224,6 +224,21 @@ COMMANDS = [
     ("spin",      "Wheelspin  (rear +45 %, 0.9 s)"),
     ("flock",     "Front lock  (0.5 s)"),
     ("rlock",     "Rear lock  (0.9 s)"),
+    # The nose up (or down) as the IMU would see it, accelerometer turning
+    # with the bike; core::stunt decides it was a trick and scores it.
+    # Needs 3 mph or more. Two within 4 s are a combo.
+    ("wheelie",   "Wheelie  (3.7 s, through the balance point)"),
+    ("stoppie",   "Stoppie  (1.5 s)"),
+]
+
+# The phone's §11.1 `N` lines, as the companion app would send them: kind,
+# who, text. The dash shows a message's text only when stopped.
+NOTIFICATIONS = [
+    ("M\tAlex\tRunning late, start without me and save a spot at the top",
+     "Text message"),
+    ("C\tMum\t", "Incoming call  (rings until ended)"),
+    ("E", "Call ended"),
+    ("X\tMum\t", "Missed call"),
 ]
 
 
@@ -492,6 +507,12 @@ class App:
             tk.Button(right, text=label, bg="#161a22", fg="#e2e8f0",
                       highlightbackground="#2c3440",
                       command=lambda c=cmd: self.sim.send(f"cmd {c}")).pack(
+                          fill="x", pady=2)
+        tk.Label(right, text="", bg="#0d0f14").pack()
+        for line, label in NOTIFICATIONS:
+            tk.Button(right, text=label, bg="#161a22", fg="#e2e8f0",
+                      highlightbackground="#2c3440",
+                      command=lambda l=line: self.sim.send(f"notify {l}")).pack(
                           fill="x", pady=2)
 
         # --- the bike, its radios, its devices ----------------------------

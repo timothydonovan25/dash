@@ -44,6 +44,7 @@ struct RenderArg {
     services::Deps*         deps;
     services::CommandQueue* commands;
     StateRequest*           state_req;
+    DoomProgram*            doom;
 };
 
 // The answer to `state`, as key=value so a script can parse it. Screen and
@@ -73,6 +74,7 @@ void render_task_impl(void* arg) {
     ctx.settings = d.settings;
     ctx.commands = &q;
     ctx.system = d.system;
+    ctx.program = ra->doom;
 
     ui::App app(ctx);
     app.bind_settings(d.settings);
@@ -143,6 +145,16 @@ void render_task_impl(void* arg) {
             canvas.set_window(0, 0, ui::kScreenW, ui::kScreenH);
             app.on_input(ev, canvas);
             while (services::take_input_event(ev)) app.on_input(ev, canvas);
+        }
+
+        // DIAG -> Doom: the panel is Doom's from here until a reset. Nothing
+        // is drawn after this, so nothing of the dash's is left mid-write.
+        if (ra->doom && ra->doom->requested()) {
+            ESP_LOGI("render", "handing the panel to Doom");
+            heap_caps_free(glass);
+            heap_caps_free(buf);
+            ra->doom->start();
+            vTaskDelete(nullptr);
         }
 
         if (d.lap_history) {
@@ -236,6 +248,15 @@ void render_task_impl(void* arg) {
             d.health->report_ok(core::state::Dev::Display, now);
         }
 
+        // The card, as the bike's `storage` and `logger` vouch for theirs:
+        // the tracker calls a device that has not reported in 2 s stale and
+        // faults it, and a card mounted once at boot and never reported on
+        // again put the SD alert ("LOG STOPPED") over the demo. One that
+        // did not mount stays absent.
+        if (d.card && d.card->present()) {
+            d.health->report_ok(core::state::Dev::Sd, now);
+        }
+
         // Keeper's health job, since this demo has no keeper: turn the
         // reports (here, ble_service.cpp and the pod) into states, and
         // publish the table when it changes.
@@ -278,8 +299,8 @@ RenderArg g_render_arg;
 }  // namespace
 
 void start_demo_render(services::Deps& d, services::CommandQueue& q,
-                       StateRequest& req) {
-    g_render_arg = {&d, &q, &req};
+                       StateRequest& req, DoomProgram* doom) {
+    g_render_arg = {&d, &q, &req, doom};
     // ui::App lives on this task's stack, so the stack is sized from it, as
     // the real render task's is. A fixed 16384 overflowed in 1.16, when the
     // App still held every screen and grew from 11.4 to 13.2 kB; it holds

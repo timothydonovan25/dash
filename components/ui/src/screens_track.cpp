@@ -367,6 +367,7 @@ uint16_t race_full_rpm(const core::config::Settings* st) {
 
 void RaceScreen::enter(Canvas&) {
     rev_.set_bounds(kRaceRev);
+    rev_.show_number(true);   // the rpm as a number, over the bar
     gear_.set_bounds(Rect{static_cast<int16_t>(kRaceGear.x + 6), static_cast<int16_t>(kRaceGear.y + 20),
                           static_cast<int16_t>(kRaceGear.w - 12), 156});
     // Scale 20 is 100x140 a glyph: inside the tile, and the biggest thing
@@ -404,6 +405,7 @@ void RaceScreen::update(const Frame& f) {
     rev_.set_scale(race_full_rpm(st));
     rev_.set(f.engine.rpm, f.engine.shift_mask != 0, f.engine.shift_flash,
              f.engine.rpm > 0.0f || f.engine.neutral);
+    rev_.set_peak(f.engine.rpm_peak);   // the rpm before the shift, held a moment
 
     // As SPEED has it: neutral is sensed, the gear inferred, and a gear
     // nobody can vouch for is a dash rather than a stale digit.

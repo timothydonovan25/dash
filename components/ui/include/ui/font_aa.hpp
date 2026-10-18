@@ -38,7 +38,9 @@ struct AaFont {
 };
 
 // The smoothed font for text drawn at `scale`, or null: that scale is drawn
-// with the bitmap.
-const AaFont* aa_font(uint8_t scale);
+// with the bitmap. Scale 2 is smoothed only when `opt_in` (a widget that
+// asked, through Canvas::set_smooth_small): small text stays the bitmap
+// everywhere else, for the reason above.
+const AaFont* aa_font(uint8_t scale, bool opt_in = false);
 
 }  // namespace ui

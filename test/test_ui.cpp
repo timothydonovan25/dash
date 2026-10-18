@@ -242,6 +242,37 @@ Frame busy_frame() {
     f.health[Dev::BleHost].state = DevState::Absent;
     f.health[Dev::McpPod].state = DevState::Degraded;
     f.health[Dev::McpPod].fault_count = 7;
+    // PERF, STUNT and PHONE with something on them.
+    using P = core::state::Perf;
+    f.perf.phase = 1;
+    f.perf.last[P::To1] = {2410, 30.0f};
+    f.perf.best[P::To1] = {2330, 30.0f};
+    f.perf.last[P::Ft60] = {1820, 24.5f};
+    f.perf.best[P::Ft60] = {1820, 24.5f};
+    f.perf.last[P::Brake1] = {1900, 41.0f};
+    f.perf.best[P::Brake1] = {1900, 41.0f};
+    f.perf.seq = 3;
+    f.perf.event = P::Brake1;
+    f.stunt.seq = 4;
+    f.stunt.kind = 1;
+    f.stunt.grade = 2;
+    f.stunt.ms = 4120;
+    f.stunt.peak_deg = 38.0f;
+    f.stunt.points = 1210;
+    f.stunt.mult_x10 = 15;
+    f.stunt.total = 2980;
+    f.stunt.tricks = 4;
+    f.stunt.best_points = 1210;
+    f.stunt.longest_ms = 4120;
+    f.stunt.highest_deg = 41.0f;
+    f.stunt.best_combo = 2;
+    f.stunt.live_deg = 2.0f;
+    f.notify.seq = 2;
+    f.notify.kind = 'M';
+    std::snprintf(f.notify.who, sizeof f.notify.who, "Alex");
+    std::snprintf(f.notify.text, sizeof f.notify.text,
+                  "Running late, start without me and save a spot at the top");
+    f.notify.at_ms = f.t_ms - 90000;
     return f;
 }
 
@@ -746,15 +777,21 @@ int main() {
             m.render(s.canvas);
             return s.px;
         };
-        // Rightmost text pixel on the line starting at row y0.
+        // Rightmost ink on the line starting at row y0, inside the row's
+        // text window (the icon is left of it). The lyric is drawn smooth
+        // (Canvas::set_smooth_small), so its edges are blends, not kAccent.
         auto right_on = [&](const std::vector<Color>& px, int16_t y0) {
             int16_t right = -1;
             for (int16_t y = y0; y < y0 + 14; ++y)
-                for (int16_t x = 0; x < kScreenW; ++x)
-                    if (px[static_cast<size_t>(y) * kScreenW + x] == color::kAccent &&
-                        x > right) right = x;
+                for (int16_t x = box.x + MediaRow::kTextX; x < kScreenW; ++x)
+                    if (px[static_cast<size_t>(y) * kScreenW + x] != color::kBg &&
+                        px[static_cast<size_t>(y) * kScreenW + x] != 0 && x > right) right = x;
             return right;
         };
+        // A smoothed glyph's ink sits inside the bitmap's cell and may stop a
+        // few pixels short of its edge; a break in the wrong place is a
+        // whole word off, which this still catches.
+        auto ends_at = [](int16_t got, int want) { return got <= want && got >= want - 4; };
         const int16_t tx = box.x + MediaRow::kTextX;
         const int16_t y1 = box.y + 1, y2 = y1 + MediaRow::kWrapLineH * 2;
 
@@ -764,14 +801,13 @@ int main() {
         const std::vector<Color> first = draw(kLong, 0);
         CHECK(draw(kLong, 1000) == first);   // still
         CHECK(draw(kLong, 7777) == first);
-        CHECK(right_on(first, y1) ==
-              tx + text_width_px("Through the fire and the flames we", 2) - 1);
-        CHECK(right_on(first, y2) ==
-              tx + text_width_px("carry on, far away", 2) - 1);
+        CHECK(ends_at(right_on(first, y1),
+                      tx + text_width_px("Through the fire and the flames we", 2) - 1));
+        CHECK(ends_at(right_on(first, y2), tx + text_width_px("carry on, far away", 2) - 1));
 
         // A line that fits stays on one.
         const std::vector<Color> one = draw("Short line", 0);
-        CHECK(right_on(one, y1) == tx + text_width_px("Short line", 2) - 1);
+        CHECK(ends_at(right_on(one, y1), tx + text_width_px("Short line", 2) - 1));
         CHECK(right_on(one, y2) == -1);
     }
 
@@ -932,8 +968,9 @@ int main() {
         Frame f = busy_frame();
         f.engine.rpm = 5000.0f;
         auto px = [&](int x, int y) { return s.px[static_cast<size_t>(y) * kScreenW + x]; };
-        // Low on the bar, clear of the slip bar's band and the 1000s marks.
-        const int x = 30, y = 45;
+        // Low on the bar, clear of the slip bar's band, the 1000s marks and
+        // the rpm readout over the left end (RevBar::show_number).
+        const int x = 180, y = 45;
         f.engine.shift_mask = 0;
         f.engine.shift_flash = false;
         fx.app.update(f);
@@ -949,6 +986,49 @@ int main() {
         CHECK(px(x, y) == color::kAlarm);
         // Past the fill is the unlit track: 5000 of 9800 is about half.
         CHECK(px(400, y) == color::kPanel);
+    }
+
+    CASE("RACE shows the rpm as a number over the bar, to the nearest 100");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 partial;
+        fx.app.begin(partial.canvas);
+        go_to(fx.app, partial.canvas, Mode::Track, 0);
+        Frame f = busy_frame();
+        f.engine.rpm = 7234.0f;
+        fx.app.update(f);
+        fx.app.render(partial.canvas, true);
+        fx.app.clear_full_repaint();
+        // White digits over the left end of the bar.
+        size_t white = 0;
+        for (int y = 6; y < 56; ++y)
+            for (int x = 6; x < 160; ++x)
+                white += partial.px[static_cast<size_t>(y) * kScreenW + x] == color::kWhite;
+        CHECK(white > 50);
+        const auto same_as_whole = [&]() {
+            Screen320x480 whole;
+            fx.app.render(whole.canvas, true);
+            return whole.px == partial.px;
+        };
+        // Inside the same 100: nothing to send for the number.
+        f.engine.rpm = 7240.0f;
+        fx.app.update(f);
+        App::Damage d[App::kMaxDamage];
+        CHECK(fx.app.damage(d, App::kMaxDamage) == 0);
+        // Into the next: just the number's box (the edge did not move).
+        f.engine.rpm = 7262.0f;
+        fx.app.update(f);
+        const size_t n = fx.app.damage(d, App::kMaxDamage);
+        CHECK(n >= 1);
+        send_damage(fx.app, partial.px);
+        CHECK(same_as_whole());
+        // Shifting: the fill and the number together, still right.
+        f.engine.rpm = 5100.0f;
+        f.engine.rpm_peak = 7300.0f;
+        fx.app.update(f);
+        send_damage(fx.app, partial.px);
+        CHECK(same_as_whole());
     }
 
     CASE("RACE's rev bar sends only the columns its edge crossed");
@@ -1693,6 +1773,11 @@ int main() {
                     f.motion.best_mph = rnd(0.0f, 1.0f) < 0.1f ? rnd(0, 120) : f.motion.best_mph + rnd(-2, 2);
                     if (f.motion.best_mph < 0) f.motion.best_mph = 0;
                     f.engine.rpm = rnd(1200, 11000);
+                    // A shift's held peak coming and going (Engine::rpm_peak).
+                    if (rnd(0.0f, 1.0f) < 0.06f) {
+                        f.engine.rpm_peak = rnd(0.0f, 1.0f) < 0.5f ? 0.0f : rnd(4000, 11000);
+                        f.engine.shift_hold = f.engine.rpm_peak > 0.0f ? 0x20 : 0;
+                    }
                     f.att.lean_deg = rnd(0.0f, 1.0f) < 0.05f ? rnd(-90, 90) : f.att.lean_deg + rnd(-4, 4);
                     f.health[Dev::Imu].state = rnd(0.0f, 1.0f) > 0.02f ? DevState::Ok : DevState::Fault;
                     f.gnss.course_deg = rnd(0, 360);
@@ -1762,6 +1847,11 @@ int main() {
                     f.motion.best_mph = rnd(0.0f, 1.0f) < 0.1f ? rnd(0, 120) : f.motion.best_mph + rnd(-2, 2);
                     if (f.motion.best_mph < 0) f.motion.best_mph = 0;
                     f.engine.rpm = rnd(1200, 11000);
+                    // A shift's held peak coming and going (Engine::rpm_peak).
+                    if (rnd(0.0f, 1.0f) < 0.06f) {
+                        f.engine.rpm_peak = rnd(0.0f, 1.0f) < 0.5f ? 0.0f : rnd(4000, 11000);
+                        f.engine.shift_hold = f.engine.rpm_peak > 0.0f ? 0x20 : 0;
+                    }
                     f.att.lean_deg = rnd(0.0f, 1.0f) < 0.05f ? rnd(-90, 90) : f.att.lean_deg + rnd(-4, 4);
                     f.health[Dev::Imu].state = rnd(0.0f, 1.0f) > 0.02f ? DevState::Ok : DevState::Fault;
                     f.gnss.course_deg = rnd(0, 360);
@@ -1980,6 +2070,501 @@ int main() {
         CHECK(fx.app.nav_state().mode == Mode::Config);
         for (int i = 0; i < 4; ++i) press(Button::A);
         CHECK(fx.app.current_id() == ScreenId::DiagMenu);
+    }
+
+    CASE("DIAG's menu has a program row only in a build that has one");
+    {
+        struct Program final : IProgram {
+            int launches = 0;
+            bool runnable = true;
+            const char* name() const override { return "Doom"; }
+            const char* state() const override { return "ready"; }
+            bool launch() override { ++launches; return runnable; }
+        } prog;
+        // Without one: eight rows, C from the top wraps to Update.
+        {
+            Fixture fx;
+            Screen320x480 s;
+            fx.app.begin(s.canvas);
+            go_to(fx.app, s.canvas, Mode::Diag, 0);
+            CHECK(fx.app.current().focus_count() == DiagMenuScreen::kPages);
+        }
+
+        Fixture fx;
+        fx.ctx.program = &prog;
+        App app(fx.ctx);
+        app.bind_settings(&fx.settings);
+        Screen320x480 s;
+        app.begin(s.canvas);
+        go_to(app, s.canvas, Mode::Diag, 0);
+        CHECK(app.current_id() == ScreenId::DiagMenu);
+        CHECK(app.current().focus_count() == DiagMenuScreen::kPages + 1);
+        // C from the top wraps to it, the last row.
+        app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        CHECK(app.nav_state().focus == DiagMenuScreen::kPages);
+        app.update(busy_frame());
+        app.render(s.canvas, true);
+        // E starts it and leaves the menu as it was: the render task takes
+        // the panel from here, not the App.
+        app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(prog.launches == 1);
+        CHECK(app.current_id() == ScreenId::DiagMenu);
+        CHECK(app.nav_state().focus == DiagMenuScreen::kPages);
+        // A program that cannot start changes nothing either.
+        prog.runnable = false;
+        app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(prog.launches == 2);
+        CHECK(app.current_id() == ScreenId::DiagMenu);
+        // The pages above it still open as before.
+        app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        CHECK(app.nav_state().focus == 0);
+        app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(app.current_id() == ScreenId::Sensors);
+    }
+
+    CASE("a trick toasts along the bottom, then the strip is put back");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 partial;
+        fx.app.begin(partial.canvas);
+        // TRIP: off SPEED, which shows tricks in its lean gauge instead.
+        go_to(fx.app, partial.canvas, Mode::Cruise, 2);
+        Frame f = busy_frame();
+        fx.app.update(f);
+        fx.app.render(partial.canvas, true);
+        fx.app.clear_full_repaint();
+        // What was there at the first frame is not news.
+        CHECK(!fx.app.toast().active());
+
+        const auto same_as_whole = [&]() {
+            Screen320x480 whole;
+            fx.app.render(whole.canvas, true);
+            size_t differing = 0;
+            for (size_t k = 0; k < partial.px.size(); ++k) {
+                if (partial.px[k] != whole.px[k]) ++differing;
+            }
+            if (differing) std::printf("       %zu px differ\n", differing);
+            return differing == 0;
+        };
+        const auto frame = [&]() {
+            fx.app.update(f);
+            if (fx.app.needs_full_repaint()) {
+                fx.app.render(partial.canvas, true);
+                fx.app.clear_full_repaint();
+            } else {
+                send_damage(fx.app, partial.px);
+            }
+        };
+
+        f.t_ms += 20;
+        f.stunt.seq += 1;
+        f.stunt.points = 1840;
+        f.stunt.record = true;
+        frame();
+        CHECK(fx.app.toast().active());
+        CHECK(same_as_whole());
+        // Still up a second later, gone after its 3.5 s, and the screen
+        // under it is whole again without a full repaint.
+        f.t_ms += 1000;
+        frame();
+        CHECK(fx.app.toast().active());
+        f.t_ms += 3000;
+        frame();
+        CHECK(!fx.app.toast().active());
+        CHECK(same_as_whole());
+
+        // A wheelie under way is live in the strip, and changes as it goes.
+        f.stunt.live_kind = 1;
+        f.stunt.live_ms = 1200;
+        f.stunt.live_deg = 36.0f;
+        f.stunt.live_points = 210.0f;
+        f.stunt.live_balance = true;
+        f.t_ms += 20;
+        frame();
+        CHECK(fx.app.toast().active());
+        f.stunt.live_ms = 1900;
+        f.t_ms += 20;
+        frame();
+        CHECK(same_as_whole());
+        f.stunt.live_kind = 0;
+        f.t_ms += 20;
+        frame();
+        CHECK(!fx.app.toast().active());
+        CHECK(same_as_whole());
+    }
+
+    CASE("the map's rider marker points the way the trace is going");
+    {
+        // A straight trace, 100 points 10 ft apart, in a direction.
+        struct Line final : IPointSource {
+            float dx = 0, dy = 0;
+            size_t count() const override { return 100; }
+            bool point(size_t i, float& x, float& y) const override {
+                x = dx * 10.0f * static_cast<float>(i);
+                y = dy * 10.0f * static_cast<float>(i);
+                return true;
+            }
+        };
+        // The marker's pixels (kWarn), as an offset from the dot's centre:
+        // the arrowhead pulls the centroid of the whole mark its way.
+        const auto lean = [](float dx, float dy, float& ox, float& oy) {
+            Line line;
+            line.dx = dx;
+            line.dy = dy;
+            MapView m;
+            m.set_bounds(Rect{14, 32, 286, 276});
+            m.set_source(&line);
+            m.set_live(true);
+            Screen320x480 s;
+            m.render(s.canvas);
+            double sx = 0, sy = 0;
+            int n = 0;
+            for (int16_t y = 0; y < kScreenH; ++y)
+                for (int16_t x = 0; x < kScreenW; ++x)
+                    if (s.px[static_cast<size_t>(y) * kScreenW + x] == color::kWarn) {
+                        sx += x; sy += y; ++n;
+                    }
+            // Where the newest point lands: the far end of the trace.
+            const Rect in = Rect{14, 32, 286, 276}.inset(MapView::kMarkerMargin);
+            const float hx = dx > 0 ? in.right() : dx < 0 ? in.x : in.cx();
+            const float hy = dy > 0 ? in.y : dy < 0 ? in.bottom() : in.cy();
+            ox = n ? static_cast<float>(sx / n) - hx : 0.0f;
+            oy = n ? static_cast<float>(sy / n) - hy : 0.0f;
+            return n;
+        };
+        float ox, oy;
+        CHECK(lean(1, 0, ox, oy) > 0);      // east: the nose is to the right
+        CHECK(ox > 1.0f && std::fabs(oy) < 1.5f);
+        CHECK(lean(0, 1, ox, oy) > 0);      // north: up the screen
+        CHECK(oy < -1.0f && std::fabs(ox) < 1.5f);
+        CHECK(lean(-1, 0, ox, oy) > 0);     // west
+        CHECK(ox < -1.0f);
+    }
+
+    CASE("a shift leaves a held peak on SPEED's tach and RACE's bar");
+    {
+        for (int which = 0; which < 2; ++which) {
+            Fixture fx;
+            fx.settings.gauge_sweep = false;
+            Screen320x480 partial;
+            fx.app.begin(partial.canvas);
+            if (which == 0) go_to(fx.app, partial.canvas, Mode::Cruise, 0);
+            else go_to(fx.app, partial.canvas, Mode::Track, 0);
+            Frame f = busy_frame();
+            f.engine.rpm = 6500.0f;
+            fx.app.update(f);
+            fx.app.render(partial.canvas, true);
+            fx.app.clear_full_repaint();
+            // White pixels, less RACE's rpm readout over the bar's left end,
+            // whose digits change with the rpm.
+            const auto white = [&]() {
+                size_t n = 0;
+                for (size_t k = 0; k < partial.px.size(); ++k) {
+                    const size_t x = k % kScreenW, y = k / kScreenW;
+                    if (which == 1 && x < 160 && y < 60) continue;
+                    n += partial.px[k] == color::kWhite;
+                }
+                return n;
+            };
+            const auto same_as_whole = [&]() {
+                Screen320x480 whole;
+                fx.app.render(whole.canvas, true);
+                return whole.px == partial.px;
+            };
+            const auto frame = [&]() {
+                fx.app.update(f);
+                if (fx.app.needs_full_repaint()) {
+                    fx.app.render(partial.canvas, true);
+                    fx.app.clear_full_repaint();
+                } else {
+                    send_damage(fx.app, partial.px);
+                }
+            };
+            const size_t before = white();
+            f.engine.rpm_peak = 8400.0f;
+            f.engine.shift_hold = 0x40;
+            f.t_ms += 20;
+            frame();
+            CHECK(white() > before);
+            CHECK(same_as_whole());
+            f.engine.rpm = 7100.0f;   // pulling again under it
+            f.t_ms += 20;
+            frame();
+            CHECK(same_as_whole());
+            f.engine.rpm_peak = 0.0f; // the hold runs out
+            f.engine.shift_hold = 0;
+            f.t_ms += 20;
+            frame();
+            CHECK(white() == before);
+            CHECK(same_as_whole());
+        }
+    }
+
+    CASE("on SPEED a trick takes the lean gauge, not the toast");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 partial;
+        fx.app.begin(partial.canvas);
+        go_to(fx.app, partial.canvas, Mode::Cruise, 0);
+        CHECK(fx.app.current_id() == ScreenId::Speed);
+        Frame f = busy_frame();
+        f.att.lean_deg = 0.0f;
+        fx.app.update(f);
+        fx.app.render(partial.canvas, true);
+        fx.app.clear_full_repaint();
+        const auto same_as_whole = [&]() {
+            Screen320x480 whole;
+            fx.app.render(whole.canvas, true);
+            size_t differing = 0;
+            for (size_t k = 0; k < partial.px.size(); ++k) {
+                if (partial.px[k] != whole.px[k]) ++differing;
+            }
+            if (differing) std::printf("       %zu px differ\n", differing);
+            return differing == 0;
+        };
+        const auto frame = [&]() {
+            fx.app.update(f);
+            if (fx.app.needs_full_repaint()) {
+                fx.app.render(partial.canvas, true);
+                fx.app.clear_full_repaint();
+            } else {
+                send_damage(fx.app, partial.px);
+            }
+        };
+        // The gauge's band, to see what it holds.
+        const Rect gauge{116, 94, 248, 126};
+        const auto band = [&]() {
+            std::vector<Color> b;
+            for (int16_t y = gauge.y; y < gauge.bottom(); ++y)
+                for (int16_t x = gauge.x; x < gauge.right(); ++x)
+                    b.push_back(partial.px[static_cast<size_t>(y) * kScreenW + x]);
+            return b;
+        };
+        const std::vector<Color> lean = band();
+
+        // Under way: the gauge shows it, the strip does not.
+        f.stunt.live_kind = 1;
+        f.stunt.live_ms = 1200;
+        f.stunt.live_deg = 34.0f;
+        f.stunt.live_points = 300.0f;
+        f.t_ms += 20;
+        frame();
+        CHECK(!fx.app.toast().active());
+        CHECK(band() != lean);
+        CHECK(same_as_whole());
+        const std::vector<Color> live = band();
+        // Points running up inside the same tenth: not redrawn yet.
+        f.stunt.live_points = 320.0f;
+        f.t_ms += 20;
+        frame();
+        CHECK(band() == live);
+        f.stunt.live_ms = 1300;
+        f.t_ms += 20;
+        frame();
+        CHECK(band() != live);
+        CHECK(same_as_whole());
+
+        // Scored: the result for 3.5 s, then lean again.
+        f.stunt.live_kind = 0;
+        f.stunt.seq += 1;
+        f.stunt.done_ms = f.t_ms;
+        f.stunt.points = 2219;
+        f.t_ms += 20;
+        frame();
+        CHECK(!fx.app.toast().active());
+        CHECK(band() != lean);
+        CHECK(same_as_whole());
+        f.t_ms += 3600;
+        frame();
+        CHECK(band() == lean);
+        CHECK(same_as_whole());
+
+        // Popups off: the gauge stays the gauge.
+        fx.settings.popups = false;
+        f.stunt.live_kind = 1;
+        f.t_ms += 20;
+        frame();
+        CHECK(band() == lean);
+        CHECK(!fx.app.toast().active());
+    }
+
+    CASE("a ringing call holds the strip; popups off silences tricks, not the phone");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        fx.settings.popups = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();
+        fx.app.update(f);
+        f.t_ms += 20;
+        f.stunt.seq += 1;
+        f.perf.seq += 1;
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+
+        f.notify.seq += 1;
+        f.notify.kind = 'C';
+        f.notify.ringing = true;
+        f.notify.text[0] = '\0';
+        f.notify.at_ms = f.t_ms;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        f.t_ms += 30000;               // past a message's 8 s: still ringing
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        f.notify.ringing = false;      // answered
+        f.t_ms += 20;
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+
+        fx.settings.notify_on = false;
+        f.notify.seq += 1;
+        f.notify.kind = 'M';
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+    }
+
+    CASE("a message outranks a trick; a run toasts only when it is a best");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();
+        fx.app.update(f);
+        // An ordinary run: on PERF, not news.
+        f.t_ms += 20;
+        f.perf.seq += 1;
+        f.perf.event_best = false;
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+        // A message, then a trick on top of it: the message stays up.
+        f.notify.seq += 1;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        const std::vector<Color> shown_msg = [&] {
+            Screen320x480 a;
+            fx.app.render(a.canvas, true);
+            return a.px;
+        }();
+        f.t_ms += 500;
+        f.stunt.seq += 1;
+        fx.app.update(f);
+        Screen320x480 b;
+        fx.app.render(b.canvas, true);
+        CHECK(b.px == shown_msg);
+        // A text message waits: still up after 8 s, until E clears it. That
+        // E is the strip's, not the screen's.
+        f.t_ms += 8000;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+        CHECK(fx.sink.posted.empty());
+        // With nothing on the strip, E is the screen's again (SPEED: play/pause).
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+    }
+
+    CASE("a text message stays a minute, and shows its text once stopped");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        Frame f = busy_frame();      // moving, 54 mph
+        fx.app.update(f);
+        f.notify.seq += 1;
+        f.notify.at_ms = f.t_ms;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        Screen320x480 moving;
+        fx.app.render(moving.canvas, true);
+        // Stopped: the same strip, now with the message in it.
+        f.motion.best_mph = 0.0f;
+        f.t_ms += 20;
+        fx.app.update(f);
+        Screen320x480 stopped;
+        fx.app.render(stopped.canvas, true);
+        // The strip only (y 266 on): stopping also redraws the speedo.
+        const auto strip_ink = [](const Screen320x480& sc) {
+            size_t n = 0;
+            for (size_t k = static_cast<size_t>(266) * kScreenW; k < sc.px.size(); ++k)
+                n += sc.px[k] != color::kBg && sc.px[k] != color::kPanel && sc.px[k] != 0;
+            return n;
+        };
+        CHECK(strip_ink(stopped) > strip_ink(moving));
+        f.t_ms += 59000;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        f.t_ms += 1500;
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+        // A missed call is not a message: no wait, and E stays the screen's.
+        f.notify.seq += 1;
+        f.notify.kind = 'X';
+        f.notify.text[0] = '\0';
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        f.t_ms += 8100;
+        fx.app.update(f);
+        CHECK(!fx.app.toast().active());
+    }
+
+    CASE("PERF's E clears bests, STUNT's E starts a new score");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Stat, 3);
+        CHECK(fx.app.current_id() == ScreenId::Perf);
+        fx.app.update(busy_frame());
+        fx.app.render(s.canvas, true);
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1 &&
+              fx.sink.posted[0].id == core::state::CommandId::PerfReset);
+        go_to(fx.app, s.canvas, Mode::Stat, 4);
+        CHECK(fx.app.current_id() == ScreenId::Stunt);
+        fx.app.update(busy_frame());
+        fx.app.render(s.canvas, true);
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1 &&
+              fx.sink.posted[0].id == core::state::CommandId::StuntReset);
+    }
+
+    CASE("PHONE shows the message when stopped, only the sender when moving");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 6);
+        CHECK(fx.app.current_id() == ScreenId::Phone);
+        Frame f = busy_frame();
+        f.motion.best_mph = 0.0f;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t stopped = s.ink();
+        f.motion.best_mph = 40.0f;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() < stopped);
+        fx.settings.notify_text_moving = true;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() == stopped);
     }
 
     CASE("DIAG -> FUSION shows what the filter made of each source");
