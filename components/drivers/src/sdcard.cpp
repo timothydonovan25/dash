@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 namespace drivers {
 namespace {
@@ -109,6 +110,14 @@ hal::Status SdCard::init() {
 
     card_ = card;
     mounted_ = true;
+    // The directories the firmware writes into. fopen() does not make a
+    // missing one, so a fresh card would refuse every log and every track.
+    // EEXIST on every mount after the first is the normal case.
+    for (const char* dir : {"logs", "tracks"}) {
+        char full[32];
+        std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
+        mkdir(full, 0777);
+    }
     return hal::Status::Ok;
 }
 
@@ -220,6 +229,27 @@ hal::Status SdCard::rename(const char* from, const char* to) {
     struct stat st;
     if (stat(b, &st) == 0) return hal::Status::Busy;      // never clobber
     return std::rename(a, b) == 0 ? hal::Status::Ok : hal::Status::IoError;
+}
+
+hal::Status SdCard::write_file(const char* path, const void* data, size_t len) {
+    const Hold hold(lock_);
+    if (!hold.held()) return hal::Status::Busy;
+    if (!mounted_) return hal::Status::NotPresent;
+    if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
+    // Never the file append() is holding open: that is the log.
+    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
+        return hal::Status::Busy;
+    }
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    FILE* f = std::fopen(full, "wb");
+    if (!f) return hal::Status::IoError;
+    const size_t written = len ? std::fwrite(data, 1, len, f) : 0;
+    // fsync before the close, so a rename after this lands on a file whose
+    // bytes are on the card and not in the FAT layer's buffer.
+    const bool flushed = std::fflush(f) == 0 && fsync(fileno(f)) == 0;
+    const bool closed = std::fclose(f) == 0;
+    return written == len && flushed && closed ? hal::Status::Ok : hal::Status::IoError;
 }
 
 bool SdCard::exists(const char* path) {

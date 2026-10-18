@@ -33,4 +33,6 @@ idf_component_register(
          "src/slip.cpp"
          "src/waypoint.cpp"
          "src/flash.cpp"
+         "src/track.cpp"
+         "src/session.cpp"
     INCLUDE_DIRS "include")

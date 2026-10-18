@@ -77,6 +77,15 @@ public:
     // LapClear: forget the reference and the session.
     void clear();
 
+    // A reference from elsewhere: a track's saved best lap, already moved
+    // into this power-on's frame (core::track::shift). Replaces whatever
+    // reference there was; the lap being recorded carries on. Fewer than
+    // two points is no reference.
+    void load_reference(const Point* pts, size_t n);
+
+    // The reference itself, for saving it with the track.
+    const Point* reference() const { return ref_; }
+
     bool   has_reference() const { return ref_count_ > 1; }
     size_t reference_points() const { return ref_count_; }
     size_t recorded_points() const { return rec_count_; }

@@ -104,6 +104,14 @@ void storage_task(void* arg) {
             d.health->report_ok(core::state::Dev::Sd, now);
         }
 
+        // Saved tracks (services/track_store.hpp): one job per pass, while
+        // the card is in and the supply holds. A save is one ~19 kB file, so
+        // not one to start on the capacitors.
+        if (d.tracks && card->present() && !ejected &&
+            !d.power_fail.load(std::memory_order_relaxed)) {
+            serve_tracks(*d.tracks, *card);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }

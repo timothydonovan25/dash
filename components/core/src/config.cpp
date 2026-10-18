@@ -89,6 +89,9 @@ const ConfigItem kItems[] = {
     num(0x0403, "Min lap",      "Lap", Kind::Int,    2, 600,  1, "s",   FIELD(lap_min_lap_s)),
     action(0x0404, "Set line here", "Lap", state::CommandId::LapSetLine),
     action(0x0405, "Clear laps",    "Lap", state::CommandId::LapClear),
+    // Deletes the saved track (core::track) whose line is set: its line,
+    // splits, record and reference lap. The next visit starts from nothing.
+    action(0x0406, "Forget track",  "Lap", state::CommandId::TrackForget),
 
     // Gearing. One ratio per gear, in rpm per mph. Calibrate against the
     // ratio the DIAG screen shows at a steady speed in that gear.

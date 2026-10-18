@@ -194,7 +194,8 @@ void AttitudeScreen::update(const Frame& f) {
     g_lat_.set(f.att.g_lat, imu);
     g_vert_.set(f.att.g_vert, imu);
     airtime_.set(f.att.airtime_ms / 1000.0f, imu && f.att.airtime_ms > 0);
-    best_air_.set(0.0f, false);          // owned by the logic task, not the Frame
+    // The session's longest (core::session, from `logic`).
+    best_air_.set(f.session.best_air_ms / 1000.0f, imu && f.session.best_air_ms > 0);
     land_g_.set(f.att.last_land_g, imu && f.att.last_land_g > 0.0f);
 }
 

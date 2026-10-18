@@ -23,9 +23,11 @@ size_t put_deg(char* buf, size_t n, size_t k, double v) {
     if (k >= n) return k;
     const bool neg = v < 0.0;
     if (neg) v = -v;
-    const long long whole = static_cast<long long>(v);
-    const double frac = v - static_cast<double>(whole);
-    if (neg) k = put(buf, n, k, '-');
+    // Rounded once, to whole millionths, and split after: rounding only the
+    // fraction wrote 39.9999996 as "39.000000", a point 69 miles off.
+    const long long micro = static_cast<long long>(v * 1000000.0 + 0.5);
+    const long long whole = micro / 1000000;
+    if (neg && micro != 0) k = put(buf, n, k, '-');
     char tmp[24];
     size_t d = 0;
     long long w = whole;
@@ -33,7 +35,7 @@ size_t put_deg(char* buf, size_t n, size_t k, double v) {
     while (w > 0 && d < sizeof tmp) { tmp[d++] = static_cast<char>('0' + w % 10); w /= 10; }
     while (d > 0) k = put(buf, n, k, tmp[--d]);
     k = put(buf, n, k, '.');
-    long long f = static_cast<long long>(frac * 1000000.0 + 0.5);
+    const long long f = micro % 1000000;
     for (int i = 5; i >= 0; --i) {
         long long div = 1;
         for (int j = 0; j < i; ++j) div *= 10;

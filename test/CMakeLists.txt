@@ -46,7 +46,9 @@ add_library(core STATIC
     ${CORE}/src/battery.cpp
     ${CORE}/src/slip.cpp
     ${CORE}/src/waypoint.cpp
-    ${CORE}/src/flash.cpp)
+    ${CORE}/src/flash.cpp
+    ${CORE}/src/track.cpp
+    ${CORE}/src/session.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -76,7 +78,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors)
+          attitude jump nmea input tach log delta gear gearcal c6 power media pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -91,22 +93,29 @@ target_link_libraries(test_settings_store PRIVATE core hal)
 add_test(NAME settings_store COMMAND test_settings_store)
 
 # `logic`'s half of the gear calibration, through the real logic_tick.
-add_executable(test_logic_gearcal test_logic_gearcal.cpp ${SVC}/src/logic_tick.cpp)
+add_executable(test_logic_gearcal test_logic_gearcal.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
 target_include_directories(test_logic_gearcal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_logic_gearcal PRIVATE core ui hal)
 add_test(NAME logic_gearcal COMMAND test_logic_gearcal)
 
 # `logic`'s half of the lap timer: fixes at 10 Hz through a 50 Hz tick.
-add_executable(test_logic_lap test_logic_lap.cpp ${SVC}/src/logic_tick.cpp)
+add_executable(test_logic_lap test_logic_lap.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
 target_include_directories(test_logic_lap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_logic_lap PRIVATE core ui hal)
 add_test(NAME logic_lap COMMAND test_logic_lap)
 
 # `logic`'s half of the named waypoints.
-add_executable(test_logic_waypoint test_logic_waypoint.cpp ${SVC}/src/logic_tick.cpp)
+add_executable(test_logic_waypoint test_logic_waypoint.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
 target_include_directories(test_logic_waypoint PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_logic_waypoint PRIVATE core ui hal)
 add_test(NAME logic_waypoint COMMAND test_logic_waypoint)
+
+# `logic`'s half of saved tracks, served by the real track_store against a
+# card in RAM.
+add_executable(test_logic_track test_logic_track.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
+target_include_directories(test_logic_track PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_track PRIVATE core ui hal)
+add_test(NAME logic_track COMMAND test_logic_track)
 
 foreach(t ui wire shadow)
     target_link_libraries(test_${t} PRIVATE ui hal)

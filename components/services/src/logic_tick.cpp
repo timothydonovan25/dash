@@ -18,6 +18,183 @@ void to_local_ft(const core::geo::LatLon& origin, const core::geo::LatLon& p,
     y_ft = static_cast<float>((p.lat - origin.lat) * lat_ft_per_deg);
 }
 
+void ensure_origin(LogicState& s, const core::geo::LatLon& p) {
+    if (!s.have_origin) {
+        s.origin = p;
+        s.have_origin = true;
+    }
+}
+
+uint32_t gps_today(const core::state::Gnss& g) {
+    return g.year != 0 ? core::waypoint::gps_day(g.year, g.day_of_year) : 0;
+}
+
+// --- saved tracks (core::track) ------------------------------------------
+
+// The track's finish line in this power-on's local frame: what a saved
+// reference, kept relative to the line, is moved by.
+void line_in_frame(const LogicState& s, const core::track::Record& r, float& x, float& y) {
+    to_local_ft(s.origin, r.finish.at, x, y);
+}
+
+// A line has been set, or has come back: whatever the session knew about
+// the old one (the splits, the reference) was about the old one.
+void forget_line_state(Deps& d, LogicState& s) {
+    s.sectors.reset();
+    s.last_split = core::lap::Split{};
+    if (d.delta) d.delta->clear();
+    s.ref_ms = 0;
+    s.want_ref = false;
+}
+
+// The rider set a line: a saved track's line moved (its old record goes),
+// or a new track. Before the library has come off the card there is no
+// telling which, so that waits for it, holding where the line is.
+void adopt_new_line(Deps& d, LogicState& s, const core::track::Line& line, uint32_t today) {
+    s.track = -1;
+    s.track_recalled = false;
+    s.track_unsaved = false;
+    if (!d.tracks) return;
+    if (!s.tracks_known) {
+        s.track_unsaved = true;
+        s.pending_line = line;
+        s.pending_day = today;
+        return;
+    }
+    const int slot = core::track::slot_for_line(d.tracks->lib, line.at);
+    if (slot < 0) return;
+    d.tracks->lib.rec[slot] = core::track::fresh(line, today);
+    s.track = static_cast<int8_t>(slot);
+    s.track_dirty = true;
+}
+
+// A good fix near a saved track, with no line set: the line, the splits and
+// (once the card has answered) the reference come back.
+void recall_track(Deps& d, LogicState& s, int slot, const core::state::Gnss& g) {
+    core::track::Record& r = d.tracks->lib.rec[slot];
+    s.lap.set_line(r.finish.at, r.finish.heading_deg);
+    forget_line_state(d, s);
+    if (r.splits) {
+        core::geo::LatLon at[core::lap::kSectors - 1];
+        double hd[core::lap::kSectors - 1];
+        for (int k = 0; k < core::lap::kSectors - 1; ++k) {
+            at[k] = r.split[k].at;
+            hd[k] = r.split[k].heading_deg;
+        }
+        s.sectors.place_lines(at, hd);
+    }
+    ensure_origin(s, core::geo::LatLon{g.lat, g.lon});
+    s.track = static_cast<int8_t>(slot);
+    s.track_recalled = true;
+    s.want_ref = r.ref_ms != 0;
+    s.load_tries = 0;
+    const uint32_t today = gps_today(g);
+    if (today != 0) r.last_day = today;
+    if (r.sessions != UINT16_MAX) ++r.sessions;
+    s.track_dirty = true;
+}
+
+// One turn of the hand-off with `storage`: take an answer if there is one,
+// then post the next job if the box is free. Never waits.
+void pump_tracks(Deps& d, LogicState& s, uint32_t now) {
+    TrackMailbox* box = d.tracks;
+    if (!box) return;
+    using Op = TrackMailbox::Op;
+
+    if (box->answered()) {
+        switch (box->op) {
+            case Op::List:
+                // A card that could not be read is asked again in a while;
+                // an empty library from it would hand its slots out anew.
+                if (box->ok) {
+                    s.tracks_known = true;
+                } else {
+                    s.tracks_asked = false;
+                    s.retry_at_ms = (now + 5000) | 1u;
+                }
+                break;
+            case Op::Load:
+                // The card could not be read. A save after giving up writes
+                // the track without its reference, so a card that was only
+                // busy gets two more goes before that happens.
+                if (!box->ok && ++s.load_tries < 3) {
+                    s.retry_at_ms = (now + 5000) | 1u;
+                    break;
+                }
+                s.want_ref = false;
+                if (box->ok && s.track >= 0 && box->slot == static_cast<uint8_t>(s.track) &&
+                    box->n >= 2 && box->rec.ref_ms != 0 && d.delta && s.have_origin) {
+                    float x = 0.0f, y = 0.0f;
+                    line_in_frame(s, d.tracks->lib.rec[s.track], x, y);
+                    core::track::shift(box->pts, box->n, x, y);
+                    d.delta->load_reference(box->pts, box->n);
+                    s.ref_ms = box->rec.ref_ms;
+                }
+                break;
+            case Op::Save:
+                // A card that will not take it gets another go in a while,
+                // not every pass (rule 5).
+                if (!box->ok) {
+                    s.track_dirty = true;
+                    s.retry_at_ms = (now + 5000) | 1u;
+                }
+                break;
+            case Op::Forget:
+            case Op::None:
+                break;
+        }
+        box->release();
+    }
+    if (!box->free()) return;
+    if (s.retry_at_ms != 0) {
+        if (static_cast<int32_t>(now - s.retry_at_ms) < 0) return;
+        s.retry_at_ms = 0;
+    }
+
+    if (!s.tracks_asked) {
+        s.tracks_asked = true;
+        box->op = Op::List;
+        box->post();
+        return;
+    }
+    if (!s.tracks_known) return;
+
+    if (s.forget_slot >= 0) {
+        box->op = Op::Forget;
+        box->slot = static_cast<uint8_t>(s.forget_slot);
+        s.forget_slot = -1;
+        box->post();
+        return;
+    }
+    if (s.track < 0) return;
+    if (s.want_ref) {
+        box->op = Op::Load;
+        box->slot = static_cast<uint8_t>(s.track);
+        box->post();
+        return;
+    }
+    if (s.track_dirty) {
+        core::track::Record& r = box->lib.rec[s.track];
+        box->n = 0;
+        r.ref_ms = 0;
+        if (s.ref_ms != 0 && d.delta && d.delta->has_reference() && s.have_origin) {
+            const size_t n = d.delta->reference_points();
+            const core::delta::Point* ref = d.delta->reference();
+            for (size_t i = 0; i < n; ++i) box->pts[i] = ref[i];
+            float x = 0.0f, y = 0.0f;
+            line_in_frame(s, r, x, y);
+            core::track::shift(box->pts, n, -x, -y);
+            box->n = static_cast<uint16_t>(n);
+            r.ref_ms = s.ref_ms;
+        }
+        box->rec = r;
+        box->op = Op::Save;
+        box->slot = static_cast<uint8_t>(s.track);
+        s.track_dirty = false;
+        box->post();
+    }
+}
+
 uint8_t gear_count(const core::config::Settings& st) {
     return st.gear_count > core::gearcal::kMaxGears ? core::gearcal::kMaxGears
                                                      : st.gear_count;
@@ -98,9 +275,14 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 // good enough, because the screen only has a Frame.
                 if (g.fix) {
                     s.lap.set_line(core::geo::LatLon{g.lat, g.lon}, g.course_deg);
-                    // The splits were placed round the old line.
-                    s.sectors.reset();
-                    s.last_split = core::lap::Split{};
+                    // The splits were placed round the old line, and the
+                    // reference lap was ridden over it.
+                    forget_line_state(d, s);
+                    ensure_origin(s, core::geo::LatLon{g.lat, g.lon});
+                    adopt_new_line(d, s,
+                                   core::track::Line{core::geo::LatLon{g.lat, g.lon},
+                                                     g.course_deg},
+                                   gps_today(g));
                 }
                 break;
             case core::state::CommandId::LapArm:
@@ -112,7 +294,22 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 s.session_peaks.lean_left_deg = 0.0f;
                 s.session_peaks.lean_right_deg = 0.0f;
                 break;
+            case core::state::CommandId::TrackForget:
+                if (s.track >= 0 && d.tracks && s.tracks_known) {
+                    d.tracks->lib.rec[s.track] = core::track::Record{};
+                    s.forget_slot = s.track;
+                    s.track_dirty = false;
+                }
+                [[fallthrough]];
             case core::state::CommandId::LapClear:
+                // The saved track stays on the card (unless forgotten just
+                // above); it just does not come straight back.
+                s.track = -1;
+                s.track_recalled = false;
+                s.track_unsaved = false;
+                s.recall_off = true;
+                s.ref_ms = 0;
+                s.want_ref = false;
                 s.lap.clear();
                 s.sectors.reset();
                 s.last_split = core::lap::Split{};
@@ -347,6 +544,20 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         }
     }
 
+    // --- saved tracks ---------------------------------------------------
+    pump_tracks(d, s, now);
+    if (d.tracks && s.tracks_known) {
+        // A line set before the library came off the card is placed now.
+        if (s.track_unsaved && s.lap.has_line()) {
+            adopt_new_line(d, s, s.pending_line, s.pending_day);
+        }
+        if (!s.recall_off && s.track < 0 && !s.lap.has_line() &&
+            g.rx_ms != s.last_lap_rx_ms && core::waypoint::good_fix(g)) {
+            const int slot = core::track::nearest(d.tracks->lib, core::geo::LatLon{g.lat, g.lon});
+            if (slot >= 0) recall_track(d, s, slot, g);
+        }
+    }
+
     // --- trip -----------------------------------------------------------
     core::trip::Input ti;
     ti.speed_mph = m.best_mph;
@@ -355,6 +566,20 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     ti.t_ms = now;
     s.trip.update(ti, s.fuel);
     d.slots->trip.publish(s.trip.publish());
+
+    // --- session --------------------------------------------------------
+    {
+        core::session::Input si;
+        si.t_ms = now;
+        si.speed_mph = m.best_mph;
+        si.engine_on = e.rpm > 0.0f;
+        si.imu_ok = health.ok(core::state::Dev::Imu);
+        si.land_ms = att.land_ms;
+        si.airtime_ms = att.airtime_ms;
+        si.land_g = att.last_land_g;
+        s.session.update(si);
+        d.slots->session.publish(s.session.publish());
+    }
 
     // --- lap ------------------------------------------------------------
     core::lap::Config lc;
@@ -398,6 +623,23 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         lu = s.lap.update(lf, lc);
         const core::lap::Split sp = s.sectors.update(lf, g.course_deg, lu, lc);
         if (sp.crossed) s.last_split = sp;
+        if (s.track >= 0 && d.tracks) {
+            core::track::Record& r = d.tracks->lib.rec[s.track];
+            if (sp.crossed) {
+                uint32_t best[core::lap::kSectors];
+                for (int k = 0; k < core::lap::kSectors; ++k) best[k] = s.sectors.best_ms(k);
+                if (core::track::offer_sectors(r, best)) s.track_dirty = true;
+            }
+            // The first clean lap placed the splits: they are the track's
+            // from now on.
+            if (!r.splits && s.sectors.placed()) {
+                for (int k = 0; k < core::lap::kSectors - 1; ++k) {
+                    r.split[k] = core::track::Line{s.sectors.line_at(k), s.sectors.heading_at(k)};
+                }
+                r.splits = true;
+                s.track_dirty = true;
+            }
+        }
     } else if (silent && !s.lap_told_stale && s.last_lap_rx_ms != 0) {
         s.lap_told_stale = true;
         lf.valid = false;
@@ -443,12 +685,20 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         s.lap_peaks.reset();
         if (d.lap_trace) d.lap_trace->clear();      // trace the new lap
         if (d.delta) {
-            // The reference is the session best. The lap timer has already
-            // refused to let a lap with a fix gap in it set the best, so a
-            // dropout cannot poison the reference either.
-            const bool is_best = lu.valid && lu.lap_ms == s.lap.state().best_ms;
-            d.delta->finish_lap(is_best);
+            // The reference is the quickest clean lap known: the session's,
+            // or the saved track's until the session beats it. A lap with a
+            // fix gap in it cannot be either, so a dropout cannot poison it.
+            const bool is_ref = lu.valid && (s.ref_ms == 0 || lu.lap_ms < s.ref_ms);
+            d.delta->finish_lap(is_ref);
+            if (is_ref && d.delta->has_reference()) {
+                s.ref_ms = lu.lap_ms;
+                if (s.track >= 0) s.track_dirty = true;
+            }
             d.delta->start_lap();
+        }
+        if (s.track >= 0 && d.tracks &&
+            core::track::offer_lap(d.tracks->lib.rec[s.track], lu.lap_ms, lu.valid)) {
+            s.track_dirty = true;
         }
     }
 
@@ -468,6 +718,13 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         pl.last_was_best = s.last_was_best;
         pl.max_lean_left_deg = s.session_peaks.lean_left_deg;
         pl.max_lean_right_deg = s.session_peaks.lean_right_deg;
+        pl.track = s.track;
+        pl.track_recalled = s.track_recalled;
+        if (s.track >= 0 && d.tracks) {
+            const core::track::Record& r = d.tracks->lib.rec[s.track];
+            pl.track_best_ms = r.best_ms;
+            pl.track_ideal_ms = r.ideal_ms();
+        }
         d.slots->lap.publish(pl);
     }
 
@@ -479,10 +736,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // trace and the delta, for minutes at a time as the two clocks drifted.
     if (g.fix && new_fix && g.rx_ms - s.last_trace_ms >= 90) {
         s.last_trace_ms = g.rx_ms;
-        if (!s.have_origin) {
-            s.origin = core::geo::LatLon{g.lat, g.lon};
-            s.have_origin = true;
-        }
+        ensure_origin(s, core::geo::LatLon{g.lat, g.lon});
         core::state::TrackPoint p;
         to_local_ft(s.origin, core::geo::LatLon{g.lat, g.lon}, p.x_ft, p.y_ft);
         p.speed_mph = m.best_mph;

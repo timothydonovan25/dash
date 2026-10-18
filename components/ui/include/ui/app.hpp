@@ -21,7 +21,7 @@ struct ScreenStorage {
 };
 using AllScreens = ScreenStorage<
     SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen,
-    LapScreen, LapHistoryScreen, TrackMapScreen, AllDataScreen, EngineScreen,
+    RaceScreen, LapScreen, LapHistoryScreen, TrackMapScreen, SessionScreen, AllDataScreen, EngineScreen,
     AttitudeScreen, DiagMenuScreen, SensorsScreen, GpsScreen, FusionScreen, SystemScreen, PowerScreen, BusScreen,
     RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen>;
 
@@ -29,7 +29,7 @@ using AllScreens = ScreenStorage<
 enum class ScreenId : uint8_t {
     None,
     Speed, Media, Trip, TripMap, Nav, Minimal,
-    Lap, LapHistory, TrackMap,
+    Race, Lap, LapHistory, TrackMap, Session,
     AllData, Engine, Attitude,
     DiagMenu, Sensors, Gps, Fusion, System, Power, Bus, Radio, Update,
     Config, GearCal,

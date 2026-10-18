@@ -722,6 +722,78 @@ int16_t TachBar::width_at(int16_t y) {
                                 (kFlareH - y) * (kFlareW - kStemW) / kFlareH);
 }
 
+// --- RevBar -------------------------------------------------------------
+
+void RevBar::set_scale(uint16_t full_rpm) {
+    if (assign_t(full_rpm_, full_rpm)) edge_ = edge_for(-1.0f);
+}
+
+int16_t RevBar::edge_for(float rpm) const {
+    if (full_rpm_ == 0 || rpm <= 0.0f) return 0;
+    float frac = rpm / static_cast<float>(full_rpm_);
+    if (frac > 1.0f) frac = 1.0f;
+    const int16_t e = static_cast<int16_t>(frac * bounds.w);
+    return static_cast<int16_t>((e / kStepPx) * kStepPx);
+}
+
+void RevBar::set(float rpm, bool lamps, bool flash, bool valid) {
+    const Shade shade = flash ? Shade::Flash : lamps ? Shade::Lamps : Shade::Normal;
+    // A change of colour or of validity repaints the lot; only a moving
+    // edge is worth working out the columns for.
+    if (assign_t(shade_, shade) | assign_t(valid_, valid)) {
+        edge_ = valid ? edge_for(rpm) : 0;
+        return;
+    }
+    const int16_t e = valid ? edge_for(rpm) : 0;
+    if (e == edge_) return;
+    int16_t l = e < edge_ ? e : edge_;
+    int16_t r = e < edge_ ? edge_ : e;
+    if (l < 0) l = 0;
+    edge_ = e;
+    if (moved_) {
+        if (moved_l_ < l) l = moved_l_;
+        if (moved_r_ > r) r = moved_r_;
+    }
+    moved_ = true;
+    moved_l_ = l;
+    moved_r_ = r;
+    touch_part();
+}
+
+int RevBar::damage(Rect* out, int max) const {
+    (void)max;
+    if (whole_ || !moved_) { out[0] = bounds; return 1; }
+    out[0] = Rect{static_cast<int16_t>(bounds.x + moved_l_), bounds.y,
+                  static_cast<int16_t>(moved_r_ - moved_l_), bounds.h}.clipped_to(bounds);
+    return out[0].empty() ? 0 : 1;
+}
+
+void RevBar::render(Canvas& c) {
+    const int16_t e = edge_ < 0 ? 0 : (edge_ > bounds.w ? bounds.w : edge_);
+    const Color lit = shade_ == Shade::Flash ? color::kAlarm
+                    : shade_ == Shade::Lamps ? color::kWarn
+                                             : color::kAccent;
+    if (e > 0) c.fill_rect(Rect{bounds.x, bounds.y, e, bounds.h}, lit);
+    if (e < bounds.w) {
+        c.fill_rect(Rect{static_cast<int16_t>(bounds.x + e), bounds.y,
+                         static_cast<int16_t>(bounds.w - e), bounds.h},
+                    color::kPanel);
+    }
+    if (full_rpm_ == 0) return;
+    // The thousands, full height so they read across the fill and the track
+    // alike; every fifth one thicker.
+    for (uint32_t rpm = 1000; rpm < full_rpm_; rpm += 1000) {
+        const int16_t x = static_cast<int16_t>(bounds.x + static_cast<int32_t>(rpm) * bounds.w /
+                                                              full_rpm_);
+        const int16_t w = rpm % 5000 == 0 ? 3 : 1;
+        c.fill_rect(Rect{static_cast<int16_t>(x - w / 2), bounds.y, w, bounds.h}, color::kBg);
+    }
+    if (!valid_) {
+        c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - 7), "--", color::kDim, 2,
+                    Align::Center);
+    }
+}
+
 void TachBar::configure(int16_t y_top, int16_t y_bottom) {
     const bool a = assign_t(y_top_, y_top);
     const bool b = assign_t(y_bottom_, y_bottom);

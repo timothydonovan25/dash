@@ -50,9 +50,11 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
             }
         case Mode::Track:
             switch (index) {
-                case 0: return ScreenId::Lap;
-                case 1: return ScreenId::LapHistory;
-                default: return ScreenId::TrackMap;
+                case 0: return ScreenId::Race;
+                case 1: return ScreenId::Lap;
+                case 2: return ScreenId::LapHistory;
+                case 3: return ScreenId::TrackMap;
+                default: return ScreenId::Session;
             }
         case Mode::Stat:
             switch (index) {
@@ -114,7 +116,9 @@ void App::build(ScreenId id) {
         }
         case ScreenId::Nav:        s = make<NavScreen>(slot_); break;
         case ScreenId::Minimal:    s = make<MinimalScreen>(slot_); break;
+        case ScreenId::Race:       s = make<RaceScreen>(slot_); break;
         case ScreenId::Lap:        s = make<LapScreen>(slot_); break;
+        case ScreenId::Session:    s = make<SessionScreen>(slot_); break;
         case ScreenId::LapHistory: {
             auto* t = make<LapHistoryScreen>(slot_);
             t->set_history(laps_, lap_count_, best_lap_, lap_peaks_);

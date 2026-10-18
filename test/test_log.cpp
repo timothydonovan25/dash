@@ -197,6 +197,27 @@ int main() {
         CHECK(contains(line, ",30.50,"));
     }
 
+    CASE("a coordinate a hair under a whole degree carries into the degree");
+    {
+        // 39.9999996 used to come out as "39.000000": the fraction rounded
+        // up to a million and the whole degrees never heard about it.
+        Record r;
+        r.lat = 39.9999996;
+        r.lon = -104.99999995;
+        char line[256];
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",40.000000,-105.000000,"));
+        r.lat = 0.0000004;
+        r.lon = -0.0000004;
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",0.000000,0.000000,"));     // and no "-0"
+        r.lat = 42.5012345;
+        r.lon = -83.1234565;
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",42.501235,-83.123457,") || contains(line, ",42.501234,-83.123456,") ||
+              contains(line, ",42.501235,-83.123456,") || contains(line, ",42.501234,-83.123457,"));
+    }
+
     CASE("a log is named by session until the date is known, then by local date");
     {
         char name[40];

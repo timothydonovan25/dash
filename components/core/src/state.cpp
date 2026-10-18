@@ -35,6 +35,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.waypoint = s.waypoint.get();
     f.fused  = s.fused.get();
     f.gear_cal = s.gear_cal.get();
+    f.session = s.session.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -80,6 +81,7 @@ const char* command_name(CommandId id) {
         case CommandId::GearCalCancel:     return "gearcal.cancel";
         case CommandId::GearCalReset:      return "gearcal.reset";
         case CommandId::LeanPeaksReset:    return "lean.peaks_reset";
+        case CommandId::TrackForget:       return "track.forget";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";
         case CommandId::MediaCtrl:         return "media.ctrl";

@@ -28,7 +28,8 @@ add_library(core STATIC
     ${CORE}/src/wifi.cpp
     ${CORE}/src/fusion_speed.cpp ${CORE}/src/gearcal.cpp ${CORE}/src/c6.cpp
     ${CORE}/src/fixtime.cpp
-    ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp ${CORE}/src/flash.cpp)
+    ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp ${CORE}/src/flash.cpp
+    ${CORE}/src/track.cpp ${CORE}/src/session.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 add_library(ui STATIC
@@ -49,7 +50,7 @@ target_include_directories(halstub PUBLIC ${HAL}/include)
 # The logic task's body, with no FreeRTOS in it. This is the point of the
 # whole exercise: the simulator executes the firmware's decisions rather
 # than a copy of them that would quietly drift.
-add_library(logic STATIC ${SVC}/src/logic_tick.cpp)
+add_library(logic STATIC ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
 target_include_directories(logic PUBLIC ${SVC}/include)
 target_link_libraries(logic PUBLIC core ui halstub)
 

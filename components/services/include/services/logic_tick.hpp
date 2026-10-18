@@ -16,6 +16,8 @@
 #include "core/lap/lap.hpp"
 #include "core/lap/sectors.hpp"
 #include "core/fixtime/fixtime.hpp"
+#include "core/session/session.hpp"
+#include "core/track/track.hpp"
 #include "core/trip/trip.hpp"
 #include "core/waypoint/waypoint.hpp"
 
@@ -80,6 +82,32 @@ struct LogicState {
     core::fusion::SpeedFilter speed;
     core::fusion::WheelCheck  wheels;
     uint32_t last_gps_utc_ms = 0;
+
+    // Saved tracks (core::track, services::TrackMailbox). The library
+    // itself is the mailbox's `lib`, in PSRAM: it is `logic`'s once the
+    // List has been answered.
+    bool     tracks_asked = false;     // the List has been posted
+    bool     tracks_known = false;     // and answered
+    int8_t   track = -1;               // the saved track the line is, -1 none
+    bool     track_recalled = false;   // it came back by itself
+    bool     track_unsaved = false;    // a line set before the library came
+    bool     track_dirty = false;      // its record has news for the card
+    bool     want_ref = false;         // its reference lap is to be fetched
+    int8_t   forget_slot = -1;         // a file to delete
+    // LapClear or TrackForget: the rider took the line away, so no track
+    // comes back by itself until the next power-on.
+    bool     recall_off = false;
+    uint32_t retry_at_ms = 0;          // a failed load or save waits for this
+    uint8_t  load_tries = 0;
+    // Where a line set before the library came is, until it can be saved.
+    core::track::Line pending_line{};
+    uint32_t pending_day = 0;
+    // The lap time of the delta's reference, 0 for none: the session best,
+    // or the track's saved best until the session beats it.
+    uint32_t ref_ms = 0;
+
+    // The ride so far, for TRACK -> SESSION.
+    core::session::Tracker session;
 
     // Gear calibration: the guided run, and the learner that runs the rest
     // of the time (core/gearcal). `logic` is the one writer of both and of

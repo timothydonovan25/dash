@@ -39,6 +39,7 @@ enum class CommandId : uint8_t {
     GearCalCancel,    // B: close it, discarding the run
     GearCalReset,     // the table back to its calibrated base
     LeanPeaksReset,   // IMU's short E: the session's lean peaks back to zero
+    TrackForget,      // delete the saved track this line belongs to (core::track)
 };
 
 struct Command {

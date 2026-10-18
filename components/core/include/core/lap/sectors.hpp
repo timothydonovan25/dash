@@ -53,8 +53,17 @@ public:
     // The three bests added up; 0 until every sector has one.
     uint32_t ideal_ms() const;
 
-    // For tests: where the lines went.
+    // Where the lines went, and the course across each: what a saved track
+    // keeps (core::track).
     geo::LatLon line_at(int k) const { return lines_[k]; }
+    double heading_at(int k) const { return headings_[k]; }
+
+    // Lines placed on an earlier visit, put back in place of the first
+    // clean lap placing them. Call after reset(): the bests stay empty,
+    // because they are the session's. Takes effect from the next lap start;
+    // a lap already being recorded to place them is dropped.
+    void place_lines(const geo::LatLon (&at)[kSectors - 1],
+                     const double (&heading_deg)[kSectors - 1]);
 
 private:
     struct Instant {

@@ -261,7 +261,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 40 host test suites, all passing.
+the media half of step 9 is written. 46 host tests, all passing.
 
 **`core/`** — all host-tested:
 
@@ -284,11 +284,16 @@ the media half of step 9 is written. 40 host test suites, all passing.
   `lap/sectors.hpp` (1.26): two split lines placed by the first clean lap at
   a third and two thirds of its distance (no rider setup, any track), timed
   in order with the finish line's crossing; each sector's best and the ideal
-  lap (their sum). Forgotten when the line is set or cleared. `Peaks`: each
+  lap (their sum). Forgotten when the line is set or cleared, and put back
+  from a saved track (`place_lines`). `Peaks`: each
   lap's top speed, rpm and lean (lean only above 10 mph) into `LapHistory`,
   and the session's lean each way on the `lap` slot (IMU shows them; short E
   posts `LeanPeaksReset`). LAP has SPLIT and IDEAL tiles and flashes LAST
-  for 5 s on a new best; LAPS shows each lap's peaks
+  for 5 s on a new best; LAPS shows each lap's peaks. TRACK is RACE, LAP,
+  LAPS, MAP, SESSION (1.30): RACE is the track-day screen, no title, a
+  full-width rev bar lit the colour the lamps are (`RevBar`), the gear at
+  scale 20, the running lap, the delta, last and best; E sets and arms the
+  line as on LAP
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
 - `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy.
@@ -352,7 +357,21 @@ the media half of step 9 is written. 40 host test suites, all passing.
 - `waypoint/` the named waypoints START, TRUCK, CAMP, FUEL, MARK, the rule
   for when START moves (not set, or from another day, or 6 h old), and
   their NVS encoding
-- `delta/` lap delta against the session best — a **placeholder**, see below
+- `delta/` lap delta against the quickest clean lap known (the session's, or
+  the saved track's) — the matcher is still a **placeholder**, see below
+- `track/` (1.30) track memory. A track is its finish line: set one and it
+  is saved to the card (`tracks/tNN.trk`, 16 slots) with the splits the
+  first clean lap places, the record, each sector's best and the reference
+  lap; a good fix within 1500 ft of a saved line brings it all back with no
+  button pressed, the delta live from the first lap. A line set within 300
+  ft of a saved one is that track's line moved, and its record starts over.
+  `logic` cannot touch the card, so `storage` does the file work through
+  `services::TrackMailbox` (one job at a time, owned by one side or the
+  other, the library in it, in PSRAM). Clear laps stops recall until the
+  next power-on; CONFIG → Lap → Forget track deletes it. The sim keeps its
+  card in `sim_card/`
+- `session/` (1.30) the ride so far for TRACK → SESSION: distance, riding
+  time, top and average speed, jumps and the longest
 - `fusion/` stage 1 of sensor fusion: road speed from the IMU, both
   wheels and GPS Doppler, gated, with GPS refereeing the wheels.
   `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride.
@@ -366,7 +385,7 @@ the media half of step 9 is written. 40 host test suites, all passing.
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 20 widgets, all 17 screens, the render loop, laid out
+**`ui/`** — canvas, 21 widgets, every screen, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each
@@ -458,7 +477,10 @@ while stopped and `logic_restore` brings them back.
 **Ride logs** are `logs/sNNN.csv` until the GPS gives a date, then renamed to
 the local date, `logs/2026-10-13_s007.csv` (core::log::log_file_name; the
 session number is one past the highest on the card). Each row ends with
-`AltFt`, GPS altitude. The Wi-Fi page exports any log as a GPX track,
+`AltFt`, GPS altitude. Its **Laps** button (1.30) analyses a log in the
+page's JavaScript: each lap's time, gap and splits, two laps on a map, and
+speed and time lost against distance, the laps lined up by position. The
+Wi-Fi page also exports any log as a GPX track,
 converted in the page's own JavaScript so the dash does no work. DIAG →
 System shows the P4's die temperature (`drivers::ChipTemp`, keeper, 1 Hz)
 and the IMU's, from its FIFO packets.
@@ -503,9 +525,9 @@ from `slave_fw` when the C6 is older than 2.12; build that project first.
   threshold in `delta::Config` is a guess that has never seen a real GPS
   trace, and the tests around it are synthetic — they prove the matcher does
   what it was designed to do, not that the design suits real fixes. Tune the
-  search window and `max_match_ft` on the first track day. A saved
-  per-track reference is the next step and needs track identity, which is
-  still open in §18.
+  search window and `max_match_ft` on the first track day. The reference is
+  now saved per track (`core/track/`, 1.30), with a track identified by
+  where its finish line is; a track database is still not here.
 
 Where files differ from the §3 sketch: `tach_capture` and `hall_capture` are
 one `engine_sense` driver because they are the same three counters;

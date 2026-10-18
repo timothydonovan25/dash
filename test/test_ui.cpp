@@ -217,6 +217,17 @@ Frame busy_frame() {
     f.trip.fuel_used_gal = 0.86f;
     f.trip.eng_hours = 143.2f;
     f.trip.top_mph = 68.0f;
+    f.session.dist_mi = 23.4f;
+    f.session.moving_s = 3725;
+    f.session.engine_s = 4100;
+    f.session.top_mph = 71.0f;
+    f.session.avg_mph = 22.6f;
+    f.session.best_air_ms = 1240;
+    f.session.jumps = 6;
+    f.lap.track = 2;
+    f.lap.track_recalled = true;
+    f.lap.track_best_ms = 89900;
+    f.lap.track_ideal_ms = 88750;
     f.lap.phase = core::lap::Phase::Timing;
     f.lap.count = 4;
     f.lap.current_ms = 42150;
@@ -889,7 +900,7 @@ int main() {
         Screen320x480 s;
         fx.app.begin(s.canvas);
 
-        go_to(fx.app, s.canvas, Mode::Track, 0);      // lap timer
+        go_to(fx.app, s.canvas, Mode::Track, 1);      // lap timer
         fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
         CHECK(fx.sink.posted.size() == 1);
         CHECK(fx.sink.posted[0].id == core::state::CommandId::LapSetLine);
@@ -897,6 +908,88 @@ int main() {
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         CHECK(fx.sink.posted.size() == 2);
         CHECK(fx.sink.posted[1].id == core::state::CommandId::LapArm);
+    }
+
+    CASE("RACE sets and arms the line with E, as LAP does");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Track, 0);
+        CHECK(fx.app.current_id() == ScreenId::Race);
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 2);
+        CHECK(fx.sink.posted[0].id == core::state::CommandId::LapSetLine);
+        CHECK(fx.sink.posted[1].id == core::state::CommandId::LapArm);
+    }
+
+    CASE("RACE's rev bar is lit the colour the shift lamps are saying");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Track, 0);
+        Frame f = busy_frame();
+        f.engine.rpm = 5000.0f;
+        auto px = [&](int x, int y) { return s.px[static_cast<size_t>(y) * kScreenW + x]; };
+        // Low on the bar, clear of the slip bar's band and the 1000s marks.
+        const int x = 30, y = 45;
+        f.engine.shift_mask = 0;
+        f.engine.shift_flash = false;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(px(x, y) == color::kAccent);
+        f.engine.shift_mask = 0x0F;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(px(x, y) == color::kWarn);
+        f.engine.shift_flash = true;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        CHECK(px(x, y) == color::kAlarm);
+        // Past the fill is the unlit track: 5000 of 9800 is about half.
+        CHECK(px(400, y) == color::kPanel);
+    }
+
+    CASE("RACE's rev bar sends only the columns its edge crossed");
+    {
+        RevBar bar;
+        bar.set_bounds(Rect{6, 6, 468, 50});
+        bar.set_scale(10000);
+        bar.set(5000.0f, false, false);
+        bar.clear_dirty();
+        bar.set(5200.0f, false, false);
+        CHECK(bar.dirty);
+        Rect r[4];
+        CHECK(bar.damage(r, 4) == 1);
+        CHECK(r[0].w <= 12);
+        CHECK(r[0].h == 50);
+        bar.clear_dirty();
+        bar.set(5201.0f, false, false);              // under a step: nothing
+        CHECK(!bar.dirty);
+        bar.set(5200.0f, true, false);               // a lamp: the colour changed
+        CHECK(bar.damage(r, 4) == 1);
+        CHECK(r[0].w == 468);
+    }
+
+    CASE("SESSION shows the ride and the saved track");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Track, 4);
+        CHECK(fx.app.current_id() == ScreenId::Session);
+        Frame f = busy_frame();
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t busy = s.ink();
+        f = dead_frame();
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() < busy);       // dashes are less ink than numbers
     }
 
     CASE("the speed screen turns C/D/short-E into media control, and leaves long E and A/B alone");
@@ -1371,7 +1464,7 @@ int main() {
         Screen320x480 s;
         fx.app.begin(s.canvas);
         fx.app.set_track_source(&src);
-        go_to(fx.app, s.canvas, Mode::Track, 2);
+        go_to(fx.app, s.canvas, Mode::Track, 3);
         fx.app.update(busy_frame());
         s.wipe();
         fx.app.render(s.canvas, true);
@@ -1405,7 +1498,7 @@ int main() {
         Screen320x480 s;
         fx.app.begin(s.canvas);
         fx.app.set_lap_history(laps, 4, 90880);
-        go_to(fx.app, s.canvas, Mode::Track, 1);
+        go_to(fx.app, s.canvas, Mode::Track, 2);
         fx.app.update(busy_frame());
         fx.app.render(s.canvas, true);
         CHECK(s.ink() > 0);
@@ -1768,7 +1861,7 @@ int main() {
         fx.settings.gauge_sweep = false;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Track, 0);
+        go_to(fx.app, s.canvas, Mode::Track, 1);
         CHECK(fx.app.current_id() == ScreenId::Lap);
         Frame f = busy_frame();
         f.lap.phase = core::lap::Phase::Timing;
@@ -1983,7 +2076,8 @@ int main() {
         const Want wants[] = {
             {Mode::Cruise, 0, "SPEED", 12000},
             {Mode::Cruise, 5, "MINIM", 6000},
-            {Mode::Track, 0, "LAP", 10000},
+            {Mode::Track, 1, "LAP", 10000},
+            {Mode::Track, 0, "RACE", 10000},
         };
         for (const Want& w : wants) {
             Fixture fx;
@@ -2282,7 +2376,7 @@ int main() {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
-        go_to(fx.app, s.canvas, Mode::Track, 1);
+        go_to(fx.app, s.canvas, Mode::Track, 2);
         CHECK(std::strcmp(fx.app.current().name(), "LAPS") == 0);
         const Frame f = busy_frame();
         fx.app.update(f);
@@ -2449,7 +2543,7 @@ int main() {
         } trace;
         const Frame f = busy_frame();
         struct Where { Mode m; uint8_t n; };
-        for (const Where w : {Where{Mode::Cruise, 3}, Where{Mode::Track, 2}}) {
+        for (const Where w : {Where{Mode::Cruise, 3}, Where{Mode::Track, 3}}) {
             Fixture bare;
             Screen320x480 sb;
             bare.app.begin(sb.canvas);
@@ -2489,7 +2583,7 @@ int main() {
         // Handed over before LAPS exists: the App gives it to the screen
         // when it builds it. Against a LAPS that was never given any.
         fx.app.set_lap_history(laps, 2, 91250);
-        go_to(fx.app, s.canvas, Mode::Track, 1);
+        go_to(fx.app, s.canvas, Mode::Track, 2);
         CHECK(fx.app.current_id() == ScreenId::LapHistory);
         const Frame f = busy_frame();
         fx.app.update(f);
@@ -2498,7 +2592,7 @@ int main() {
             Fixture bare;
             Screen320x480 sb;
             bare.app.begin(sb.canvas);
-            go_to(bare.app, sb.canvas, Mode::Track, 1);
+            go_to(bare.app, sb.canvas, Mode::Track, 2);
             bare.app.update(f);
             bare.app.render(sb.canvas, true);
             size_t differing = 0;

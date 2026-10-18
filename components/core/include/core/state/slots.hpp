@@ -27,6 +27,7 @@ struct Slots {
     Published<Waypoints> waypoint;  // logic
     Published<Fused>    fused;      // logic
     Published<GearCal>  gear_cal;   // logic
+    Published<Session>  session;    // logic
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
@@ -60,6 +61,7 @@ struct Frame {
     Waypoints waypoint;
     Fused    fused;
     GearCal  gear_cal;
+    Session  session;
     uint32_t t_ms = 0;
 };
 

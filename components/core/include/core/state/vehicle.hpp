@@ -136,6 +136,28 @@ struct Lap {
     // entered (1.17), and peaks kept in one were lost on leaving it.
     float      max_lean_left_deg  = 0.0f;
     float      max_lean_right_deg = 0.0f;
+
+    // The saved track this line belongs to (core::track), -1 for none: no
+    // line, no card, or a line not yet saved. A track that came back by
+    // itself is `track_recalled`, which LAP says, so a rider who did not set
+    // a line knows why one is there.
+    int8_t     track             = -1;
+    bool       track_recalled    = false;
+    // Its record and its ideal lap over every visit; 0 for none yet.
+    uint32_t   track_best_ms     = 0;
+    uint32_t   track_ideal_ms    = 0;
+};
+
+// The ride so far, for TRACK -> SESSION (core::session). Written by `logic`.
+struct Session {
+    float    dist_mi        = 0.0f;
+    uint32_t moving_s       = 0;     // above core::session::kMovingMph
+    uint32_t engine_s       = 0;
+    float    top_mph        = 0.0f;
+    float    avg_mph        = 0.0f;  // over moving time
+    uint32_t best_air_ms    = 0;     // longest jump, 0 none
+    float    hardest_land_g = 0.0f;
+    uint16_t jumps          = 0;
 };
 
 // One lap's peaks, for LAPS (core::lap::Peaks, as kept per lap by logic).

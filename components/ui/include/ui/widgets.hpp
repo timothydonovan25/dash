@@ -322,6 +322,39 @@ private:
     int16_t moved_bottom_ = 0;
 };
 
+// RACE's tach: a bar across the whole width, filled from the left, lit the
+// colour the shift lamps are saying -- the dash colour below the first lamp,
+// amber once a lamp is on, red at the flash -- so the bar and the handlebar
+// never disagree. Marks every 1000 rpm, drawn over the fill.
+//
+// A widget, not chrome, because it moves; and only the columns between the
+// old edge and the new one go out on a partial update, as TachBar does in y.
+class RevBar : public Widget {
+public:
+    // `full_rpm` is the right-hand end. 0 draws an empty bar.
+    void set_scale(uint16_t full_rpm);
+    // `lamps` and `flash` are what `ctrl` sent the lamps (Engine::shift_mask,
+    // shift_flash).
+    void set(float rpm, bool lamps, bool flash, bool valid = true);
+    void render(Canvas& c) override;
+    int damage(Rect* out, int max) const override;
+    void clear_dirty() override { Widget::clear_dirty(); moved_ = false; }
+
+    static constexpr int16_t kStepPx = 2;
+
+private:
+    enum class Shade : uint8_t { Normal, Lamps, Flash };
+    int16_t edge_for(float rpm) const;
+
+    uint16_t full_rpm_ = 0;
+    int16_t  edge_ = -1;              // filled columns, from bounds.x
+    Shade    shade_ = Shade::Normal;
+    bool     valid_ = false;
+    bool     moved_ = false;
+    int16_t  moved_l_ = 0;
+    int16_t  moved_r_ = 0;
+};
+
 // The lean gauge on the speed screen: a half annulus with a marker on it and
 // the angle in the middle -- and, around a jump, the jump instead: the
 // airtime counting up while in the air, then the airtime and the landing g

@@ -37,6 +37,7 @@
 #include "core/log/log.hpp"
 #include "core/delta/delta.hpp"
 #include "core/flash/flash.hpp"
+#include "services/track_store.hpp"
 #include "ui/screen.hpp"
 
 namespace services {
@@ -90,6 +91,10 @@ struct Deps {
     // either — there was no path between the two before, and the screen
     // showed "no laps yet" for the whole session.
     LapHistory* lap_history = nullptr;
+
+    // Saved tracks, between `logic` (core 0) and `storage`, which owns the
+    // card (services/track_store.hpp). In PSRAM: two lap traces' worth.
+    TrackMailbox* tracks = nullptr;
 
     // Bytes of a firmware upload, from the Wi-Fi page to `ota`. A FreeRTOS
     // StreamBuffer, made by start_ota; void* so this header stays free of

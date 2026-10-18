@@ -28,6 +28,17 @@ void Sectors::reset() {
     for (uint32_t& b : best_) b = 0;
 }
 
+void Sectors::place_lines(const geo::LatLon (&at)[kSectors - 1],
+                          const double (&heading_deg)[kSectors - 1]) {
+    for (int k = 0; k < kSectors - 1; ++k) {
+        lines_[k] = at[k];
+        headings_[k] = heading_deg[k];
+    }
+    placed_ = true;
+    recording_ = false;
+    path_n_ = 0;
+}
+
 void Sectors::abort_lap() {
     timing_ = false;
     recording_ = false;

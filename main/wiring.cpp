@@ -38,6 +38,9 @@ EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
 EXT_RAM_BSS_ATTR core::log::Ring<core::log::Record, 512>                 g_blackbox;
 EXT_RAM_BSS_ATTR core::delta::Tracker                                    g_delta;
+// Saved tracks, `logic` to `storage` and back: a reference lap and a whole
+// file's scratch, ~40 kB.
+EXT_RAM_BSS_ATTR services::TrackMailbox                                  g_tracks;
 services::LapHistory                                    g_lap_history;
 
 drivers::EspClock    g_clock;
@@ -134,6 +137,7 @@ services::Deps& build() {
     g_deps.blackbox   = &g_blackbox;
     g_deps.delta      = &g_delta;
     g_deps.lap_history= &g_lap_history;
+    g_deps.tracks     = &g_tracks;
     g_deps.commands   = &g_commands;
 
     // States are derived on a tick, which is keeper's job once it runs;

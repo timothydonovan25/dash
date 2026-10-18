@@ -71,6 +71,13 @@ public:
     // Deletes one file, for the Wi-Fi page. Busy for the file `append` is
     // writing: the logger still holds it open, and FAT would lose the rows.
     virtual Status remove(const char* path) = 0;
+
+    // A whole small file, created or replaced, and closed again: a saved
+    // track (core::track). Not for the log, which appends.
+    virtual Status write_file(const char* path, const void* data, size_t len) = 0;
+
+    // Fails rather than overwrite an existing `to`.
+    virtual Status rename(const char* from, const char* to) = 0;
 };
 
 }  // namespace hal

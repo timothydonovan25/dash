@@ -47,7 +47,8 @@ public:
     // Renames a file, closing it first if it is the one being appended to;
     // the next append() reopens it under whatever name it is given. Fails
     // rather than overwrite an existing `to`.
-    hal::Status rename(const char* from, const char* to);
+    hal::Status rename(const char* from, const char* to) override;
+    hal::Status write_file(const char* path, const void* data, size_t len) override;
     bool exists(const char* path);
 
     // Reads the socket's card-detect switch. Configures the pin on first

@@ -32,7 +32,9 @@
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac> key=value...\n
 //        (slip=KIND/pct, alert=TEXT, spaces as _, `-` for none;
-//        bl=backlight percent, which the front end dims the picture by)
+//        bl=backlight percent, which the front end dims the picture by;
+//        phase=lap phase 0 no line 1 armed 2 timing, track=saved track or -1.
+//        Saved tracks live in sim_card/tracks/, so they outlast a run)
 //        P6\n320 480\n255\n<pixels>
 #include "sim_bike.hpp"
 #include "panel_sim.hpp"
@@ -49,6 +51,7 @@
 #include "core/wifi/wifi.hpp"
 #include "core/sweep/sweep.hpp"
 #include "services/logic_tick.hpp"
+#include "services/track_store.hpp"
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/wire_cost.hpp"
@@ -60,6 +63,7 @@
 #include <cstring>
 #include <deque>
 #include <poll.h>
+#include <sys/stat.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -183,6 +187,58 @@ struct FakeStorage {
             system.sd_ejected = false;
         }
     }
+};
+
+// The card's files, for what `storage` does with saved tracks
+// (services/track_store.hpp): a folder beside the simulator, `sim_card/`, so
+// a track set in one run comes back in the next, as it would on the bike
+// after a key-off. Only what serve_tracks() calls is more than a stub.
+class DirCard final : public hal::ICard {
+public:
+    explicit DirCard(const char* root) : root_(root) {
+        ::mkdir(root, 0777);
+        ::mkdir((std::string(root) + "/tracks").c_str(), 0777);
+    }
+    hal::Status init() override { return hal::Status::Ok; }
+    bool present() const override { return true; }
+    hal::Status append(const char*, const void*, size_t) override { return hal::Status::Unsupported; }
+    hal::Status sync() override { return hal::Status::Ok; }
+    hal::Status size_of(const char* path, size_t& out) override {
+        struct stat st;
+        if (::stat(full(path).c_str(), &st) != 0) return hal::Status::NotPresent;
+        out = static_cast<size_t>(st.st_size);
+        return hal::Status::Ok;
+    }
+    hal::Status read_at(const char* path, size_t offset, void* buf, size_t len,
+                        size_t& got) override {
+        got = 0;
+        std::FILE* f = std::fopen(full(path).c_str(), "rb");
+        if (!f) return hal::Status::NotPresent;
+        std::fseek(f, static_cast<long>(offset), SEEK_SET);
+        got = std::fread(buf, 1, len, f);
+        std::fclose(f);
+        return hal::Status::Ok;
+    }
+    hal::Status list(const char*, ListFn, void*) override { return hal::Status::Ok; }
+    hal::Status remove(const char* path) override {
+        return std::remove(full(path).c_str()) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
+    }
+    hal::Status write_file(const char* path, const void* data, size_t len) override {
+        std::FILE* f = std::fopen(full(path).c_str(), "wb");
+        if (!f) return hal::Status::IoError;
+        const size_t w = std::fwrite(data, 1, len, f);
+        return std::fclose(f) == 0 && w == len ? hal::Status::Ok : hal::Status::IoError;
+    }
+    hal::Status rename(const char* from, const char* to) override {
+        struct stat st;
+        if (::stat(full(to).c_str(), &st) == 0) return hal::Status::Busy;
+        return std::rename(full(from).c_str(), full(to).c_str()) == 0 ? hal::Status::Ok
+                                                                     : hal::Status::IoError;
+    }
+
+private:
+    std::string full(const char* path) const { return root_ + "/" + path; }
+    std::string root_;
 };
 
 // `wifi`'s part, minus the radio: the hotspot starts, gets a new password,
@@ -467,6 +523,9 @@ int main() {
     deps.blackbox = &blackbox;
     deps.delta = &delta;
     deps.lap_history = &lap_history;
+    static services::TrackMailbox tracks;
+    deps.tracks = &tracks;
+    static DirCard card("sim_card");
 
     // Everything reports healthy except the things that genuinely are not
     // on this board, so the screens show what they will show on the bike.
@@ -657,8 +716,10 @@ int main() {
         host_utc(clock_shift_h, controls);
         bike.step(slots, controls, now, kTickMs);
         fake_ota.step(slots);
-        fake_storage.step(slots, health, system,
-                          dev_mode[static_cast<uint8_t>(core::state::Dev::Sd)] != DevMode::Absent);
+        const bool card_in =
+            dev_mode[static_cast<uint8_t>(core::state::Dev::Sd)] != DevMode::Absent;
+        fake_storage.step(slots, health, system, card_in);
+        if (card_in && !fake_storage.ejected) services::serve_tracks(tracks, card);
         fake_wifi.step(slots, now, bike.speed_mph(), wifi_in_use);
         fake_ble.step(slots, health, now, phone_on);
 
@@ -865,7 +926,7 @@ int main() {
                              ? core::alert::text(app.alert_kind()) : "");
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
-                    "over=%u busy=%d pend=%u slip=%s/%u alert=%s bl=%u\n",
+                    "over=%u busy=%d pend=%u slip=%s/%u alert=%s bl=%u phase=%u track=%d\n",
                     lamp_mask, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
@@ -875,7 +936,8 @@ int main() {
                     wire.total().oversized, bus_busy ? 1 : 0,
                     panel.pending_px(), slip_tok,
                     static_cast<unsigned>(app.slip_bar().pct()), alert_tok,
-                    static_cast<unsigned>(backlight_pct));
+                    static_cast<unsigned>(backlight_pct),
+                    static_cast<unsigned>(lapv.phase), static_cast<int>(lapv.track));
         std::printf("P6\n%d %d\n255\n", ui::kScreenW, ui::kScreenH);
         std::fwrite(rgb.data(), 1, rgb.size(), stdout);
         std::fflush(stdout);

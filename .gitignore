@@ -9,6 +9,7 @@ compile_commands.json
 .cache/
 build-sim/
 dash_log.csv
+sim_card/
 __pycache__/
 
 # Scratch builds and sync debris.

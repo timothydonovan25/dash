@@ -55,6 +55,21 @@ void Tracker::clear() {
     last_match_ft_ = 0.0f;
 }
 
+void Tracker::load_reference(const Point* pts, size_t n) {
+    if (!pts || n < 2) {
+        ref_count_ = 0;
+    } else {
+        if (n > kMaxPoints) n = kMaxPoints;
+        for (size_t i = 0; i < n; ++i) ref_[i] = pts[i];
+        ref_count_ = n;
+    }
+    // Whatever was matched was matched against the old one.
+    match_ = 0;
+    anchored_ = false;
+    valid_ = false;
+    delta_ms_ = 0;
+}
+
 void Tracker::finish_lap(bool is_best) {
     // Only a lap the caller calls best becomes the reference. The lap timer
     // already refuses to let a lap with a GPS gap in it set the best, so a

@@ -1,7 +1,7 @@
 // Every screen in the firmware (§7.1).
 //
 //   Cruise  big speed · media · trip stats · trip map · minimal
-//   Track   lap timer · lap history · track map
+//   Track   race · lap timer · lap history · track map · session
 //   Stat    all data · engine · attitude
 //   Diag    sensors · gps · system · bus and I/O · radio
 //   Config  the generated ConfigItem list
@@ -238,6 +238,52 @@ private:
     ValueBox to_line_;
     DeltaBar delta_;
     Widget*  list_[4] = {};
+};
+
+// The screen for riding a track day: the revs across the whole top, the
+// gear as big as the panel allows, the running lap and the delta, and the
+// last and best laps. Nothing else -- the factory "track" layouts strip the
+// screen to this, and riders say that is the right call. No title bar.
+// E does what it does on LAP: hold to set the line here, tap to re-arm.
+class RaceScreen final : public Screen {
+public:
+    const char* name() const override { return "RACE"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    bool wants_title() const override { return false; }
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+    const char* widget_name(size_t i) const override;
+
+private:
+    RevBar   rev_;
+    Label    gear_;
+    Label    status_;
+    Label    current_;
+    DeltaBar delta_;
+    Label    last_;
+    Label    best_;
+    Widget*  list_[7] = {};
+};
+
+// The ride so far, on one page: the laps (best, ideal, the track's record),
+// how far and how long, how fast, how far over, how high. What a rider wants
+// to read in the paddock, and nothing that needs reading while moving.
+class SessionScreen final : public Screen {
+public:
+    const char* name() const override { return "SESSION"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    WidgetList widgets() override;
+
+private:
+    static constexpr int kTiles = 9;
+    void     show(int i, const char* text, bool valid);
+    Label    track_;
+    Label    value_[kTiles];
+    Widget*  list_[1 + kTiles] = {};
 };
 
 // --- Stat ---------------------------------------------------------------

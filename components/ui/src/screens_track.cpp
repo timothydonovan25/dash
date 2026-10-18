@@ -85,7 +85,25 @@ void LapScreen::update(const Frame& f) {
         case Phase::Armed:  phase = "ARMED";  break;
         case Phase::Timing: phase = "TIMING"; break;
     }
-    phase_.configure(phase, f.lap.phase == Phase::Timing ? color::kGood : color::kWarn,
+    // Which saved track the line is (core::track), and its record: a line
+    // that came back by itself says so, or a rider who set nothing would
+    // wonder where it came from.
+    char status[48];
+    size_t k = 0;
+    for (const char* p = phase; *p && k + 1 < sizeof status; ++p) status[k++] = *p;
+    status[k] = '\0';
+    if (f.lap.track >= 0 && f.lap.phase != Phase::NoLine) {
+        char rec[16];
+        u::fmt_duration(rec, sizeof rec, f.lap.track_best_ms, true);
+        if (f.lap.track_best_ms > 0) {
+            std::snprintf(status + k, sizeof status - k, "   TRACK %d%s   REC %s",
+                          f.lap.track + 1, f.lap.track_recalled ? " (saved)" : "", rec);
+        } else {
+            std::snprintf(status + k, sizeof status - k, "   TRACK %d%s", f.lap.track + 1,
+                          f.lap.track_recalled ? " (saved)" : "");
+        }
+    }
+    phase_.configure(status, f.lap.phase == Phase::Timing ? color::kGood : color::kWarn,
                      1, Align::Left);
 
     char buf[24];
@@ -324,5 +342,258 @@ void TrackMapScreen::update(const Frame& f) {
 }
 
 WidgetList TrackMapScreen::widgets() { return WidgetList{list_, 4}; }
+
+// --- RaceScreen ---------------------------------------------------------
+//
+// Read in a glance down the straight. The bar is read by length and colour,
+// the gear by shape, the delta by colour; only the lap times are read as
+// numbers, and those are the ones a rider looks at between corners.
+namespace {
+constexpr Rect kRaceRev    {  6,   6, 468,  50};
+constexpr Rect kRaceGear   {  6,  66, 156, 248};
+constexpr Rect kRaceLap    {170,  66, 304,  70};
+constexpr Rect kRaceDelta  {170, 144, 304,  72};
+constexpr Rect kRaceLast   {170, 224, 150,  90};
+constexpr Rect kRaceBest   {324, 224, 150,  90};
+// The right-hand end of the bar: a thousand past the flash, on a thousand,
+// so the lamps' whole range is on it and the redline is not the last pixel.
+uint16_t race_full_rpm(const core::config::Settings* st) {
+    const uint32_t flash = st ? st->shift_flash_rpm : 8800;
+    uint32_t full = ((flash + 1000 + 999) / 1000) * 1000;
+    if (full > 16000) full = 16000;
+    return static_cast<uint16_t>(full);
+}
+}  // namespace
+
+void RaceScreen::enter(Canvas&) {
+    rev_.set_bounds(kRaceRev);
+    gear_.set_bounds(Rect{static_cast<int16_t>(kRaceGear.x + 6), static_cast<int16_t>(kRaceGear.y + 20),
+                          static_cast<int16_t>(kRaceGear.w - 12), 156});
+    // Scale 20 is 100x140 a glyph: inside the tile, and the biggest thing
+    // on the panel, because the gear is what a rider checks most.
+    gear_.configure("-", color::kDim, 20, Align::Center);
+    status_.set_bounds(Rect{static_cast<int16_t>(kRaceGear.x + 6),
+                            static_cast<int16_t>(kRaceGear.bottom() - 26),
+                            static_cast<int16_t>(kRaceGear.w - 12), 14});
+    status_.configure("NO LINE", color::kWarn, 1, Align::Center);
+    current_.set_bounds(kRaceLap.inset(6));
+    current_.configure("--:--.--", color::kText, 6, Align::Center);
+    delta_.set_bounds(kRaceDelta);
+    for (Label* l : {&last_, &best_}) {
+        const Rect& t = l == &last_ ? kRaceLast : kRaceBest;
+        // Scale 3: "--:--.--" is 144 px, the tile less its frame.
+        l->set_bounds(Rect{static_cast<int16_t>(t.x + 3), static_cast<int16_t>(t.y + 40),
+                           static_cast<int16_t>(t.w - 6), 22});
+    }
+    last_.configure("--:--.--", color::kText, 3, Align::Center);
+    best_.configure("--:--.--", color::kAccent, 3, Align::Center);
+    list_[0] = &rev_;     list_[1] = &gear_;  list_[2] = &status_;
+    list_[3] = &current_; list_[4] = &delta_; list_[5] = &last_;
+    list_[6] = &best_;
+}
+
+const char* RaceScreen::widget_name(size_t i) const {
+    static const char* const kNames[] = {"rev", "gear", "status", "lap", "delta", "last", "best"};
+    return i < sizeof kNames / sizeof kNames[0] ? kNames[i] : nullptr;
+}
+
+void RaceScreen::update(const Frame& f) {
+    using core::lap::Phase;
+    const core::config::Settings* st = has_ctx() ? ctx().settings : nullptr;
+
+    rev_.set_scale(race_full_rpm(st));
+    rev_.set(f.engine.rpm, f.engine.shift_mask != 0, f.engine.shift_flash,
+             f.engine.rpm > 0.0f || f.engine.neutral);
+
+    // As SPEED has it: neutral is sensed, the gear inferred, and a gear
+    // nobody can vouch for is a dash rather than a stale digit.
+    char g[2] = {'-', '\0'};
+    Color gc = color::kDim;
+    if (f.engine.neutral) {
+        g[0] = 'N';
+        gc = color::kGood;
+    } else if (f.engine.gear > 0 && f.engine.gear <= 9) {
+        g[0] = static_cast<char>('0' + f.engine.gear);
+        gc = color::kText;
+    }
+    gear_.configure(g, gc, 20, Align::Center);
+
+    char buf[24];
+    switch (f.lap.phase) {
+        case Phase::NoLine:
+            status_.configure("NO LINE - HOLD E", color::kWarn, 1, Align::Center);
+            break;
+        case Phase::Armed:
+            status_.configure(f.lap.track_recalled ? "ARMED - SAVED LINE" : "ARMED",
+                              color::kWarn, 1, Align::Center);
+            break;
+        case Phase::Timing:
+            std::snprintf(buf, sizeof buf, "LAP %u", f.lap.count + 1u);
+            status_.configure(buf, color::kGood, 1, Align::Center);
+            break;
+    }
+
+    u::fmt_duration(buf, sizeof buf, f.lap.current_ms, f.lap.phase == Phase::Timing);
+    current_.set_text(buf);
+    delta_.set(f.lap.delta_ms, f.lap.delta_valid);
+
+    // A new best flashes, as on LAP.
+    u::fmt_duration(buf, sizeof buf, f.lap.last_ms, f.lap.count > 0);
+    const uint32_t since = f.t_ms - f.lap.last_done_ms;
+    const bool flash = f.lap.last_was_best && f.lap.last_done_ms != 0 && since < kShowMs;
+    const bool lit = !flash || (since / 250) % 2 == 0;
+    last_.configure(buf, flash ? (lit ? color::kGood : color::kBg) : color::kText, 3,
+                    Align::Center);
+
+    // The session's best once there is one; before that the track's record,
+    // dimmed, so the first lap of the day has a number to chase.
+    if (f.lap.best_ms > 0) {
+        u::fmt_duration(buf, sizeof buf, f.lap.best_ms, true);
+        best_.configure(buf, color::kAccent, 3, Align::Center);
+    } else {
+        u::fmt_duration(buf, sizeof buf, f.lap.track_best_ms, f.lap.track_best_ms > 0);
+        best_.configure(buf, color::kDim, 3, Align::Center);
+    }
+}
+
+bool RaceScreen::handle(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::nav::Press;
+    using core::state::Command;
+    using core::state::CommandId;
+    if (e.button != Button::E) return false;
+    return post(Command(e.press == Press::Long ? CommandId::LapSetLine : CommandId::LapArm));
+}
+
+void RaceScreen::draw_background(Canvas& c) {
+    for (const Rect& r : {kRaceGear, kRaceLap, kRaceLast, kRaceBest}) {
+        c.draw_round_rect(r, chrome::kRadius, theme::rule);
+    }
+    c.draw_text(static_cast<int16_t>(kRaceGear.x + 8), static_cast<int16_t>(kRaceGear.y + 8),
+                "GEAR", theme::secondary, 1, Align::Left);
+    c.draw_text(static_cast<int16_t>(kRaceLast.x + 8), static_cast<int16_t>(kRaceLast.y + 8),
+                "LAST", theme::secondary, 1, Align::Left);
+    c.draw_text(static_cast<int16_t>(kRaceBest.x + 8), static_cast<int16_t>(kRaceBest.y + 8),
+                "BEST", theme::secondary, 1, Align::Left);
+}
+
+WidgetList RaceScreen::widgets() { return WidgetList{list_, 7}; }
+
+// --- SessionScreen ------------------------------------------------------
+namespace {
+constexpr Rect kSessTrack{14, 30, 452, 12};
+// Three rows of three. Each tile's caption is chrome; its value a label.
+constexpr int16_t kSessX[3] = {14, 168, 322};
+constexpr int16_t kSessY[3] = {52, 140, 228};
+constexpr int16_t kSessW = 144;
+constexpr int16_t kSessH = 80;
+constexpr const char* kSessCaption[9] = {
+    "BEST LAP", "IDEAL LAP", "LAPS",
+    "TOP SPEED", "DISTANCE", "RIDING TIME",
+    "LEAN L / R", "BEST AIR", "AVG SPEED",
+};
+Rect sess_tile(int i) { return Rect{kSessX[i % 3], kSessY[i / 3], kSessW, kSessH}; }
+
+// Hours and minutes past an hour, minutes and seconds below it.
+void fmt_ride_time(char* buf, size_t n, uint32_t s) {
+    if (s >= 3600) {
+        std::snprintf(buf, n, "%u:%02u:%02u", static_cast<unsigned>(s / 3600),
+                      static_cast<unsigned>(s / 60 % 60), static_cast<unsigned>(s % 60));
+    } else {
+        std::snprintf(buf, n, "%u:%02u", static_cast<unsigned>(s / 60),
+                      static_cast<unsigned>(s % 60));
+    }
+}
+}  // namespace
+
+void SessionScreen::enter(Canvas&) {
+    track_.set_bounds(kSessTrack);
+    track_.configure("", theme::secondary, 1, Align::Left);
+    list_[0] = &track_;
+    for (int i = 0; i < kTiles; ++i) {
+        const Rect t = sess_tile(i);
+        value_[i].set_bounds(Rect{static_cast<int16_t>(t.x + 4), static_cast<int16_t>(t.y + 34),
+                                  static_cast<int16_t>(t.w - 8), 22});
+        value_[i].configure("--", color::kDim, 3, Align::Center);
+        list_[1 + i] = &value_[i];
+    }
+}
+
+void SessionScreen::show(int i, const char* text, bool valid) {
+    // Scale 3 where it fits, 2 where it does not: "--:--.--" and an hour's
+    // riding are wider than a tile at 3.
+    const int16_t room = value_[i].bounds.w;
+    const uint8_t scale = text_width_px(text, 3) <= room ? 3 : 2;
+    value_[i].configure(text, valid ? color::kText : color::kDim, scale, Align::Center);
+}
+
+void SessionScreen::update(const Frame& f) {
+    char buf[32];
+    char line[64];
+
+    // The saved track, when the line is one.
+    if (f.lap.track >= 0) {
+        char rec[16], ideal[16];
+        u::fmt_duration(rec, sizeof rec, f.lap.track_best_ms, f.lap.track_best_ms > 0);
+        u::fmt_duration(ideal, sizeof ideal, f.lap.track_ideal_ms, f.lap.track_ideal_ms > 0);
+        std::snprintf(line, sizeof line, "TRACK %d   RECORD %s   IDEAL %s", f.lap.track + 1,
+                      rec, ideal);
+    } else {
+        std::snprintf(line, sizeof line, "%s",
+                      f.lap.phase == core::lap::Phase::NoLine ? "NO LINE SET" : "TRACK NOT SAVED");
+    }
+    track_.set_text(line);
+
+    u::fmt_duration(buf, sizeof buf, f.lap.best_ms, f.lap.best_ms > 0);
+    show(0, buf, f.lap.best_ms > 0);
+    u::fmt_duration(buf, sizeof buf, f.lap.ideal_ms, f.lap.ideal_ms > 0);
+    show(1, buf, f.lap.ideal_ms > 0);
+    std::snprintf(buf, sizeof buf, "%u", static_cast<unsigned>(f.lap.count));
+    show(2, buf, f.lap.count > 0);
+
+    const char* unit = "mph";
+    char num[12];
+    u::fmt_float(num, sizeof num, u::speed_for_display(f.session.top_mph, units(), &unit), 0);
+    std::snprintf(buf, sizeof buf, "%s %s", num, unit);
+    show(3, buf, f.session.top_mph > 0.0f);
+
+    const char* dunit = "mi";
+    u::fmt_float(num, sizeof num, u::distance_for_display(f.session.dist_mi, units(), &dunit), 1);
+    std::snprintf(buf, sizeof buf, "%s %s", num, dunit);
+    show(4, buf, f.session.dist_mi > 0.0f);
+
+    fmt_ride_time(buf, sizeof buf, f.session.moving_s);
+    show(5, buf, f.session.moving_s > 0);
+
+    // Deepest each way, above the 10 mph floor (core::lap::Peaks).
+    const bool lean = f.lap.max_lean_left_deg > 0.0f || f.lap.max_lean_right_deg > 0.0f;
+    std::snprintf(buf, sizeof buf, "%d / %d", static_cast<int>(f.lap.max_lean_left_deg + 0.5f),
+                  static_cast<int>(f.lap.max_lean_right_deg + 0.5f));
+    show(6, lean ? buf : "--", lean);
+
+    if (f.session.best_air_ms > 0) {
+        u::fmt_float(num, sizeof num, f.session.best_air_ms / 1000.0f, 2);
+        std::snprintf(buf, sizeof buf, "%ss x%u", num, static_cast<unsigned>(f.session.jumps));
+        show(7, buf, true);
+    } else {
+        show(7, "--", false);
+    }
+
+    unit = "mph";
+    u::fmt_float(num, sizeof num, u::speed_for_display(f.session.avg_mph, units(), &unit), 0);
+    std::snprintf(buf, sizeof buf, "%s %s", num, unit);
+    show(8, buf, f.session.avg_mph > 0.0f);
+}
+
+void SessionScreen::draw_background(Canvas& c) {
+    for (int i = 0; i < kTiles; ++i) {
+        const Rect t = sess_tile(i);
+        c.draw_round_rect(t, chrome::kRadius, theme::rule);
+        c.draw_text(static_cast<int16_t>(t.x + 8), static_cast<int16_t>(t.y + 8), kSessCaption[i],
+                    theme::secondary, 1, Align::Left);
+    }
+}
+
+WidgetList SessionScreen::widgets() { return WidgetList{list_, 1 + kTiles}; }
 
 }  // namespace ui
