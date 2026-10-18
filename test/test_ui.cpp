@@ -187,7 +187,6 @@ Frame busy_frame() {
     f.t_ms = 1234567;
     f.engine.rpm = 7250.0f;
     f.engine.neutral = false;
-    f.engine.coolant_c = 88.0f;
     f.engine.tps_pct = 62.0f;
     f.engine.ecu_online = false;         // NullEngine: what actually ships
     f.motion.gps_mph = 54.0f;

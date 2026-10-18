@@ -156,7 +156,7 @@ void ValueBox::configure(const char* label, const char* unit, int decimals,
 }
 
 void ValueBox::set(float value, bool valid) {
-    // Compare at display resolution. A coolant sensor jittering in the
+    // Compare at display resolution. A battery voltage jittering in the
     // fourth decimal must not repaint the widget 30 times a second.
     float scale = 1.0f;
     for (int i = 0; i < decimals_; ++i) scale *= 10.0f;

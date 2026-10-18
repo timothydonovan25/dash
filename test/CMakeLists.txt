@@ -57,6 +57,7 @@ target_include_directories(core PUBLIC ${CORE}/include)
 set(UI ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui)
 add_library(ui STATIC
     ${UI}/src/font5x7.cpp
+    ${UI}/src/font_aa.cpp
     ${UI}/src/framebuffer_canvas.cpp
     ${UI}/src/icons.cpp
     ${UI}/src/album_art.cpp

@@ -309,13 +309,13 @@ public:
     WidgetList widgets() override;
 
 private:
-    ValueBox  rpm_, coolant_, tps_, volts_;
-    Bar       coolant_bar_, tps_bar_;
+    ValueBox  rpm_, hours_, tps_, volts_;
+    Bar       tps_bar_;
     Sparkline rpm_trace_;
     static constexpr uint32_t kRpmTraceMs = 100;
     uint32_t  rpm_trace_ms_ = 0;
     Label     ecu_;
-    Widget*   list_[8] = {};
+    Widget*   list_[7] = {};
 };
 
 class AttitudeScreen final : public Screen {

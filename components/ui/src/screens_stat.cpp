@@ -47,10 +47,10 @@ void AllDataScreen::update(const Frame& f) {
     row_value(v, sizeof v, u::rpm_for_display(f.engine.rpm), 0, "rpm", f.engine.rpm > 0.0f);
     table_.set_row(1, "RPM", v);
 
-    unit = "C";
-    row_value(v, sizeof v, u::temp_for_display(f.engine.coolant_c, units(), &unit),
-              0, unit, f.engine.ecu_online);
-    table_.set_row(2, "Coolant", v);
+    // Air-cooled: no coolant temperature. Engine hours are what a dirt
+    // bike's maintenance is counted in.
+    row_value(v, sizeof v, f.trip.eng_hours, 1, "h", true);
+    table_.set_row(2, "Eng hours", v);
 
     row_value(v, sizeof v, f.att.lean_deg, 0, "deg", f.health.ok(Dev::Imu));
     table_.set_row(3, "Lean", v);
@@ -90,11 +90,11 @@ WidgetList AllDataScreen::widgets() { return WidgetList{list_, 1}; }
 // --- EngineScreen -------------------------------------------------------
 namespace {
 // rpm and its trace across the top, the three secondary readings below.
+// The bike is air-cooled, so there is no coolant tile: engine hours instead.
 constexpr Rect kEngEcu     { 14,   6, 452,  14};
 constexpr Rect kEngRpm     { 14,  32, 190,  80};
 constexpr Rect kEngTrace   {216,  32, 250,  80};
-constexpr Rect kEngCoolant { 14, 138, 144,  76};
-constexpr Rect kEngCoolBar { 14, 226, 144,  14};
+constexpr Rect kEngHours   { 14, 138, 144,  76};
 constexpr Rect kEngTps     {168, 138, 144,  76};
 constexpr Rect kEngTpsBar  {168, 226, 144,  14};
 constexpr Rect kEngVolts   {322, 138, 144,  76};
@@ -104,17 +104,15 @@ void EngineScreen::enter(Canvas&) {
     ecu_.set_bounds(kEngEcu);
     rpm_.set_bounds(kEngRpm.inset(8));   rpm_.configure("RPM", "", 0, 5);
     rpm_trace_.set_bounds(kEngTrace); rpm_trace_.configure(0.0f, 11000.0f);
-    coolant_.set_bounds(kEngCoolant.inset(7)); coolant_.configure("COOLANT", "C", 0, 3);
-    coolant_bar_.set_bounds(kEngCoolBar);
-    coolant_bar_.configure(color::kAccent, color::kAlarm, 0.85f);
+    hours_.set_bounds(kEngHours.inset(7)); hours_.configure("ENG HOURS", "h", 1, 3);
     tps_.set_bounds(kEngTps.inset(7)); tps_.configure("THROTTLE", "%", 0, 3);
     tps_bar_.set_bounds(kEngTpsBar);
     tps_bar_.configure(color::kGood, color::kGood, 2.0f);
     volts_.set_bounds(kEngVolts.inset(7)); volts_.configure("BATTERY", "V", 1, 3);
 
     list_[0] = &ecu_;     list_[1] = &rpm_;      list_[2] = &rpm_trace_;
-    list_[3] = &coolant_; list_[4] = &coolant_bar_;
-    list_[5] = &tps_;     list_[6] = &tps_bar_;  list_[7] = &volts_;
+    list_[3] = &hours_;
+    list_[4] = &tps_;     list_[5] = &tps_bar_;  list_[6] = &volts_;
 }
 
 void EngineScreen::update(const Frame& f) {
@@ -136,11 +134,7 @@ void EngineScreen::update(const Frame& f) {
         rpm_trace_.push(f.engine.rpm);
     }
 
-    const char* tunit = "C";
-    coolant_.set(u::temp_for_display(f.engine.coolant_c, units(), &tunit),
-                 f.engine.ecu_online);
-    coolant_.set_unit(tunit);
-    coolant_bar_.set(f.engine.coolant_c / 120.0f, f.engine.ecu_online);
+    hours_.set(f.trip.eng_hours, true);
 
     tps_.set(f.engine.tps_pct, f.engine.ecu_online);
     tps_bar_.set(f.engine.tps_pct / 100.0f, f.engine.ecu_online);
@@ -149,12 +143,12 @@ void EngineScreen::update(const Frame& f) {
 }
 
 void EngineScreen::draw_background(Canvas& c) {
-    for (const Rect& r : {kEngRpm, kEngCoolant, kEngTps, kEngVolts}) {
+    for (const Rect& r : {kEngRpm, kEngHours, kEngTps, kEngVolts}) {
         c.draw_round_rect(r, chrome::kRadius, theme::rule);
     }
 }
 
-WidgetList EngineScreen::widgets() { return WidgetList{list_, 8}; }
+WidgetList EngineScreen::widgets() { return WidgetList{list_, 7}; }
 
 // --- AttitudeScreen -----------------------------------------------------
 namespace {

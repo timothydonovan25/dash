@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "src/font5x7.cpp"
+         "src/font_aa.cpp"
          "src/framebuffer_canvas.cpp"
          "src/icons.cpp"
          "src/album_art.cpp"

@@ -18,7 +18,7 @@ namespace core::state {
 struct Engine {
     float rpm        = 0.0f;
     bool  neutral    = false;   // reads LOW on the wire; the driver inverts
-    float coolant_c  = 0.0f;
+    // No coolant temperature: the CRF250F is air-cooled.
     float tps_pct    = 0.0f;
     bool  ecu_online = false;   // false until the CAN adapter exists
 

@@ -80,7 +80,6 @@ Frame riding_frame(uint32_t t_ms) {
     Frame f;
     f.t_ms = t_ms;
     f.engine.rpm = 7250.0f;
-    f.engine.coolant_c = 88.0f;
     f.engine.tps_pct = 62.0f;
     f.engine.gear = 4;
     f.engine.shift_mask = 0x07;

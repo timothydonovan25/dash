@@ -207,7 +207,6 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     e.gear = c.gear;
     e.rpm = rpm_;
     e.neutral = c.neutral;
-    e.coolant_c = c.coolant_c;
     e.tps_pct = c.tps_pct;
     e.ecu_online = c.ecu_online;
     slots.engine.publish(e);

@@ -261,7 +261,6 @@ void ctrl_task(void* arg) {
         if (e.ecu_online) {
             hal::EngineData ed;
             if (d.engine->read(ed)) {
-                e.coolant_c = ed.coolant_c;
                 e.tps_pct = ed.tps_pct;
             }
         }

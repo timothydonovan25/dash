@@ -390,6 +390,14 @@ for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each
 invent their own idea of what a labelled box looks like.
+**Large text is anti-aliased** (1.31): at scales 3–6 (all of ASCII) and
+8, 10, 20, 22 (digits, `+-.:%`, N C F R), `FrameBufferCanvas::draw_text`
+blends 4-bit glyphs of Noto Sans Condensed Bold (`ui/font_aa.hpp`; OFL, in
+`tools/fonts/`) into the 5x7 bitmap's own cell, ink inside its 5x7 box, so
+widths, layouts and per-character damage are unchanged; anything else is
+still the bitmap. `font_aa.cpp` is generated (`python3 tools/gen_font.py`,
+Pillow): a new large scale, or a character it lacks, goes in its `SCALES`.
+About 350 kB of flash, no RAM.
 **`ui::App` keeps one screen alive at a time** (1.17): it is built into one
 slot sized for the largest (`ui::AllScreens`) when entered and destroyed
 when left, so the App is ~1.9 kB on render's stack, not 13 kB, and a new

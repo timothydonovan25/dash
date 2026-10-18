@@ -9,7 +9,7 @@
 // protocol is deliberately plain text plus a PPM, which means you can also
 // drive it from a shell script and pipe the frames into ffmpeg.
 //
-//   in   set <name> <value>      speed, rpm, lean, pitch, tps, coolant,
+//   in   set <name> <value>      speed, rpm, lean, pitch, tps,
 //                                vbat, sats, neutral, ecu, fix, auto,
 //                                fslip, rslip (percent against road),
 //                                deadf, deadr (that wheel sensor reads 0),
@@ -441,7 +441,6 @@ void apply_set(sim::Controls& c, const std::string& name, float v) {
     else if (name == "lean")    c.lean_deg = v;
     else if (name == "pitch")   c.pitch_deg = v;
     else if (name == "tps")     c.tps_pct = v;
-    else if (name == "coolant") c.coolant_c = v;
     else if (name == "vbat")    c.vbat = v;
     else if (name == "fslip")   c.front_slip_pct = v;
     else if (name == "rslip")   c.rear_slip_pct = v;

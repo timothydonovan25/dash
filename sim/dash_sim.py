@@ -137,7 +137,6 @@ SLIDERS = [
     ("lean",    "Lean  deg  (+ corner)", -55, 55, 1,   0),
     ("pitch",   "Pitch  deg",   -30,   30,    1,    0),
     ("tps",     "Throttle  %",    0,  100,    1,    0),
-    ("coolant", "Coolant  C",     0,  130,    1,   82),
     # To 17: over 16 is the overcharging alert (a dead regulator).
     ("vbat",    "Battery  V",     0,   17,  0.1, 12.6),
     # Each wheel against road speed: + spinning, -100 locked (slip bar).

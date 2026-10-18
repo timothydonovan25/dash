@@ -11,6 +11,9 @@
 
 namespace ui {
 
+struct AaFont;
+struct AaGlyph;
+
 class FrameBufferCanvas final : public Canvas {
 public:
     // Does not own the buffer. `stride` is in pixels, and defaults to `w`.
@@ -69,8 +72,17 @@ public:
 
     Color pixel(int16_t x, int16_t y) const;
 
+    // Smoothed glyphs for the large scales (ui/font_aa.hpp); on unless a
+    // caller wants the bitmap everywhere, to compare.
+    void set_antialias(bool on) { antialias_ = on; }
+
 private:
     void put(int16_t x, int16_t y, Color c);
+    // One smoothed glyph, its cell's corner at (cx, cy), blended over the
+    // buffer inside `vis` (the window, clipped).
+    void draw_aa_glyph(const AaFont& font, const AaGlyph& g, int16_t cx,
+                       int16_t cy, Color c, const Rect& vis);
+    bool    antialias_ = true;
 
     Color*  px_;
     int16_t w_;

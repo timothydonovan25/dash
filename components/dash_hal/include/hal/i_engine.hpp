@@ -18,7 +18,6 @@ namespace hal {
 
 struct EngineData {
     float rpm       = 0.0f;
-    float coolant_c = 0.0f;
     float tps_pct   = 0.0f;
     float batt_v    = 0.0f;
     bool  mil       = false;    // check-engine lamp

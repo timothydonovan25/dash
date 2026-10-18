@@ -1,4 +1,5 @@
 #include "ui/framebuffer_canvas.hpp"
+#include "ui/font_aa.hpp"
 #include <cmath>
 
 namespace ui {
@@ -6,7 +7,40 @@ namespace {
 inline int16_t clamp16(int v, int lo, int hi) {
     return static_cast<int16_t>(v < lo ? lo : (v > hi ? hi : v));
 }
+
+// `fg` over `bg` at coverage a/15, a channel at a time in RGB565. Straight
+// in 565, not linear light: at these sizes the difference is a shade of one
+// edge pixel, and it costs nothing to leave out.
+inline Color blend565(Color fg, Color bg, uint32_t a) {
+    const uint32_t na = 15 - a;
+    const uint32_t r = (((fg >> 11) & 0x1F) * a + ((bg >> 11) & 0x1F) * na + 7) / 15;
+    const uint32_t g = (((fg >> 5) & 0x3F) * a + ((bg >> 5) & 0x3F) * na + 7) / 15;
+    const uint32_t b = ((fg & 0x1F) * a + (bg & 0x1F) * na + 7) / 15;
+    return static_cast<Color>((r << 11) | (g << 5) | b);
+}
 }  // namespace
+
+void FrameBufferCanvas::draw_aa_glyph(const AaFont& font, const AaGlyph& g, int16_t cx,
+                                      int16_t cy, Color c, const Rect& vis) {
+    if (g.w == 0 || g.h == 0) return;
+    const Rect ink{static_cast<int16_t>(cx + g.x), static_cast<int16_t>(cy + g.y),
+                   g.w, g.h};
+    const Rect r = ink.clipped_to(vis);
+    if (r.empty()) return;
+    const int16_t row_bytes = static_cast<int16_t>((g.w + 1) / 2);
+    const uint8_t* data = font.data + g.offset;
+    for (int16_t y = r.y; y < r.bottom(); ++y) {
+        const uint8_t* row = data + (y - ink.y) * row_bytes;
+        Color* out = px_ + (y - oy_) * stride_ - ox_;
+        for (int16_t x = r.x; x < r.right(); ++x) {
+            const int16_t i = static_cast<int16_t>(x - ink.x);
+            const uint8_t b = row[i >> 1];
+            const uint32_t a = (i & 1) ? (b & 0x0F) : (b >> 4);
+            if (a == 0) continue;
+            out[x] = a == 15 ? c : blend565(c, out[x], a);
+        }
+    }
+}
 
 void FrameBufferCanvas::put(int16_t x, int16_t y, Color c) {
     if (clipped_ && !clip_.contains(x, y)) return;
@@ -303,9 +337,16 @@ void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
     const int16_t gh = static_cast<int16_t>(f.height * scale);
     if (!vis.intersects(Rect{pen, y, static_cast<int16_t>(w > 0 ? w : 1), gh})) return;
 
+    // The large sizes have smoothed glyphs in the same cells (ui/font_aa.hpp).
+    // A character that set leaves out is drawn from the bitmap.
+    const AaFont* aa = antialias_ ? aa_font(scale) : nullptr;
+
     for (const char* ch = text; *ch; ++ch) {
         const uint8_t code = static_cast<uint8_t>(*ch);
-        if (code >= f.first && code <= f.last &&
+        const AaGlyph* ag = aa ? aa->find(code) : nullptr;
+        if (ag) {
+            if (vis.intersects(Rect{pen, y, gw, gh})) draw_aa_glyph(*aa, *ag, pen, y, c, vis);
+        } else if (code >= f.first && code <= f.last &&
             vis.intersects(Rect{pen, y, gw, gh})) {
             const uint8_t* glyph = f.glyphs + (code - f.first) * f.width;
             for (uint8_t col = 0; col < f.width; ++col) {

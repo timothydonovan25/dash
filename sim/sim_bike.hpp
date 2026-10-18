@@ -19,7 +19,6 @@ struct Controls {
     float lean_deg   = 0.0f;
     float pitch_deg  = 0.0f;
     float tps_pct    = 0.0f;
-    float coolant_c  = 82.0f;
     float vbat       = 12.6f;
     // Each wheel against road speed, percent: +30 is spinning 30% fast,
     // -100 is locked. GPS keeps telling the truth, as it would.

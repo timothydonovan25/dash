@@ -219,7 +219,7 @@ stress test caught in the first draft of this document:
 
 ```cpp
 // core/state/vehicle.hpp
-struct Engine   { float rpm; bool neutral; float coolant_c;
+struct Engine   { float rpm; bool neutral;
                   float tps_pct; bool ecu_online; };
 struct Motion   { float gps_mph, front_mph, rear_mph, best_mph;
                   float accel_g; };

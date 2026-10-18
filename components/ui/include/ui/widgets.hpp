@@ -88,7 +88,7 @@ private:
     Color      color_ = color::kText;
 };
 
-// A horizontal bar, 0..1. Coolant, fuel, throttle.
+// A horizontal bar, 0..1. Fuel, throttle.
 class Bar : public Widget {
 public:
     void configure(Color fill, Color warn_fill, float warn_above = 2.0f);
