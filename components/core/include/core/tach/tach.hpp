@@ -132,12 +132,7 @@ private:
     bool     started_ = false;
 };
 
-// Which of the three speeds to believe. GPS is accurate but late and dies
-// under trees; the wheels are instant but wrong when they are spinning or
-// locked. Front wheel first — a driven rear wheel lies about speed under
-// power, and this is a dirt bike.
-float best_speed_mph(float front_mph, bool front_ok,
-                     float rear_mph,  bool rear_ok,
-                     float gps_mph,   bool gps_ok);
+// Which speed to show is core::fusion::shown_speed_mph: it needs the fused
+// filter's verdict on each wheel, which this file knows nothing about.
 
 }  // namespace core::tach

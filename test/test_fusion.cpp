@@ -15,7 +15,7 @@ using replay::Kind;
 namespace {
 
 struct Result {
-    replay::Error raw, fused;
+    replay::Error raw, shown, fused;
     uint8_t suspect_seen = 0;
     uint8_t rejected_seen = 0;
     uint16_t resets = 0;
@@ -26,9 +26,11 @@ Result ride(Kind k, uint32_t seed) {
     Result r;
     SpeedFilter f;
     replay::RawBest best;
+    replay::ShownBest shown;
     replay::run(k, seed, [&](const replay::Sample& s) {
         const SpeedOutput o = f.step(s.in);
         r.raw.add(best(s.in) - s.truth_mph);
+        r.shown.add(shown(s.in, o) - s.truth_mph);
         r.fused.add((o.valid ? o.mph : 0.0f) - s.truth_mph);
         r.suspect_seen |= o.suspect;
         r.rejected_seen |= o.rejected;
@@ -36,6 +38,17 @@ Result ride(Kind k, uint32_t seed) {
         if (s.truth_mph > 1.0f && !o.valid) r.always_valid_moving = false;
     });
     return r;
+}
+
+// The speed the dash shows (core::fusion::shown_speed_mph): worst RMS and
+// worst max over seeds 1..8.
+void worst_shown(Kind k, double& rms, double& max) {
+    rms = max = 0.0;
+    for (uint32_t seed = 1; seed <= 8; ++seed) {
+        const Result r = ride(k, seed);
+        if (r.shown.rms() > rms) rms = r.shown.rms();
+        if (r.shown.max > max) max = r.shown.max;
+    }
 }
 
 // Worst RMS and worst max over seeds 1..8.
@@ -231,7 +244,7 @@ int main() {
     worst(Kind::FrontLock, rms, max);
     CHECK(rms < 0.3);
     CHECK(max < 2.0);
-    CHECK(ride(Kind::FrontLock, 1).raw.max > 30.0);   // what the dash does today
+    CHECK(ride(Kind::FrontLock, 1).raw.max > 30.0);   // the front, believed (pre-1.36)
 
     CASE("GPS dropout: the wheels carry it, valid throughout");
     worst(Kind::GpsDropout, rms, max);
@@ -264,6 +277,59 @@ int main() {
     worst(Kind::SpinNoFront, rms, max);
     CHECK(rms < 2.5);
     CHECK(max < 12.0);
+
+    // The front up for 3 s on the second run: it spins down to about half
+    // its speed, and the accelerometer reads gravity as 0.5 g of drive.
+    CASE("wheelie: the fused speed holds through it");
+    worst(Kind::Wheelie, rms, max);
+    CHECK(rms < 0.8);
+    CHECK(max < 3.0);
+    CHECK(ride(Kind::Wheelie, 1).raw.max > 15.0);     // the front, believed (pre-1.36)
+
+    // --- the speed the dash shows (shown_speed_mph) ----------------------
+    CASE("shown speed: the front wheel first, as before, on a clean ride");
+    for (Kind k : {Kind::Ride, Kind::Wheelspin, Kind::GpsDropout, Kind::NoGps,
+                   Kind::GpsGlitch, Kind::Parked}) {
+        const Result r = ride(k, 3);
+        CHECK_NEAR(r.shown.rms(), r.raw.rms(), 1e-9);
+        CHECK_NEAR(r.shown.max, r.raw.max, 1e-9);
+    }
+
+    CASE("shown speed: a locked front, a wheelie, a dead sensor are not shown");
+    worst_shown(Kind::FrontLock, rms, max);
+    CHECK(rms < 0.4);
+    CHECK(max < 2.5);                     // no tick of 0 mph as it locks
+    worst_shown(Kind::Wheelie, rms, max);
+    CHECK(rms < 0.8);
+    CHECK(max < 3.0);
+    worst_shown(Kind::DeadFront, rms, max);
+    CHECK(rms < 0.5);
+    CHECK(max < 6.0);                     // the launch, before GPS referees
+
+    CASE("shown speed: the order, and when the filter may overrule a wheel");
+    {
+        // Front, then fused, then rear, then GPS.
+        CHECK_NEAR(shown_speed_mph(30, true, 31, true, 29, true, 30.5f, true, 0), 30.0, 1e-6);
+        CHECK_NEAR(shown_speed_mph(0, false, 31, true, 29, true, 30.5f, true, 0), 30.5, 1e-6);
+        CHECK_NEAR(shown_speed_mph(0, false, 31, true, 29, true, 0, false, 0), 31.0, 1e-6);
+        CHECK_NEAR(shown_speed_mph(0, false, 0, false, 29, true, 0, false, 0), 29.0, 1e-6);
+        CHECK_NEAR(shown_speed_mph(0, false, 0, false, 0, false, 0, false, 0), 0.0, 1e-6);
+        // A front the filter rejected last pass: the fused figure.
+        CHECK_NEAR(shown_speed_mph(28, true, 31, true, 30, true, 30.0f, true, kSrcFront),
+                   30.0, 1e-6);
+        // A front that is plainly wrong now, before the filter has said so.
+        CHECK_NEAR(shown_speed_mph(0, true, 45, true, 45, true, 44.5f, true, 0), 44.5, 1e-6);
+        // Inside the allowance (4 mph, or a quarter above 16 mph) it stands.
+        CHECK_NEAR(shown_speed_mph(10, true, 13, true, 13, true, 13.5f, true, 0), 10.0, 1e-6);
+        CHECK_NEAR(shown_speed_mph(36, true, 45, true, 45, true, 44.5f, true, 0), 36.0, 1e-6);
+        // With no valid fused speed, nothing overrules a wheel.
+        CHECK_NEAR(shown_speed_mph(0, true, 45, true, 45, true, 44.5f, false, kSrcFront),
+                   0.0, 1e-6);
+        // The rear is only reached with no fused speed, so it is never
+        // overruled: the old order, rear before GPS.
+        CHECK_NEAR(shown_speed_mph(0, false, 60, true, 45, true, 45.0f, false, kSrcRear),
+                   60.0, 1e-6);
+    }
 
     // --- dead wheel sensors -------------------------------------------
     const auto verdicts = [](Kind k, Wheel& front, Wheel& rear, bool& front_ever_dead,

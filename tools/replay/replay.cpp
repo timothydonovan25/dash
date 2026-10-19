@@ -43,25 +43,29 @@ struct Writer {
     }
 };
 
-void print_stats(const char* name, const replay::Error& raw, const replay::Error& fused,
-                 uint16_t resets) {
-    std::printf("%-12s raw rms %5.2f max %5.2f   fused rms %5.2f max %5.2f   resets %u\n",
-                name, raw.rms(), raw.max, fused.rms(), fused.max, resets);
+void print_stats(const char* name, const replay::Error& raw, const replay::Error& shown,
+                 const replay::Error& fused, uint16_t resets) {
+    std::printf("%-12s raw rms %5.2f max %5.2f   shown rms %5.2f max %5.2f   "
+                "fused rms %5.2f max %5.2f   resets %u\n",
+                name, raw.rms(), raw.max, shown.rms(), shown.max, fused.rms(), fused.max,
+                resets);
 }
 
 int run_scenario(replay::Kind k, uint32_t seed, const SpeedConfig& cfg, Writer& w) {
     SpeedFilter filt;
     replay::RawBest best;
-    replay::Error raw_e, fused_e;
+    replay::ShownBest shown;
+    replay::Error raw_e, shown_e, fused_e;
     SpeedOutput o;
     replay::run(k, seed, [&](const replay::Sample& s) {
         o = filt.step(s.in, cfg);
         const float raw = best(s.in);
         raw_e.add(raw - s.truth_mph);
+        shown_e.add(shown(s.in, o) - s.truth_mph);
         fused_e.add((o.valid ? o.mph : 0.0f) - s.truth_mph);
         w.row(s.in, s.truth_mph, raw, o);
     });
-    print_stats(replay::kind_name(k), raw_e, fused_e, o.resets);
+    print_stats(replay::kind_name(k), raw_e, shown_e, fused_e, o.resets);
     return 0;
 }
 

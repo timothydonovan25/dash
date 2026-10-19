@@ -37,7 +37,7 @@ struct Sample {
 };
 
 enum class Kind { Ride, Wheelspin, FrontLock, GpsDropout, DeadFront, Parked, NoGps,
-                  SpinNoFront, GpsGlitch, Count };
+                  SpinNoFront, GpsGlitch, Wheelie, Count };
 
 inline const char* kind_name(Kind k) {
     switch (k) {
@@ -50,6 +50,7 @@ inline const char* kind_name(Kind k) {
         case Kind::NoGps:      return "nogps";
         case Kind::SpinNoFront:return "spinnofront";
         case Kind::GpsGlitch:  return "gpsglitch";
+        case Kind::Wheelie:    return "wheelie";
         default:               return "?";
     }
 }
@@ -103,6 +104,11 @@ void run(Kind k, uint32_t seed, Fn fn) {
         in.accel_ok = true;
         in.accel_g = dv / core::fusion::kMphPerSecPerG + bias_g +
                      (0.08f + v * 0.003f) * rng.gauss();
+        // A wheelie on the second run, 23-26 s: the front up at 30 degrees,
+        // so gravity lands on the forward accelerometer as sin 30 = 0.5 g of
+        // acceleration that is not happening.
+        const bool up = k == Kind::Wheelie && t >= 23.0f && t < 26.0f;
+        if (up) in.accel_g += 0.5f;
 
         // Wheels: pulse timing jitter, and nothing below a walking pace,
         // which is what a few pulses per revolution can resolve.
@@ -121,6 +127,13 @@ void run(Kind k, uint32_t seed, Fn fn) {
             in.front_mph = 0.0f;                         // locked solid
         }
         if (k == Kind::DeadFront || k == Kind::SpinNoFront) in.front_mph = 0.0f;  // unplugged
+        // In the air the front spins down on its bearings and brake drag:
+        // a guess, a time constant of 4 s, so ~half its speed by landing.
+        // The driven rear keeps turning, a little fast.
+        if (up) {
+            in.front_mph *= std::exp(-(t - 23.0f) / 4.0f);
+            in.rear_mph *= 1.04f;
+        }
 
         // GPS: 10 Hz, 100 ms late, noisier at higher HDOP.
         const bool fix_tick = t_ms % 100 == 0;
@@ -142,15 +155,32 @@ void run(Kind k, uint32_t seed, Fn fn) {
     }
 }
 
-// What the dash shows today: core::tach::best_speed_mph, the front wheel
-// whenever its sensor reads at all, holding the last GPS figure between
-// fixes for when it falls through to GPS.
+// What the dash showed until 1.36: the front wheel whenever its sensor reads
+// at all, then the rear, holding the last GPS figure between fixes for when
+// it falls through to GPS. Kept as the yardstick: shown_speed_mph with no
+// fused figure is exactly this.
 struct RawBest {
     float last_gps = 0.0f;
     float operator()(const core::fusion::SpeedInput& in) {
         if (in.gps_new) last_gps = in.gps_mph;
-        return core::tach::best_speed_mph(in.front_mph, in.front_ok, in.rear_mph,
-                                          in.rear_ok, last_gps, in.gps_ok);
+        return core::fusion::shown_speed_mph(in.front_mph, in.front_ok, in.rear_mph,
+                                             in.rear_ok, last_gps, in.gps_ok,
+                                             0.0f, false, 0);
+    }
+};
+
+// What the dash shows now: core::fusion::shown_speed_mph with the filter's
+// last output, as `ctrl` has it (published by `logic` the tick before).
+struct ShownBest {
+    float last_gps = 0.0f;
+    core::fusion::SpeedOutput prev;
+    float operator()(const core::fusion::SpeedInput& in, const core::fusion::SpeedOutput& o) {
+        if (in.gps_new) last_gps = in.gps_mph;
+        const float v = core::fusion::shown_speed_mph(
+            in.front_mph, in.front_ok, in.rear_mph, in.rear_ok, last_gps, in.gps_ok,
+            prev.mph, prev.valid, prev.rejected);
+        prev = o;
+        return v;
     }
 };
 

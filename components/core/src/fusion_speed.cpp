@@ -197,4 +197,27 @@ void WheelCheck::update(const SpeedInput& in, const SpeedOutput& out,
     judge(r_, in.rear_ok, in.rear_mph, kSrcRear, out, in.t_ms, cfg);
 }
 
+float shown_speed_mph(float front_mph, bool front_ok, float rear_mph, bool rear_ok,
+                      float gps_mph, bool gps_ok,
+                      float fused_mph, bool fused_valid, uint8_t fused_rejected) {
+    // The verdict is a pass old (`logic` publishes it at 50 Hz), so a wheel
+    // that has just locked was still accepted then, and read 0 for up to
+    // 20 ms. So a wheel this far from the fused speed is not believed either,
+    // whatever the last pass said: the same allowance the filter's GPS
+    // referee gives a wheel, 4 mph or a quarter.
+    const auto believed = [&](float w, bool ok, uint8_t bit) {
+        if (!ok) return false;
+        if (!fused_valid) return true;
+        if (fused_rejected & bit) return false;
+        const float allow = fused_mph * 0.25f > 4.0f ? fused_mph * 0.25f : 4.0f;
+        return std::fabs(w - fused_mph) <= allow;
+    };
+    if (believed(front_mph, front_ok, kSrcFront)) return front_mph;
+    if (fused_valid) return fused_mph;
+    // No fused speed past here, so nothing to judge the rear by.
+    if (rear_ok) return rear_mph;
+    if (gps_ok) return gps_mph;
+    return 0.0f;
+}
+
 }  // namespace core::fusion

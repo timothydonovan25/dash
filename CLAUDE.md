@@ -389,6 +389,9 @@ the media half of step 9 is written. 48 host tests, all passing.
   `docs/fusion.md`; `tools/replay` runs it over a log or a synthetic ride.
   `WheelCheck` faults a wheel sensor that reads 0 for 5 s at speed, into
   the health table as FrontWheel / RearWheel, and `ctrl` skips it.
+  `shown_speed_mph` (1.36) is `Motion::best_mph`: the front wheel unless the
+  filter rejected it or it is far from the fused speed (a wheelie, a locked
+  front, a dying sensor), then the fused speed, then rear, then GPS.
   DIAG → FUSION (1.28) shows the fused speed and its sigma, each source's
   reading and residual and whether it was used, gated or is suspect, the
   accel bias and the wheel verdicts

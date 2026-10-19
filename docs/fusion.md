@@ -51,6 +51,21 @@ in use (`F R G`, lower case = suspect). CONFIG → Display → Speedo picks
 what the big number shows: Wheels (the default) or Fused. **Leave it on
 Wheels until the filter has been tuned on real rides.**
 
+"Wheels" is not blind to the filter any more (1.36). `ctrl` picks
+`Motion::best_mph` -- the speedo, the odometer, the gear and its calibration,
+the blackbox -- with `core::fusion::shown_speed_mph`: the front wheel, unless
+the filter rejected it on its last pass or it is more than 4 mph (or a
+quarter) from the fused speed, and then the fused speed; with no valid fused
+speed, the rear, then GPS, as before. On a clean ride that is the front
+wheel every tick. What it changes is a wheelie (the front spinning down in
+the air read as the bike slowing, by half in 3 s), a locked front (0 mph)
+and a sensor that has just died (0 mph for the 5 s before WheelCheck calls
+it). `replay --scenario all` prints it as "shown". The cost of an untuned
+filter is that it can overrule a front that was right; GPS still corrects
+the fused speed, so what is shown then is a GPS-grounded figure, not
+nonsense. If a real log shows good fronts being thrown out, that is the
+filter to tune, not this.
+
 ### Dead wheel sensors
 
 `core::fusion::WheelCheck` judges each wheel from the filter:
@@ -68,8 +83,9 @@ plausible speed, so a connector that comes back clears itself.
 
 `logic` reports the verdicts as `FrontWheel` and `RearWheel` in the health
 table, so they show on DIAG → Sensors and on the cruise fault line. `ctrl`
-skips a faulted wheel when it picks the speedo's source (front, then rear,
-then GPS), so a dead front no longer means 0 mph for the rest of the ride.
+skips a faulted wheel when it picks the speedo's source (above), so a dead
+front no longer means 0 mph for the rest of the ride -- nor, now, for the 5 s
+before it is called dead, while the filter is already rejecting it.
 
 **It only ever knows while moving.** On the board as drawn (netlist
 2026-10-07), each Hall input is CNx pin 2 with a 10 kΩ pull-up to 3.3 V

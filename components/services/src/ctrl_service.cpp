@@ -12,6 +12,7 @@
 #include "core/shift/shift.hpp"
 #include "core/gear/gear.hpp"
 #include "core/tach/tach.hpp"
+#include "core/fusion/speed.hpp"
 #include "core/power/power.hpp"
 #include "core/sweep/sweep.hpp"
 #include "bsp/pins.hpp"
@@ -274,14 +275,20 @@ void ctrl_task(void* arg) {
         }
         const core::state::Gnss g = d.slots->gnss.get();
 
+        // The speed every screen, the odometer and the gear go by: the front
+        // wheel unless the fused filter (`logic`, its last pass) has thrown
+        // it out -- a wheelie, a locked front, a sensor that has just died --
+        // and then the fused speed (core::fusion::shown_speed_mph).
+        const core::state::Fused fu = d.slots->fused.get();
         core::state::Motion m;
         m.front_mph = front.mph();
         m.rear_mph = rear.mph();
         m.gps_mph = g.speed_mph;
-        m.best_mph = core::tach::best_speed_mph(
+        m.best_mph = core::fusion::shown_speed_mph(
             m.front_mph, hal::ok(s) && front_live,
             m.rear_mph, hal::ok(s) && rear_live,
-            m.gps_mph, g.fix);
+            m.gps_mph, g.fix,
+            fu.speed_mph, fu.speed_valid, fu.rejected);
 
         core::state::Engine e;
         e.shift_mask = prev_mask;   // what the rpm lights; the held lamp apart

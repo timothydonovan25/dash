@@ -147,13 +147,4 @@ void WheelMeter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
     out_ = bound < mph_ ? bound : mph_;
 }
 
-float best_speed_mph(float front_mph, bool front_ok,
-                     float rear_mph,  bool rear_ok,
-                     float gps_mph,   bool gps_ok) {
-    if (front_ok) return front_mph;
-    if (rear_ok)  return rear_mph;
-    if (gps_ok)   return gps_mph;
-    return 0.0f;
-}
-
 }  // namespace core::tach

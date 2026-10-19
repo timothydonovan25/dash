@@ -332,15 +332,5 @@ int main() {
         CHECK(hi < 20.2f);
     }
 
-    CASE("the front wheel is believed first, then the rear, then GPS");
-    {
-        // A driven rear wheel lies about speed under power, and this is a
-        // dirt bike, so the front sensor wins whenever it is healthy.
-        CHECK_NEAR(best_speed_mph(30.0f, true, 44.0f, true, 31.0f, true), 30.0, 1e-6);
-        CHECK_NEAR(best_speed_mph(0.0f, false, 44.0f, true, 31.0f, true), 44.0, 1e-6);
-        CHECK_NEAR(best_speed_mph(0.0f, false, 0.0f, false, 31.0f, true), 31.0, 1e-6);
-        CHECK_NEAR(best_speed_mph(0.0f, false, 0.0f, false, 0.0f, false), 0.0, 1e-6);
-    }
-
     return check::report("tach");
 }

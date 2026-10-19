@@ -169,4 +169,25 @@ private:
     One f_, r_;
 };
 
+// The speed the dash shows, Motion::best_mph: the speedo, the odometer, the
+// gear and its calibration, the blackbox. `ctrl` picks it every 2 ms.
+//
+// The front wheel first, as before: it is instant, it does not spin under
+// power, and the gear table is calibrated against it. But not a wheel the
+// filter has just rejected (`fused_rejected`, Source bits, as last
+// published): in a wheelie the front spins down in the air, locked under
+// braking it reads 0, and a sensor that has died reads 0 for the 5 s before
+// WheelCheck calls it -- and each of those was the speedo, the odometer and
+// the gear. Then the fused speed, which is right in all three and close to
+// the front whenever the front is accepted, so the hand-over does not jump.
+// Then the rear, then GPS, for when there is no fused figure.
+//
+// Nor a wheel more than 4 mph or a quarter from the fused speed, because the
+// verdict is a pass old and a wheel can lock in less. Both only while the
+// fused speed is valid: a filter that does not know the speed has no
+// business overruling a wheel.
+float shown_speed_mph(float front_mph, bool front_ok, float rear_mph, bool rear_ok,
+                      float gps_mph, bool gps_ok,
+                      float fused_mph, bool fused_valid, uint8_t fused_rejected);
+
 }  // namespace core::fusion
