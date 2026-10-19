@@ -1,10 +1,11 @@
 // The real handlebar pod (MCP23017) on the demo board's CN3 I2C connector.
 //
-// Not drivers::ButtonPod: that one is written against the legacy
-// driver/i2c.h API on the real board's I2C0, and the touch controller here
-// already owns this bus through the new i2c_master driver. The two APIs
-// cannot share a controller (IDF aborts at boot if both are linked in), so
-// this is the same three register writes and one read over i2c_master. The
+// Not drivers::ButtonPod: that one recovers a wedged bus by deleting I2C0
+// through bsp and clocking its pins by hand, and here the bus is the touch
+// controller's too. (It was also written against the legacy driver/i2c.h
+// API, which could not share a controller with i2c_master; both are
+// i2c_master now, so that reason is gone.) This is the same three register
+// writes and one read, with no recovery of its own. The
 // pin-to-button mapping is core::input::pod_pins_to_buttons(), the same
 // one the bike uses, so a button means the same thing on both.
 //

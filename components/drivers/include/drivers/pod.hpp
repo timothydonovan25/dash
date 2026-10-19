@@ -15,6 +15,10 @@ namespace drivers {
 
 class ButtonPod final : public hal::IButtonPod {
 public:
+    // The I2C0 bus from bsp (BusStatus::i2c0, an i2c_master_bus_handle_t).
+    // Call before init(); recover_bus() replaces it with the new one.
+    void attach(void* bus) { bus_ = bus; }
+
     hal::Status init() override;
     hal::Status read_buttons(uint8_t& pressed_mask) override;
 
@@ -40,7 +44,8 @@ private:
     hal::Status write_reg(uint8_t reg, uint8_t value);
     hal::Status read_reg(uint8_t reg, uint8_t& value);
 
-    bool     installed_ = false;
+    void*    bus_ = nullptr;      // i2c_master_bus_handle_t
+    void*    dev_ = nullptr;      // i2c_master_dev_handle_t
     uint16_t recoveries_ = 0;
     uint16_t stuck_ = 0;
     uint8_t  last_clocks_ = 0;

@@ -2,8 +2,7 @@
 #include "bsp/pins.hpp"
 #include "core/shift/shift.hpp"
 
-#include "driver/i2c.h"
-#include "freertos/FreeRTOS.h"
+#include "driver/i2c_master.h"
 
 namespace drivers {
 
@@ -18,10 +17,9 @@ static_assert(bsp::kLedBacklight0 + bsp::kLedBacklightCount <= 16 &&
 
 namespace {
 
-constexpr i2c_port_t kPort = I2C_NUM_1;
 // A transfer here is ~0.2 ms at 1 MHz, and `ctrl` makes it inside a 2 ms
 // tick: a wedged bus must cost a tick, not five of them.
-constexpr TickType_t kTimeout = pdMS_TO_TICKS(2);
+constexpr int kTimeoutMs = 2;
 
 // Register map, datasheet Rev. 2.3 Table 7.
 constexpr uint8_t kMode1   = 0x00;
@@ -44,14 +42,17 @@ uint8_t duty_of(uint8_t percent) {
 }  // namespace
 
 hal::Status Pca9955b::write(uint8_t reg, const uint8_t* data, size_t n) {
+    if (!dev_) return hal::Status::NotPresent;
     // The largest run written is sixteen registers plus the address byte.
     uint8_t buf[1 + 16];
     if (n > 16) return hal::Status::Unsupported;
     buf[0] = static_cast<uint8_t>(kAutoInc | reg);
     for (size_t i = 0; i < n; ++i) buf[1 + i] = data[i];
-    const esp_err_t err =
-        i2c_master_write_to_device(kPort, bsp::kLedAddr, buf, n + 1, kTimeout);
+    const esp_err_t err = i2c_master_transmit(
+        static_cast<i2c_master_dev_handle_t>(dev_), buf, n + 1, kTimeoutMs);
     if (err == ESP_OK) return hal::Status::Ok;
+    // ESP_ERR_INVALID_RESPONSE is a NACK or the hardware's own SCL timeout;
+    // either way the part did not take the write.
     return err == ESP_ERR_TIMEOUT ? hal::Status::Timeout : hal::Status::IoError;
 }
 
@@ -83,6 +84,19 @@ hal::Status Pca9955b::refresh_config() {
 }
 
 hal::Status Pca9955b::init() {
+    if (!dev_) {
+        if (!bus_) return hal::Status::NotPresent;
+        i2c_device_config_t cfg = {};
+        cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        cfg.device_address = bsp::kLedAddr;
+        cfg.scl_speed_hz = bsp::kLedI2cHz;
+        i2c_master_dev_handle_t dev = nullptr;
+        if (i2c_master_bus_add_device(static_cast<i2c_master_bus_handle_t>(bus_),
+                                      &cfg, &dev) != ESP_OK) {
+            return hal::Status::IoError;
+        }
+        dev_ = dev;
+    }
     // Dark first, then configured: if the configuration write fails half
     // way, nothing is left lit at a duty nobody chose.
     const uint8_t zero[16] = {};

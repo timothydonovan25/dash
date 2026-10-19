@@ -78,13 +78,16 @@ services::Deps& build() {
     // 1. Buses and safe pin levels, before any driver exists.
     const bsp::BusStatus buses = bsp::board_init();
     ESP_LOGI(kTag, "buses: spi2=%d i2c0=%d i2c1=%d uart1=%d lcd=%d",
-             buses.spi2, buses.i2c0, buses.i2c1, buses.uart1,
+             buses.spi2, buses.i2c0 != nullptr, buses.i2c1 != nullptr, buses.uart1,
              buses.lcd_bus != nullptr);
 
     // The panel needs the 8080 bus handle, which only exists once the bus
     // is up. A function-local static is still built exactly once and never
     // freed, like everything else in this file.
     static drivers::Ili9488 panel{buses.lcd_bus, &g_leds};
+    // Likewise the I2C devices: each driver adds itself to its bus at init().
+    g_leds.attach(buses.i2c1);
+    g_pod.attach(buses.i2c0);
 
     // 2. Storage first, because the settings decide how everything else is
     //    set up.

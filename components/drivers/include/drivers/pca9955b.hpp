@@ -22,7 +22,7 @@
 //    The one exception is `power` at the moment VIN is cut: it calls
 //    `blank_lamps` and `set_backlight(0)` directly, because the hold-up is
 //    too short to wait for a tick. Neither touches `mask_` or `lamp_pwm_`,
-//    and the I2C driver's own lock keeps the two transfers apart.
+//    and the i2c_master driver's bus lock keeps the two transfers apart.
 #pragma once
 #include "hal/i_shift_lamps.hpp"
 
@@ -30,7 +30,12 @@ namespace drivers {
 
 class Pca9955b final : public hal::IShiftLamps {
 public:
-    // Full configuration, every output at zero duty.
+    // The I2C1 bus from bsp (BusStatus::i2c1, an i2c_master_bus_handle_t).
+    // Call before init(); without one every call says NotPresent.
+    void attach(void* bus) { bus_ = bus; }
+
+    // Full configuration, every output at zero duty. Adds the device to the
+    // bus the first time.
     hal::Status init() override;
     hal::Status set_mask(uint8_t mask) override;
     hal::Status set_master(uint8_t percent) override;
@@ -48,6 +53,8 @@ public:
 private:
     hal::Status write(uint8_t reg, const uint8_t* data, size_t n);
 
+    void*   bus_ = nullptr;   // i2c_master_bus_handle_t
+    void*   dev_ = nullptr;   // i2c_master_dev_handle_t
     uint8_t mask_ = 0;
     uint8_t lamp_pwm_ = 0;
 };

@@ -2,10 +2,11 @@
 #include "bsp/pins.hpp"
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "driver/uart.h"
 #include "esp_lcd_io_i80.h"
+#include "esp_log.h"
 
 namespace bsp {
 namespace {
@@ -29,20 +30,40 @@ bool init_spi2() {
     return ok_or_already(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
 }
 
-bool init_i2c(i2c_port_t port, int sda, int scl, int hz) {
-    i2c_config_t cfg = {};
-    cfg.mode = I2C_MODE_MASTER;
+// The bus handles. bsp owns the buses, so it is the one place that remembers
+// them: that is what keeps init idempotent (the i2c_master driver refuses a
+// second bus on a port instead of saying "already up") and lets the pod's
+// recovery take I2C0 down and back without anyone else holding a stale
+// handle. Nothing outside this file writes them.
+i2c_master_bus_handle_t s_i2c[2] = {nullptr, nullptr};
+
+void* init_i2c(i2c_port_num_t port, int sda, int scl) {
+    if (s_i2c[port]) return s_i2c[port];
+
+    // The driver logs every NACK and timeout from inside the transfer. The
+    // LED driver's writes are made from `ctrl`, at 18 on core 0, which must
+    // never log (a line to the console is milliseconds of UART), and a dead
+    // part is retried every 50 ms. Both drivers return the failure, and the
+    // health table is where it shows.
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
+
+    i2c_master_bus_config_t cfg = {};
+    cfg.i2c_port = port;
     cfg.sda_io_num = static_cast<gpio_num_t>(sda);
     cfg.scl_io_num = static_cast<gpio_num_t>(scl);
+    cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+    cfg.glitch_ignore_cnt = 7;
+    // Synchronous: each transfer returns when it is on the wire or failed.
+    cfg.trans_queue_depth = 0;
     // The external resistors do the work. The internal pull-ups are around
     // 45k and barely register; they are left on as insurance against an
     // unpopulated resistor, which is a real bring-up failure.
-    cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    cfg.master.clk_speed = hz;
+    cfg.flags.enable_internal_pullup = 1;
 
-    if (i2c_param_config(port, &cfg) != ESP_OK) return false;
-    return ok_or_already(i2c_driver_install(port, I2C_MODE_MASTER, 0, 0, 0));
+    i2c_master_bus_handle_t bus = nullptr;
+    if (i2c_new_master_bus(&cfg, &bus) != ESP_OK) return nullptr;
+    s_i2c[port] = bus;
+    return bus;
 }
 
 bool init_uart1() {
@@ -88,14 +109,18 @@ void* init_lcd_bus() {
 BusStatus init_buses() {
     BusStatus s;
     s.spi2 = init_spi2();
-    s.i2c0 = init_i2c(I2C_NUM_0, kI2cSda, kI2cScl, kI2cHz);
-    s.i2c1 = init_i2c(I2C_NUM_1, kLedSda, kLedScl, kLedI2cHz);
+    s.i2c0 = init_i2c(0, kI2cSda, kI2cScl);
+    s.i2c1 = init_i2c(1, kLedSda, kLedScl);
     s.uart1 = init_uart1();
     return s;
 }
 
-bool init_pod_bus() {
-    return init_i2c(I2C_NUM_0, kI2cSda, kI2cScl, kI2cHz);
+void* init_pod_bus() {
+    return init_i2c(0, kI2cSda, kI2cScl);
+}
+
+void release_pod_bus() {
+    if (s_i2c[0] && i2c_del_master_bus(s_i2c[0]) == ESP_OK) s_i2c[0] = nullptr;
 }
 
 BusStatus board_init() {

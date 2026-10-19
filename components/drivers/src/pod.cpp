@@ -4,13 +4,12 @@
 #include "bsp/buses.hpp"
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_rom_sys.h"
 
 namespace drivers {
 namespace {
 
-constexpr i2c_port_t kPort = I2C_NUM_0;
 constexpr uint8_t kIodirA = 0x00, kGppuA = 0x0C, kGpioA = 0x12, kIpolA = 0x02;
 
 // Short, on purpose. A pod that has fallen off its connector must not stall
@@ -26,7 +25,9 @@ hal::Status from_esp(int err) {
     switch (err) {
         case ESP_OK: return hal::Status::Ok;
         case ESP_ERR_TIMEOUT: return hal::Status::Timeout;
-        case ESP_FAIL: return hal::Status::NotPresent;   // NACK: nobody home
+        // A NACK (nobody home), or the hardware's SCL timeout; the
+        // i2c_master driver does not tell the two apart.
+        case ESP_ERR_INVALID_RESPONSE: return hal::Status::NotPresent;
         case ESP_ERR_INVALID_STATE: return hal::Status::Busy;
         default: return hal::Status::IoError;
     }
@@ -35,22 +36,34 @@ hal::Status from_esp(int err) {
 }  // namespace
 
 hal::Status ButtonPod::write_reg(uint8_t reg, uint8_t value) {
+    if (!dev_) return hal::Status::NotPresent;
     const uint8_t buf[2] = {reg, value};
-    return from_esp(i2c_master_write_to_device(kPort, bsp::kPodAddr, buf,
-                                               sizeof buf,
-                                               pdMS_TO_TICKS(kTimeoutMs)));
+    return from_esp(i2c_master_transmit(static_cast<i2c_master_dev_handle_t>(dev_),
+                                        buf, sizeof buf, kTimeoutMs));
 }
 
 hal::Status ButtonPod::read_reg(uint8_t reg, uint8_t& value) {
-    return from_esp(i2c_master_write_read_device(kPort, bsp::kPodAddr, &reg, 1,
-                                                 &value, 1,
-                                                 pdMS_TO_TICKS(kTimeoutMs)));
+    if (!dev_) return hal::Status::NotPresent;
+    return from_esp(i2c_master_transmit_receive(
+        static_cast<i2c_master_dev_handle_t>(dev_), &reg, 1, &value, 1, kTimeoutMs));
 }
 
 hal::Status ButtonPod::init() {
-    // The bus itself belongs to bsp (100 kHz, pull-ups, pins). This driver
-    // only ever talks to a device on it.
-    installed_ = true;
+    // The bus itself belongs to bsp (pull-ups, pins). This driver only ever
+    // adds a device to it, at the pod's 100 kHz.
+    if (!dev_) {
+        if (!bus_) return hal::Status::NotPresent;
+        i2c_device_config_t cfg = {};
+        cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        cfg.device_address = bsp::kPodAddr;
+        cfg.scl_speed_hz = bsp::kI2cHz;
+        i2c_master_dev_handle_t dev = nullptr;
+        if (i2c_master_bus_add_device(static_cast<i2c_master_bus_handle_t>(bus_),
+                                      &cfg, &dev) != ESP_OK) {
+            return hal::Status::IoError;
+        }
+        dev_ = dev;
+    }
     return refresh_config();
 }
 
@@ -85,10 +98,12 @@ hal::Status ButtonPod::recover_bus() {
     // Tearing the driver down and putting it back does not fix it: the
     // peripheral does not drive SCL while idle, so the slave never gets the
     // edges it is waiting for. The bus has to be clocked by hand.
-    if (installed_) {
-        i2c_driver_delete(kPort);
-        installed_ = false;
+    if (dev_) {
+        i2c_master_bus_rm_device(static_cast<i2c_master_dev_handle_t>(dev_));
+        dev_ = nullptr;
     }
+    bsp::release_pod_bus();
+    bus_ = nullptr;
 
     const gpio_num_t sda = static_cast<gpio_num_t>(bsp::kI2cSda);
     const gpio_num_t scl = static_cast<gpio_num_t>(bsp::kI2cScl);
@@ -129,8 +144,9 @@ hal::Status ButtonPod::recover_bus() {
     if (recoveries_ != UINT16_MAX) ++recoveries_;
     if (!freed && stuck_ != UINT16_MAX) ++stuck_;
 
-    // Hand the pins back to the peripheral.
-    if (!bsp::init_pod_bus()) return hal::Status::IoError;
+    // Hand the pins back to the peripheral: a new bus, and the device on it.
+    bus_ = bsp::init_pod_bus();
+    if (!bus_) return hal::Status::IoError;
     const hal::Status s = init();
 
     // A bus still held low is a failure even when the re-init went fine.

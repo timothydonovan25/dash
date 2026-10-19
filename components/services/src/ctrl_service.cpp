@@ -66,6 +66,12 @@ void ctrl_task(void* arg) {
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
 
+    // The wheel rows of the health table, as of its generation `health_gen`.
+    // One past the slot's own, so the first tick reads it.
+    uint32_t health_gen = d.slots->health.generation() - 1;
+    bool front_live = true;
+    bool rear_live = true;
+
     // Woken by the tach ISR on every edge past its refractory window.
     drivers::EngineSense::notify_on_tach(xTaskGetCurrentTaskHandle());
 
@@ -257,10 +263,15 @@ void ctrl_task(void* arg) {
 
         // A wheel sensor `logic` has found dead (read 0 at speed) is skipped,
         // so the speedo falls through to the other wheel, then GPS, instead
-        // of showing 0 mph for the rest of the ride.
-        const core::state::Health hl = d.slots->health.get();
-        const bool front_live = hl[core::state::Dev::FrontWheel].state != core::state::DevState::Fault;
-        const bool rear_live = hl[core::state::Dev::RearWheel].state != core::state::DevState::Fault;
+        // of showing 0 mph for the rest of the ride. The table is re-read
+        // only when `keeper` has published a new one (it publishes on
+        // change), not copied whole every 2 ms for two of its rows.
+        if (const uint32_t gen = d.slots->health.generation(); gen != health_gen) {
+            health_gen = gen;
+            const core::state::Health hl = d.slots->health.get();
+            front_live = hl[core::state::Dev::FrontWheel].state != core::state::DevState::Fault;
+            rear_live = hl[core::state::Dev::RearWheel].state != core::state::DevState::Fault;
+        }
         const core::state::Gnss g = d.slots->gnss.get();
 
         core::state::Motion m;
