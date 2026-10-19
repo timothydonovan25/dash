@@ -13,6 +13,11 @@
 //    window decays but never arrives, and the dash reads 400 rpm on a bike
 //    that has been switched off for a minute. There is an explicit stall
 //    timeout for that.
+//  - **A count is only spent with a time.** Pulses that arrive with an edge
+//    time no later than the last one (a torn read, a timestamp that went
+//    wrong) are left in the counter, not consumed: the next good edge then
+//    measures all of them over the whole interval. Consumed, they vanished,
+//    and that next reading was one pulse over two intervals, half the rpm.
 //  - **The counter wraps.** A uint32 of pulses at 6000 rpm wraps in about
 //    eight days of running, and every difference below is an unsigned
 //    subtraction so that it does not matter.

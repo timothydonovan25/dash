@@ -37,12 +37,12 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
     }
 
     const uint32_t dp = total - last_total_;         // unsigned: wrap-safe
-    last_total_ = total;
 
     if (dp > 0 && edge_us > last_edge_us_) {
         // The interval that matters is between the edge that ended the last
         // measurement and the edge that ended this one — not between polls.
         const uint64_t dt = edge_us - last_edge_us_;
+        last_total_ = total;
         last_edge_us_ = edge_us;
         raw_rpm_ = rpm_from_pulses(dp, static_cast<uint32_t>(dt), c.pulses_per_rev) *
                    static_cast<float>(c.revs_per_pulse ? c.revs_per_pulse : 1);
@@ -122,10 +122,10 @@ void WheelMeter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
     }
 
     const uint32_t dp = total - last_total_;
-    last_total_ = total;
 
     if (dp > 0 && edge_us > last_edge_us_) {
         const uint64_t dt = edge_us - last_edge_us_;
+        last_total_ = total;
         last_edge_us_ = edge_us;
         const float raw = mph_from_pulses(dp, static_cast<uint32_t>(dt), c);
         // First-order low-pass with time constant tau over an interval dt:

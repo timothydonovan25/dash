@@ -72,8 +72,10 @@ void read_channel(const Channel& ch, uint32_t& count, uint32_t& edge_lo) {
 }
 
 // Rebuild a 64-bit timestamp from the 32-bit one the ISR stored. The low
-// word wraps every 71 minutes; `now` is never more than a few milliseconds
-// ahead of the edge, so the high word is either the current one or one less.
+// word wraps every 71 minutes. The edge is never after `now` (read() takes
+// the clock last), so the high word is either the current one or one less;
+// an edge older than 71 minutes widens wrongly, but a pulse that old is
+// only ever compared once a new one has come in.
 uint64_t widen(uint32_t lo, uint64_t now_us) {
     const uint64_t hi = now_us & 0xFFFFFFFF00000000ull;
     uint64_t v = hi | lo;
@@ -138,15 +140,21 @@ hal::Status EngineSense::init() {
 }
 
 hal::Status EngineSense::read(Counts& out) {
+    // The channels first, the clock after. An edge's timestamp is stored
+    // before its count, so read in this order every timestamp is at or
+    // before `now`, which is what widen() assumes. With the clock read
+    // first, an edge landing in between (the ISR runs on this core and can
+    // fall between any two loads) had a low word just past now's and was
+    // widened 71 minutes into the past: its pulse was counted with no
+    // usable time, and the next reading came out at half the rpm.
+    uint32_t tach_lo = 0, front_lo = 0, rear_lo = 0;
+    read_channel(g_tach, out.tach_pulses, tach_lo);
+    read_channel(g_front, out.front_pulses, front_lo);
+    read_channel(g_rear, out.rear_pulses, rear_lo);
     const uint64_t now = static_cast<uint64_t>(esp_timer_get_time());
-
-    uint32_t lo = 0;
-    read_channel(g_tach, out.tach_pulses, lo);
-    out.tach_edge_us = widen(lo, now);
-    read_channel(g_front, out.front_pulses, lo);
-    out.front_edge_us = widen(lo, now);
-    read_channel(g_rear, out.rear_pulses, lo);
-    out.rear_edge_us = widen(lo, now);
+    out.tach_edge_us = widen(tach_lo, now);
+    out.front_edge_us = widen(front_lo, now);
+    out.rear_edge_us = widen(rear_lo, now);
     out.t_us = now;
 
     // Neutral is a plain GPIO on this board. It reads LOW in neutral —

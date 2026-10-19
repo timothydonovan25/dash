@@ -180,6 +180,53 @@ int main() {
         CHECK(r.rpm_per_s() <= RateEstimator::kMaxRpmPerS);
     }
 
+    CASE("pulses with no usable edge time wait for one, not vanish");
+    {
+        // 6000 rpm: an edge every 10 ms. One read comes back with its count
+        // advanced but a timestamp that is no newer -- the driver's torn read
+        // -- and the next good read must still say 6000, not 3000.
+        Meter m;
+        Config c;
+        c.smoothing = 1.0f;
+        uint32_t total = 0;
+        uint64_t edge = 1000000;
+        m.update(total, edge, edge, c);
+        for (int i = 0; i < 5; ++i) {
+            ++total;
+            edge += 10000;
+            m.update(total, edge, edge + 500, c);
+        }
+        CHECK_NEAR(m.raw_rpm(), 6000.0f, 1.0f);
+        ++total;                                  // a pulse at edge + 10 ms...
+        m.update(total, edge - 3000, edge + 10500, c);   // ...stamped in the past
+        CHECK_NEAR(m.raw_rpm(), 6000.0f, 1.0f);   // held, not a new reading
+        ++total;
+        edge += 20000;
+        m.update(total, edge, edge + 500, c);     // two pulses over two periods
+        CHECK_NEAR(m.raw_rpm(), 6000.0f, 1.0f);
+    }
+    {
+        WheelMeter w;
+        WheelConfig c;
+        uint32_t total = 0;
+        uint64_t edge = 1000000;
+        w.update(total, edge, edge, c);
+        // 6 magnets, 2130 mm: 20 ms between pulses is ~39.7 mph.
+        const float want = mph_from_pulses(1, 20000, c);
+        for (int i = 0; i < 40; ++i) {
+            ++total;
+            edge += 20000;
+            w.update(total, edge, edge + 500, c);
+        }
+        CHECK_NEAR(w.mph(), want, 0.1f);
+        ++total;
+        w.update(total, 0, edge + 20500, c);      // count moved, time did not
+        ++total;
+        edge += 40000;
+        w.update(total, edge, edge + 500, c);
+        CHECK_NEAR(w.mph(), want, 0.1f);
+    }
+
     CASE("wheel speed from circumference and magnet count");
     {
         WheelConfig w;

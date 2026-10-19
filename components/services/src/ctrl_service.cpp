@@ -125,6 +125,12 @@ void ctrl_task(void* arg) {
         }
         const uint8_t m = core::shift::pattern(lamp_rpm, sc, prev_mask);
         prev_mask = m;   // the hysteresis is the pattern's alone
+        // Dark while the supply is failing. `power` blanked the lamps
+        // directly, but the duty this task holds is still the bright one
+        // until its tick sends master 0, so an edge wake in between (a dip
+        // with the engine running) relit them on the rail holding the board
+        // up. The mask going to 0 here covers both paths.
+        if (d.power_fail.load(std::memory_order_relaxed)) return 0;
         return flasher.apply(static_cast<uint8_t>(m | hold_bits),
                              core::shift::over_limit(lamp_rpm, sc), now, sc);
     };
