@@ -411,5 +411,72 @@ int main() {
         delete trace;
     }
 
+    CASE("Set line is refused at a standstill, and says so; moving, it is set");
+    {
+        // The line faces the GPS course, which means nothing stopped: a
+        // rider who turned round at the line would get one no lap crosses.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        deps.slots = &slots;
+        deps.settings = &settings;
+
+        core::state::Gnss g;
+        g.fix = true;
+        g.hdop = 1.0f;
+        g.lat = kLat0;
+        g.lon = kLon0;
+        g.course_deg = 270.0f;
+        g.speed_mph = 1.5f;                          // parked, Doppler near 0
+        g.rx_ms = 1000;
+        slots.gnss.publish(g);
+        OneCommand stopped(core::state::CommandId::LapSetLine);
+        services::logic_tick(deps, state, stopped, 1000);
+        CHECK(!state.lap.has_line());
+        CHECK(slots.lap.get().line_refused_seq == 1);
+
+        g.speed_mph = 25.0f;
+        g.rx_ms = 1100;
+        slots.gnss.publish(g);
+        OneCommand moving(core::state::CommandId::LapSetLine);
+        services::logic_tick(deps, state, moving, 1100);
+        CHECK(state.lap.has_line());
+        CHECK(slots.lap.get().line_refused_seq == 1);  // not refused again
+    }
+
+    CASE("Calibrate level is handed to imu, and its answer applied like any edit");
+    {
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        deps.slots = &slots;
+        deps.settings = &settings;
+
+        const uint32_t gen = slots.imu_request.generation();
+        OneCommand cal(core::state::CommandId::ImuCalibrate);
+        services::logic_tick(deps, state, cal, 1000);
+        CHECK(slots.imu_request.generation() != gen);
+        CHECK(slots.imu_request.get().op == core::state::ImuRequest::CalibrateLevel);
+
+        // imu's answer: unrounded, and past the old ±45° pitch range.
+        class Two final : public services::ICommandSource {
+        public:
+            bool take(core::state::Command& out) override {
+                if (n_ == 0) out = core::state::Command::config_set(core::config::kKeyImuRollOffset, 3.27f);
+                else if (n_ == 1) out = core::state::Command::config_set(core::config::kKeyImuPitchOffset, 52.4f);
+                else return false;
+                ++n_;
+                return true;
+            }
+        private:
+            int n_ = 0;
+        } answer;
+        services::logic_tick(deps, state, answer, 1020);
+        CHECK_NEAR(settings.imu_roll_offset_deg, 3.27, 1e-5);
+        CHECK_NEAR(settings.imu_pitch_offset_deg, 52.4, 1e-5);
+    }
+
     return check::report("logic_lap");
 }

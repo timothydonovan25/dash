@@ -53,6 +53,8 @@ struct LogicState {
     // The last fix handed to the lap timer (Gnss::rx_ms), and whether it has
     // already been told the receiver went quiet.
     uint32_t last_lap_rx_ms = 0;
+    // Set line presses refused for want of speed (Lap::line_refused_seq).
+    uint16_t line_refused_seq = 0;
     bool     lap_told_stale = false;
     // When each fix was taken, on the system clock, from its own GPS time
     // (core::fixtime) rather than from when it arrived; and the last one.

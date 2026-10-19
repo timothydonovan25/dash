@@ -59,7 +59,8 @@ struct Settings {
     // been tuned on real rides.
     uint8_t speedo_source  = 0;
 
-    // Wheels — the front sensor counts spokes, the rear counts sprocket bolts
+    // Wheels — pulses per rev is the number of magnets on that wheel; the
+    // A1120 unipolar Halls see only south poles, never bare steel
     uint16_t front_circumference_mm = 2130;
     uint16_t rear_circumference_mm  = 2050;
     uint8_t  front_pulses_per_rev   = 6;
@@ -169,8 +170,19 @@ float clamp(const ConfigItem& it, float v);
 float get(const Settings& s, const ConfigItem& it);
 bool  set(Settings& s, const ConfigItem& it, float v);   // true if it changed
 
-// One step of the C/D buttons on the config screen.
+// One step of the C/D buttons on the config screen, from `current`: the
+// value it would become, clamped, without writing anything. The screen
+// posts it as a ConfigSet and `logic` applies it, so Settings has one
+// writer at run time.
+float nudged(const ConfigItem& it, float current, int direction);
+
+// The same, applied: set(s, it, nudged(it, get(s, it), direction)).
 bool nudge(Settings& s, const ConfigItem& it, int direction);
+
+// Keys something other than the config screen posts a ConfigSet for: the
+// IMU's calibration writes the mount offset through logic like any edit.
+inline constexpr uint16_t kKeyImuRollOffset  = 0x0601;
+inline constexpr uint16_t kKeyImuPitchOffset = 0x0602;
 
 // The value as the config screen draws it: "80 %", "Metric", "On".
 size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n);

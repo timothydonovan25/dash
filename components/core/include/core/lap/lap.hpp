@@ -50,6 +50,16 @@ struct Config {
     uint32_t max_fix_gap_ms = 1500;
 };
 
+// Whether a fix may set the finish line. The line's direction is the GPS
+// course at that moment, and `crosses_line` only counts crossings that way,
+// so a course read at a standstill -- held from before the bike turned
+// round, or noise -- can make a line no lap will ever cross. The bar is the
+// same speed a crossing needs: a line cannot be set slower than it can be
+// crossed. `gps_mph` is Doppler, which reads near zero parked.
+inline bool may_set_line(bool fix, float gps_mph, const Config& c) {
+    return fix && gps_mph >= c.min_speed_mph;
+}
+
 struct Fix {
     geo::LatLon pos{};
     float       speed_mph = 0.0f;

@@ -17,7 +17,6 @@ void gnss_task(void* arg) {
 
     core::nmea::Parser parser;
     core::state::Gnss  fix;
-    uint32_t last_fix_ms = 0;
 
     // The receiver is brought up here, not in wiring::build(): agreeing a
     // baud rate takes half a second of waiting, and nothing else in the boot
@@ -60,7 +59,6 @@ void gnss_task(void* arg) {
                 // The lap timer, the traces and NAV act on a fix the moment
                 // it lands, not up to 20 ms later at logic's next tick.
                 wake_logic(d);
-                last_fix_ms = now;
                 d.health->report_ok(core::state::Dev::Gnss, now);
             }
             if (d.system) {
@@ -73,9 +71,13 @@ void gnss_task(void* arg) {
         }
 
         // A receiver that has stopped sending is not the same as one with no
-        // fix, and only the first is a fault. `report_ok` above is what keeps
-        // the health tracker's staleness timer fed.
-        (void)last_fix_ms;
+        // fix, and only the first is a fault: `report_ok` above is what keeps
+        // the health tracker's staleness timer fed. Either way its last
+        // position is not a fix any more, for every reader of the slot.
+        if (core::nmea::age_fix(fix, now)) {
+            d.slots->gnss.publish(fix);
+            wake_logic(d);
+        }
 
         // 5 ms, not 20: the poll is how late a fix is stamped, and the lap
         // timer interpolates line crossings from that stamp. Reading an

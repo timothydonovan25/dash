@@ -31,6 +31,7 @@ constexpr uint32_t kStuntToastMs = 3500;
 constexpr uint32_t kNotifyToastMs = 8000;
 // A text message waits longer, for E: a minute, or until it is cleared.
 constexpr uint32_t kMessageToastMs = 60000;
+constexpr uint32_t kLineToastMs = 3000;
 // Riding, for whether a message's text shows (Settings::notify_text_moving).
 constexpr float kMovingMph = 3.0f;
 // Top-right corner: small, but on every screen.
@@ -392,6 +393,7 @@ void App::update_toast(const core::state::Frame& f) {
         seen_perf_ = f.perf.seq;
         seen_stunt_ = f.stunt.seq;
         seen_notify_ = f.notify.seq;
+        seen_line_refused_ = f.lap.line_refused_seq;
     }
 
     char big[40], small[64], a[16], b[16];
@@ -462,6 +464,16 @@ void App::update_toast(const core::state::Frame& f) {
                                 now + kStuntToastMs);
             }
         }
+    }
+
+    // A Set line that `logic` refused: the answer to a press, so it shows
+    // whatever Popups says.
+    if (f.lap.line_refused_seq != seen_line_refused_) {
+        seen_line_refused_ = f.lap.line_refused_seq;
+        const float need_mph = cfg ? core::config::lap_view(*cfg).min_speed_mph : 10.0f;
+        core::units::fmt_float(a, sizeof a, metric ? need_mph * 1.609344f : need_mph, 0);
+        std::snprintf(small, sizeof small, "ride over %s %s, then hold E", a, dunit);
+        game_event_.set("LINE NOT SET", small, color::kWarn, now + kLineToastMs);
     }
 
     const core::state::Notify& n = f.notify;

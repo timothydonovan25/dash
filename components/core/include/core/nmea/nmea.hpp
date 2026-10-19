@@ -64,4 +64,23 @@ private:
 // decimal number puts you a few hundred miles away.
 double degrees_from_ddmm(const char* s, char hemi);
 
+// A receiver that stops sending -- unplugged, browned out, a dead UART --
+// leaves its last sentence's `fix` set, and the slot would go on offering
+// that position and speed forever: the speedo's GPS fallback froze on it,
+// and a finish line or waypoint set then landed where the bike had been.
+// So a fix with no new one for this long is no fix. Long enough for a
+// receiver still at its 1 Hz power-on rate (the 10 Hz command not taken).
+// `logic`'s lap timer keeps its own, shorter, silence check.
+inline constexpr uint32_t kFixMaxAgeMs = 2500;
+
+// Clears `fix` if the last fix (`rx_ms`) is older than kFixMaxAgeMs.
+// True if it did, which is a change to publish.
+inline bool age_fix(state::Gnss& g, uint32_t now_ms) {
+    if (!g.fix || static_cast<int32_t>(now_ms - g.rx_ms) <= static_cast<int32_t>(kFixMaxAgeMs)) {
+        return false;
+    }
+    g.fix = false;
+    return true;
+}
+
 }  // namespace core::nmea

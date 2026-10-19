@@ -286,6 +286,7 @@ struct Fixture {
     SystemInfo             sys;
     Context                ctx;
     App                    app;
+    size_t                 applied = 0;     // posted commands apply_posted() has seen
 
     Fixture() : ctx{&settings, &sink, &sys}, app(ctx) {
         sys.heap_free_b = 184320;
@@ -300,6 +301,18 @@ struct Fixture {
         app.bind_settings(&settings);
     }
 };
+
+// What `logic` does with the config screen's edits: apply each ConfigSet,
+// in order. The screen itself never writes Settings.
+void apply_posted(Fixture& fx) {
+    for (; fx.applied < fx.sink.posted.size(); ++fx.applied) {
+        const core::state::Command& c = fx.sink.posted[fx.applied];
+        if (c.id != core::state::CommandId::ConfigSet) continue;
+        if (const core::config::ConfigItem* it = core::config::find(c.cfg.key)) {
+            core::config::set(fx.settings, *it, c.cfg.val);
+        }
+    }
+}
 
 // Walk to a given mode and screen with real button presses, the way a rider
 // would, rather than reaching into nav state.
@@ -1143,7 +1156,7 @@ int main() {
         CHECK(lyric_ink);
     }
 
-    CASE("the config screen edits settings and reports every change upward");
+    CASE("the config screen posts every edit upward, and never writes Settings");
     {
         Fixture fx;
         Screen320x480 s;
@@ -1155,10 +1168,14 @@ int main() {
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open
         const uint8_t before = fx.settings.brightness_pct;
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
-        // C is up and D is down, on the value as much as on the list.
+        // C is up and D is down, on the value as much as on the list. The
+        // edit is logic's to make: until it does, Settings is untouched.
         fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        CHECK(fx.settings.brightness_pct == before);
+        apply_posted(fx);
         CHECK(fx.settings.brightness_pct == before + 5);
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        apply_posted(fx);
         CHECK(fx.settings.brightness_pct == before);
         fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
         CHECK(!fx.sink.posted.empty());
@@ -1184,6 +1201,56 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() != not_editing);
+    }
+
+    CASE("two presses before logic applies the first are two steps, not one");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // Display
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
+        const uint8_t before = fx.settings.brightness_pct;
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);   // logic not yet run
+        CHECK(fx.sink.posted.size() >= 2);
+        CHECK_NEAR(fx.sink.posted.back().cfg.val, before - 10.0, 1e-4);
+        apply_posted(fx);
+        CHECK(fx.settings.brightness_pct == before - 10);
+        // And once applied, the next press steps on from what Settings says.
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        apply_posted(fx);
+        CHECK(fx.settings.brightness_pct == before - 5);
+    }
+
+    CASE("a refused Set line toasts why, and only once");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        auto strip = [&] {
+            size_t n = 0;
+            s.wipe();
+            fx.app.render(s.canvas, true);
+            for (int16_t y = 270; y < 316; ++y)
+                for (int16_t x = 20; x < 460; ++x)
+                    if (s.canvas.pixel(x, y) != color::kBg) ++n;
+            return n;
+        };
+        auto f = busy_frame();
+        f.t_ms += 5000;
+        fx.app.update(f);
+        const size_t plain = strip();
+        f.t_ms += 20;
+        f.lap.line_refused_seq = 1;
+        fx.app.update(f);
+        CHECK(strip() != plain);
+        // Gone after its 3 s, and the same count does not bring it back.
+        f.t_ms += 3500;
+        fx.app.update(f);
+        CHECK(strip() == plain);
     }
 
     CASE("CONFIG's SD card submenu posts Eject");
@@ -1226,6 +1293,7 @@ int main() {
         // Toggling the sweep off goes up as a ConfigSet for its key.
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
         fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        apply_posted(fx);
         CHECK(!fx.settings.gauge_sweep);
         CHECK(fx.sink.posted.back().cfg.key == 0x0B01);
 

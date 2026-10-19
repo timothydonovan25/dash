@@ -37,6 +37,7 @@ struct Slots {
     Published<BleRequest> ble_request; // logic, for the same reason
     Published<Ota>        ota;         // ota
     Published<OtaRequest> ota_request; // logic, like ble_request
+    Published<ImuRequest> imu_request; // logic, like ble_request
     Published<StorageRequest> storage_request; // logic, like ble_request
     Published<Wifi>        wifi;          // wifi
     Published<WifiRequest> wifi_request;  // logic, like ble_request

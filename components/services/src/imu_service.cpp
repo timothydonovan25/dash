@@ -5,16 +5,20 @@
 // host tests behind them; this file is a loop and a health report.
 #include "services/services.hpp"
 #include "core/attitude/attitude.hpp"
+#include "core/fixtime/fixtime.hpp"
 #include "core/jump/jump.hpp"
 
 #include "bsp/pins.hpp"
 #include "driver/gpio.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cmath>
 
 namespace services {
 namespace {
+
+constexpr const char* kTag = "imu";
 
 constexpr size_t kBatch = 16;
 // The FIFO's 2 kB is eight batches of 16-byte packets; one more for the
@@ -59,13 +63,28 @@ bool attach_data_ready() {
 void imu_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
-    core::attitude::Filter   filter;
+    // Static, not a local: with its heading history it is ~0.5 kB, and
+    // the task's frame is held to 1 kB (CLAUDE.md, 1.28). One imu task.
+    static core::attitude::Filter filter;
     core::attitude::Config   acfg;
     core::jump::Detector     jumps;
     core::jump::Config       jcfg;
+    // Its own, so the slide check compares the gyro with when each fix was
+    // taken rather than when it arrived. `logic` keeps another for laps.
+    core::fixtime::Clock     fix_clock;
+    uint32_t                 last_fix_rx_ms = 0;
 
-    filter.set_mount_offset(d.settings->imu_roll_offset_deg,
-                            d.settings->imu_pitch_offset_deg);
+    // The mount offset the filter is using. Settings is `logic`'s, so a
+    // change -- typed into CONFIG, from the Wi-Fi page, or this task's own
+    // calibration coming back -- is seen by comparing, once a wake.
+    float mount_roll = d.settings->imu_roll_offset_deg;
+    float mount_pitch = d.settings->imu_pitch_offset_deg;
+    filter.set_mount_offset(mount_roll, mount_pitch);
+    core::attitude::LevelCal level;
+    uint32_t level_gen = d.slots->imu_request.generation();
+    // After a calibration, until `logic` has applied its two edits: the old
+    // values still in Settings are not a change to go back to.
+    uint32_t level_wait_until_ms = 0;
 
     // Zero the gyro against a stationary bike. If the rider is already
     // moving this is wrong, so it is only taken while the readings are
@@ -119,6 +138,24 @@ void imu_task(void* arg) {
         // from core 1 in the middle of one.
         if (take_retry(d, core::state::Dev::Imu) && d.imu) d.imu->init();
 
+        const bool level_landing =
+            static_cast<int32_t>(level_wait_until_ms - d.clock->now_ms()) > 0;
+        if ((d.settings->imu_roll_offset_deg != mount_roll ||
+             d.settings->imu_pitch_offset_deg != mount_pitch) && !level_landing) {
+            mount_roll = d.settings->imu_roll_offset_deg;
+            mount_pitch = d.settings->imu_pitch_offset_deg;
+            filter.set_mount_offset(mount_roll, mount_pitch);
+            filter.reset();      // what it had was in the old axes
+        }
+        const uint32_t gen = d.slots->imu_request.generation();
+        if (gen != level_gen) {
+            level_gen = gen;
+            if (d.slots->imu_request.get().op ==
+                core::state::ImuRequest::CalibrateLevel) {
+                level.start();
+            }
+        }
+
         // Read until the FIFO is drained, not one batch per wake. After a
         // stall -- SPI2 held by the SD card's busy time, a flash write --
         // there can be several batches waiting, and one per 5 ms wake fell
@@ -135,7 +172,14 @@ void imu_task(void* arg) {
             if (hal::ok(s)) {
                 if (n > 0) d.health->report_ok(core::state::Dev::Imu, now);
 
-                const float speed = d.slots->motion.get().best_mph;
+                // The fused speed, which already refuses a spinning or
+                // locked wheel. The speedo's figure is front wheel first,
+                // with no slip check: a locked front read the lean low and,
+                // with the front dead, wheelspin read it high.
+                const core::state::Fused fu = d.slots->fused.get();
+                const float speed = fu.speed_valid
+                                        ? fu.speed_mph
+                                        : d.slots->motion.get().best_mph;
                 for (size_t i = 0; i < n; ++i) {
                     core::attitude::Sample a;
                     a.gx_dps = batch[i].gx_dps;
@@ -146,11 +190,54 @@ void imu_task(void* arg) {
                     a.az_g = batch[i].az_g;
                     a.speed_mph = speed;      // the v.omega reference needs it
                     a.t_ms = batch[i].t_ms;
+
+                    // Calibrate level: a still second, then the offsets go
+                    // to `logic` as edits, like any other. The filter takes
+                    // them now; the compare above then finds them equal.
+                    switch (level.feed(a)) {
+                        case core::attitude::LevelCal::Result::Done: {
+                            const core::attitude::Sample& m = level.mean();
+                            float roll = 0.0f, pitch = 0.0f;
+                            filter.calibrate_level(m, roll, pitch);
+                            filter.set_gyro_bias(m.gx_dps, m.gy_dps, m.gz_dps);
+                            mount_roll = roll;
+                            mount_pitch = pitch;
+                            // logic applies them within a pass; a second is
+                            // plenty, and a dropped edit is then undone
+                            // rather than left disagreeing with NVS.
+                            level_wait_until_ms = a.t_ms + 1000;
+                            if (d.commands) {
+                                d.commands->post(core::state::Command::config_set(
+                                    core::config::kKeyImuRollOffset, roll));
+                                d.commands->post(core::state::Command::config_set(
+                                    core::config::kKeyImuPitchOffset, pitch));
+                            }
+                            ESP_LOGI(kTag, "level: roll %.2f pitch %.2f deg",
+                                     static_cast<double>(roll), static_cast<double>(pitch));
+                            break;
+                        }
+                        case core::attitude::LevelCal::Result::Moved:
+                            ESP_LOGW(kTag, "level refused: the bike moved");
+                            break;
+                        default:
+                            break;
+                    }
+
                     filter.update(a, acfg);
 
                     const float mag = std::sqrt(a.ax_g * a.ax_g + a.ay_g * a.ay_g +
                                                 a.az_g * a.az_g);
                     jumps.update(mag, batch[i].t_ms, jcfg);
+                }
+
+                // A new fix, after the samples up to its arrival, so the
+                // filter's heading history covers when it was taken.
+                const core::state::Gnss g = d.slots->gnss.get();
+                if (g.rx_ms != last_fix_rx_ms) {
+                    last_fix_rx_ms = g.rx_ms;
+                    const uint32_t taken =
+                        g.fix ? fix_clock.stamp(g.utc_ms, g.rx_ms) : g.rx_ms;
+                    filter.on_fix(g.course_deg, g.speed_mph, taken, g.fix, acfg);
                 }
 
                 if (n > 0) imu_temp_c = batch[n - 1].temp_c;

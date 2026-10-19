@@ -177,6 +177,7 @@ private:
     Toast                toast_;
     bool                 toast_seen_init_ = false;
     uint16_t             seen_perf_ = 0, seen_stunt_ = 0, seen_notify_ = 0;
+    uint16_t             seen_line_refused_ = 0;
     // Two kinds of event, so a trick cannot bury a message: the phone's,
     // and the game's (a trick, a run).
     struct ToastEvent {

@@ -267,14 +267,27 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     const core::state::Motion m = d.slots->motion.get();
     const core::state::Engine e = d.slots->engine.get();
 
+    // The lap timer's thresholds: the crossing gates, and the speed a Set
+    // line needs.
+    core::lap::Config lc;
+    if (d.settings) {
+        const core::config::LapView lv = core::config::lap_view(*d.settings);
+        lc.half_width_ft = lv.half_width_ft;
+        lc.min_speed_mph = lv.min_speed_mph;
+        lc.min_lap_ms = lv.min_lap_ms;
+    }
+
     // --- commands -------------------------------------------------------
     core::state::Command cmd;
     while (commands.take(cmd)) {
         switch (cmd.id) {
             case core::state::CommandId::LapSetLine:
                 // The screen asked; this task decides whether the fix is
-                // good enough, because the screen only has a Frame.
-                if (g.fix) {
+                // good enough, because the screen only has a Frame. Moving,
+                // too: the line faces the way the GPS course points.
+                if (!core::lap::may_set_line(g.fix, g.speed_mph, lc)) {
+                    ++s.line_refused_seq;
+                } else {
                     s.lap.set_line(core::geo::LatLon{g.lat, g.lon}, g.course_deg);
                     // The splits were placed round the old line, and the
                     // reference lap was ridden over it.
@@ -394,6 +407,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                     s.waypoints.pts[cmd.i] = core::state::Waypoint{};
                     d.slots->waypoint.publish(s.waypoints);
                 }
+                break;
+            case core::state::CommandId::ImuCalibrate:
+                // `imu` has the samples; it answers with ConfigSets for the
+                // mount offset, which land back here.
+                d.slots->imu_request.publish(core::state::ImuRequest{
+                    core::state::ImuRequest::CalibrateLevel});
                 break;
             case core::state::CommandId::StorageEject:
                 d.slots->storage_request.publish(core::state::StorageRequest{
@@ -624,13 +643,6 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     }
 
     // --- lap ------------------------------------------------------------
-    core::lap::Config lc;
-    if (d.settings) {
-        const core::config::LapView lv = core::config::lap_view(*d.settings);
-        lc.half_width_ft = lv.half_width_ft;
-        lc.min_speed_mph = lv.min_speed_mph;
-        lc.min_lap_ms = lv.min_lap_ms;
-    }
 
     // Picked up by the blackbox row below, so a lap tag lands between the
     // right two data rows rather than at the end of the file.
@@ -762,6 +774,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         pl.max_lean_right_deg = s.session_peaks.lean_right_deg;
         pl.track = s.track;
         pl.track_recalled = s.track_recalled;
+        pl.line_refused_seq = s.line_refused_seq;
         if (s.track >= 0 && d.tracks) {
             const core::track::Record& r = d.tracks->lib.rec[s.track];
             pl.track_best_ms = r.best_ms;

@@ -251,13 +251,30 @@ Do this statically before trusting any filter output:
    on the speed screen's gauge should move right.
 3. Lean it left. Negative.
 4. Brake hard by hand (rock it forward). `g_lon` sign.
+5. Lift the front, quickly. Pitch goes **positive** nose up, straight
+   away. If it dips first or creeps up a second late, the accelerometer
+   is right and the pitch gyro's sign is not (gy < 0 nose up).
+6. Turn the bars to each lock. Lean moves about 0.45° per degree of steer,
+   the wrong way to the bars. That is the bar mount, not a fault; the
+   filter can only take it out while moving.
+
+The frame is x forward, y **left**, z up, right-handed (`attitude.hpp`).
+The stand does not test the yaw gyro: the `v·ω` reference only takes over
+above 5 mph. So:
+
+7. Ride a slow right-hand circle, 10–15 mph. YAW on DIAG → IMU is
+   **positive**, lean is positive and steady. If yaw is negative, or lean
+   reads right on the stand but left in the circle, gz is the wrong sign —
+   and if the fix is to negate gz alone, a second axis is wrong too, since
+   a right-handed part cannot need one axis negated.
 
 Fix the mapping in the driver, not in `core/attitude` — the filter's
 convention is documented and the rest of the code depends on it.
 
 Only then tune the filter against a bench tilt. Lean comes from `v·ω`, not
 from the accelerometer, so it will read nonsense while stationary and that
-is correct.
+is correct. Check `Config::rake_deg` and `wheelbase_ft` against the bike:
+they size the steering correction.
 
 The IMU shares SPI2 with the SD card. If IMU samples arrive in bursts
 while logging, that is SD write-busy time; the FIFO absorbs it. If the IMU
@@ -326,6 +343,17 @@ also unconfirmed — spin a wheel on a stand before trusting mph
 the front (GPIO22). Pin 1 of each is **VIN, not 3.3 V**: the sensor gets
 12 V, and its output is pulled up to 3.3 V on the board. An open-collector
 sensor is what this expects.
+
+The sensors are Allegro A1120LUA-T unipolar Hall switches, not latches.
+Each needs magnets, one per pulse, every one with its **south pole facing
+the sensor's branded face**: a magnet fitted north-out gives no pulse, and
+bare steel (sprocket bolts, rotor holes) gives none either, as the A1120 is
+not back-biased. The count goes up as each magnet leaves (the rising edge),
+and CONFIG → Wheels → Front/Rear pulses must equal the magnets fitted. The
+A1120's supply is rated to about 28 V absolute (check the datasheet) and VIN
+reaches ~29 V while the input SMBJ18A clamps; if that margin matters, put
+~100 Ω in series with pin 1 and a 24 V zener at the sensor end of the
+harness.
 
 **The shift lamps are eight outputs of the PCA9955B** (OUT0–7) on I2C1,
 anodes on VCC, 30 mA full scale set by REXT (R23). There is no master FET

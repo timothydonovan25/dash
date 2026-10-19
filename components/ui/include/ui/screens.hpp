@@ -568,10 +568,11 @@ public:
     void set_focus(uint8_t f) override { focus_ = f; }
     int focus_now() const override { return focus_; }
 
-    // The screen edits the caller's Settings in place and reports changes
-    // upward as ConfigSet commands, so the keeper can write NVS and every
-    // module that keeps a copy can refresh.
-    void bind_settings(core::config::Settings* s) { settings_ = s; }
+    // The screen reads Settings and never writes it: an edit goes up as a
+    // ConfigSet and `logic`, the one writer, applies it (rule 2). It used
+    // to edit in place from render, on the other core from logic's own
+    // writes to the same table.
+    void bind_settings(const core::config::Settings* s) { settings_ = s; }
 
     // Where CONFIG was: the submenu, the cursor, an edit in progress. The
     // App saves it when the gear calibration page takes CONFIG's place (and
@@ -598,7 +599,13 @@ private:
     Table                   table_;
     Label                   hint_;
     Widget*                 list_[2] = {};
-    core::config::Settings* settings_ = nullptr;
+    const core::config::Settings* settings_ = nullptr;
+    // The value last posted for `pending_key_`, until Settings shows it:
+    // a second press before logic has applied the first steps on from
+    // here, not from the old value, or it would be lost.
+    bool                    has_pending_ = false;
+    uint16_t                pending_key_ = 0;
+    float                   pending_val_ = 0.0f;
     // Two levels: the list of submenus, then one submenu's items. `group_`
     // is the submenu open, or the one to put the cursor back on.
     bool                    in_group_ = false;

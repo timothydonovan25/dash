@@ -245,5 +245,35 @@ int main() {
         CHECK_NEAR(lv.half_width_ft, s.lap_half_width_ft, 1e-6);
     }
 
+    CASE("nudged gives the next value without touching Settings");
+    {
+        using namespace core::config;
+        const ConfigItem* bright = find(0x0101);
+        CHECK(bright != nullptr);
+        CHECK_NEAR(nudged(*bright, 80.0f, +1), 80.0f + bright->step, 1e-6);
+        CHECK_NEAR(nudged(*bright, bright->max, +1), bright->max, 1e-6);   // clamped
+        CHECK_NEAR(nudged(*bright, bright->min, -1), bright->min, 1e-6);
+        // nudge is nudged applied, so the two cannot disagree.
+        Settings s;
+        const float from = get(s, *bright);
+        CHECK(nudge(s, *bright, -1));
+        CHECK_NEAR(get(s, *bright), nudged(*bright, from, -1), 1e-6);
+    }
+
+    CASE("the mount offset takes a calibration unrounded, pitch to 89 degrees");
+    {
+        using namespace core::config;
+        Settings s;
+        const ConfigItem* pitch = find(kKeyImuPitchOffset);
+        const ConfigItem* roll = find(kKeyImuRollOffset);
+        CHECK(pitch != nullptr && roll != nullptr);
+        CHECK(set(s, *pitch, 52.37f));
+        CHECK_NEAR(s.imu_pitch_offset_deg, 52.37, 1e-5);
+        set(s, *pitch, 120.0f);
+        CHECK_NEAR(s.imu_pitch_offset_deg, 89.0, 1e-5);
+        CHECK(set(s, *roll, -3.21f));
+        CHECK_NEAR(s.imu_roll_offset_deg, -3.21, 1e-5);
+    }
+
     return check::report("config");
 }

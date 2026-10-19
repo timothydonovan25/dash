@@ -104,10 +104,13 @@ New `core/imu_dsp/`:
    value. `attitude` widens its accelerometer gate (it currently fails
    almost constantly on rough ground, so low-speed lean drifts) and
    `fusion` lowers IMU trust while it is high.
-5. **Steering coupling**: no software fix without a steering-angle source.
-   Phase 3 compares bar-mounted lean against the stand/GPS reference. If it
-   is bad, the fallback is a second IMU rigid to the frame, or moving the
-   dash.
+5. **Steering coupling**: partly corrected in `core/attitude`: the
+   steady-corner steering angle is estimated from yaw rate, speed and
+   wheelbase, and the readings are turned back about the head tube. That
+   covers the steady part. Countersteer, bar shake and a bike stopped with
+   the bars turned have no source to correct from. Phase 3 compares
+   bar-mounted lean against the stand/GPS reference. If it is bad, the
+   fallback is a second IMU rigid to the frame, or moving the dash.
 
 **Tests** (rule: every change to `core/` needs one): a tone at 190 Hz in is
 >40 dB down out; DC and 5 Hz pass with <1 dB error; the notch removes a

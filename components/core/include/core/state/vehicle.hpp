@@ -151,6 +151,10 @@ struct Lap {
     // a line knows why one is there.
     int8_t     track             = -1;
     bool       track_recalled    = false;
+    // Moves each time a Set line was refused for want of speed: the line's
+    // direction is the GPS course, which means nothing at a standstill.
+    // The toast says why (ui::App), as it does for a new best.
+    uint16_t   line_refused_seq  = 0;
     // Its record and its ideal lap over every visit; 0 for none yet.
     uint32_t   track_best_ms     = 0;
     uint32_t   track_ideal_ms    = 0;
@@ -458,6 +462,14 @@ struct WifiRequest {
 // writer of the dev slot; the web server only carries the bytes to it.
 struct OtaUpload {
     uint32_t size = 0;
+};
+
+// CONFIG's Calibrate level, handed from `logic` to `imu` like BleRequest:
+// the samples it needs are only in `imu`. Its answer comes back as two
+// ConfigSets for the mount offset, so Settings keeps its one writer.
+struct ImuRequest {
+    enum Op : uint8_t { None = 0, CalibrateLevel };
+    uint8_t op = None;
 };
 
 // The Update screen's actions, handed from `logic` to `ota` like BleRequest.

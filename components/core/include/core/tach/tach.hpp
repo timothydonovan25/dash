@@ -67,7 +67,7 @@ private:
 
 struct WheelConfig {
     uint16_t circumference_mm = 2130;
-    uint8_t  pulses_per_rev   = 6;      // spoke magnets, or sprocket bolts
+    uint8_t  pulses_per_rev   = 6;      // magnets, south pole out (unipolar Hall)
     uint32_t stall_ms         = 1500;   // a wheel can legitimately be slow
     // Smoothing as a time constant, not a fraction per pulse. Per pulse, the
     // lag grew as the wheel slowed: ~1.5 pulse intervals, 240 ms at 5 mph

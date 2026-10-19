@@ -74,9 +74,11 @@ then GPS), so a dead front no longer means 0 mph for the rest of the ride.
 **It only ever knows while moving.** On the board as drawn (netlist
 2026-10-07), each Hall input is CNx pin 2 with a 10 kΩ pull-up to 3.3 V
 (R59/R60), 10 nF to ground (C17/C18), an SMBJ10A clamp (D9/D8) and 10 kΩ in
-series to the GPIO (R61/R62). The sensor is open-collector, a TLE4935L
-latch. So an unplugged sensor reads HIGH, which is also what a plugged-in
-one reads with its output off, and a latch parked on that pole stays off.
+series to the GPIO (R61/R62). The sensor is an Allegro A1120LUA-T, a
+unipolar Hall switch with an open-drain output: on (LOW) while a magnet's
+south pole is at its branded face, off (HIGH) otherwise. So an unplugged
+sensor reads HIGH, which is also what a plugged-in one reads with no magnet
+in front of it, and a wheel parked between magnets stays HIGH.
 A LOW does prove a sensor is there (or the line is shorted to ground), but
 HIGH proves nothing, so a parked dash cannot tell "unplugged" from "not
 turning". Detecting it while parked needs hardware: a sense resistor on the

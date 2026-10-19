@@ -242,5 +242,25 @@ int main() {
         CHECK(g.day_of_year == before);
     }
 
+    CASE("a fix with no new one for 2.5 s is no fix");
+    {
+        core::state::Gnss g;
+        g.fix = true;
+        g.rx_ms = 10000;
+        CHECK(!core::nmea::age_fix(g, 10000));
+        CHECK(!core::nmea::age_fix(g, 10000 + core::nmea::kFixMaxAgeMs));
+        CHECK(g.fix);
+        CHECK(core::nmea::age_fix(g, 10001 + core::nmea::kFixMaxAgeMs));
+        CHECK(!g.fix);
+        // Once cleared, nothing more to say.
+        CHECK(!core::nmea::age_fix(g, 20000));
+        // Across the 49-day wrap of the system clock.
+        g.fix = true;
+        g.rx_ms = 0xFFFFFF00u;
+        CHECK(!core::nmea::age_fix(g, 0x00000100u));       // 512 ms later
+        CHECK(core::nmea::age_fix(g, 0x00000F00u));        // ~3.8 s later
+        // And the next sentence brings it back: the parser sets `fix` again.
+    }
+
     return check::report("nmea");
 }

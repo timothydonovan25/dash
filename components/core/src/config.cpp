@@ -124,8 +124,11 @@ const ConfigItem kItems[] = {
     num(0x0503, "Tank",      "Fuel", Kind::Float, 0.20f, 10.0f, 0.05f,"gal", FIELD(fuel_tank_gal)),
 
     // IMU
-    num(0x0601, "Roll offset",  "IMU", Kind::Float, -45, 45, 0.5f, "deg", FIELD(imu_roll_offset_deg)),
-    num(0x0602, "Pitch offset", "IMU", Kind::Float, -45, 45, 0.5f, "deg", FIELD(imu_pitch_offset_deg)),
+    // Calibrate level writes these, unrounded. Pitch reaches 89: a dash on
+    // the bars faces the rider, and clamping a 50° tilt would have stored a
+    // rotation that was not the board's.
+    num(kKeyImuRollOffset,  "Roll offset",  "IMU", Kind::Float, -45, 45, 0.5f, "deg", FIELD(imu_roll_offset_deg)),
+    num(kKeyImuPitchOffset, "Pitch offset", "IMU", Kind::Float, -89, 89, 0.5f, "deg", FIELD(imu_pitch_offset_deg)),
     action(0x0603, "Calibrate level", "IMU", state::CommandId::ImuCalibrate),
 
     // Trip
@@ -307,20 +310,23 @@ bool set(Settings& s, const ConfigItem& it, float v) {
     return get(s, it) != before;
 }
 
-bool nudge(Settings& s, const ConfigItem& it, int direction) {
-    if (direction == 0 || it.kind == Kind::Action) return false;
-    if (it.kind == Kind::Bool) {
-        return set(s, it, get(s, it) >= 0.5f ? 0.0f : 1.0f);
-    }
+float nudged(const ConfigItem& it, float current, int direction) {
+    if (direction == 0 || it.kind == Kind::Action) return clamp(it, current);
+    if (it.kind == Kind::Bool) return current >= 0.5f ? 0.0f : 1.0f;
     if (it.kind == Kind::Enum) {
         // Enums wrap: pressing down on the last option is how you get back.
         const int count = it.option_count > 0 ? it.option_count : 1;
-        int v = static_cast<int>(get(s, it)) + (direction > 0 ? 1 : -1);
+        int v = static_cast<int>(current) + (direction > 0 ? 1 : -1);
         if (v < 0) v = count - 1;
         if (v >= count) v = 0;
-        return set(s, it, static_cast<float>(v));
+        return static_cast<float>(v);
     }
-    return set(s, it, get(s, it) + (direction > 0 ? it.step : -it.step));
+    return clamp(it, current + (direction > 0 ? it.step : -it.step));
+}
+
+bool nudge(Settings& s, const ConfigItem& it, int direction) {
+    if (direction == 0 || it.kind == Kind::Action) return false;
+    return set(s, it, nudged(it, get(s, it), direction));
 }
 
 size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n) {

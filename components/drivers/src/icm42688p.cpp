@@ -184,11 +184,14 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         if ((p[0] & 0x80) != 0) continue;         // empty-FIFO header
 
         Sample sm;
-        // Chip axes to bike axes: x forward, y right, z up, which is what
-        // core/attitude documents and depends on. BRINGUP: this mapping is
-        // taken from the board outline and has never been checked against a
-        // real part. Roll the bike to the right on the stand and confirm the
-        // lean number goes positive before trusting anything downstream.
+        // Chip axes to board axes: x forward, y LEFT, z up, right-handed,
+        // which is what core/attitude documents and depends on. The part is
+        // right-handed, so a correct mapping only permutes axes in pairs or
+        // negates two at once; negating one makes a mirror image, and that
+        // reads a right turn as a left lean. BRINGUP: this mapping is taken
+        // from the board outline and has never been checked against a real
+        // part. Do bringup §6 in full, the moving check too: the stand
+        // alone does not test gz.
         const float ax = be16(p + 1) * accel_scale_;
         const float ay = be16(p + 3) * accel_scale_;
         const float az = be16(p + 5) * accel_scale_;

@@ -351,5 +351,17 @@ int main() {
         CHECK_NEAR(t.state().dist_to_line_ft, 347.6, 5.0);
     }
 
+    CASE("a line is set only from a moving fix");
+    {
+        const Config c;                              // 10 mph to cross, so to set
+        CHECK(!core::lap::may_set_line(true, 0.0f, c));
+        CHECK(!core::lap::may_set_line(true, 9.9f, c));
+        CHECK(core::lap::may_set_line(true, 10.0f, c));
+        CHECK(!core::lap::may_set_line(false, 30.0f, c));
+        Config slow = c;
+        slow.min_speed_mph = 5.0f;                   // follows the crossing gate
+        CHECK(core::lap::may_set_line(true, 6.0f, slow));
+    }
+
     return check::report("lap");
 }

@@ -128,6 +128,7 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
     if (e.button == Button::B && (e.press == Press::Short || editing_)) {
         if (editing_) {
             editing_ = false;
+            has_pending_ = false;
         } else {
             in_group_ = false;
             focus_ = group_;
@@ -141,6 +142,7 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
             return post(core::state::Command(it.action));
         }
         editing_ = !editing_;
+        has_pending_ = false;
         return true;
     }
 
@@ -151,12 +153,20 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
         if (!editing_) return false;            // let nav move the focus
         // C is up and D is down, on the value as well as on the list.
         const int dir = (e.button == Button::C) ? +1 : -1;
-        if (cfg::nudge(*settings_, it, dir)) {
-            // Report it up so the keeper writes NVS and every module holding
-            // a copy of this value refreshes. The screen does not write
-            // flash and does not reach into the shift-light config itself.
-            post(core::state::Command::config_set(it.key,
-                                                  cfg::get(*settings_, it)));
+        const float shown = cfg::get(*settings_, it);
+        if (has_pending_ && (pending_key_ != it.key || pending_val_ == shown)) {
+            has_pending_ = false;                // applied, or another item
+        }
+        const float from = has_pending_ ? pending_val_ : shown;
+        const float to = cfg::nudged(it, from, dir);
+        if (to != from) {
+            // Up to logic, which applies it; the keeper then writes NVS and
+            // every module holding a copy refreshes. The screen does not
+            // write Settings, flash, or the shift-light config itself.
+            post(core::state::Command::config_set(it.key, to));
+            has_pending_ = true;
+            pending_key_ = it.key;
+            pending_val_ = to;
         }
         return true;
     }

@@ -296,13 +296,25 @@ the media half of step 9 is written. 48 host tests, all passing.
   line as on LAP
 - `units/` conversions and all display formatting · `trip/` odometer,
   tripmeters, fuel model, engine hours
-- `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus · `health/` DevState and the retry policy.
+- `config/` the one ConfigItem table, and its `group`s as CONFIG's submenus.
+  **Settings has one writer at run time, `logic`**: the CONFIG screen (a
+  `const Settings*`), the Wi-Fi page and `imu`'s Calibrate level all post
+  `ConfigSet`, and a task that keeps a copy compares and re-reads · `health/` DevState and the retry policy.
   Any task reports into the one `Tracker` through per-device atomics; only
   `keeper` (20 Hz) turns reports into states and publishes, on change, so the
   health slot has one writer. A report for an absent device is ignored: an
   ejected SD card stays ejected. A device that reports must `begin_init` first
-- `attitude/` lean from `v·ω`, not from the accelerometer · `jump/` airtime
-- `nmea/` the sentence parser, so the GPS driver is only bytes
+- `attitude/` lean from `v·ω`, not from the accelerometer, Ω being the
+  world's yaw rate through the Euler-rate transform (the yaw gyro alone
+  read 33° for 40°). The frame is x forward, y left, z up, right-handed.
+  The IMU is on the bars: mount offset is a rotation of all six axes, and
+  the steady-corner steering angle (rake, wheelbase in `Config`) is
+  estimated and turned out. Speed is the fused figure. Each GPS fix
+  (`on_fix`, fixtime-stamped by `imu`) compares the gyro's heading change
+  with the course's over two fixes; a mismatch is a slide (or air), and the
+  v·Ω correction and steering estimate hold until they agree · `jump/` airtime
+- `nmea/` the sentence parser, so the GPS driver is only bytes; and
+  `age_fix`: 2.5 s without a new fix and the slot's `fix` goes false
 - `input/` debounce and short/long/repeat; C and D act on the press
   (`on_press_mask`), as they have no long meaning — a button given one must leave the mask · `tach/` pulses to rpm and mph
 - `log/` the blackbox ring, its CSV format, the rate decimator, and
