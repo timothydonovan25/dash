@@ -26,6 +26,20 @@ uint8_t pattern(uint16_t rpm, const Config& c, uint8_t prev) {
 
 bool over_limit(uint16_t rpm, const Config& c) { return rpm >= c.flash_rpm; }
 
+uint8_t Flasher::apply(uint8_t mask, bool over, uint32_t t_ms, const Config& c) {
+    if (!over) {
+        over_ = false;
+        return mask;
+    }
+    if (!over_) {
+        over_ = true;
+        since_ms_ = t_ms;
+    }
+    if (c.flash_period_ms == 0) return 0xFF;      // no period: solid
+    const uint32_t phase = (t_ms - since_ms_) % c.flash_period_ms;   // wrap-safe
+    return phase < c.flash_period_ms / 2u ? 0xFF : 0x00;
+}
+
 uint16_t lamp_rpm(float rpm, float rpm_per_s, const Config& c) {
     if (rpm < 0.0f) rpm = 0.0f;
     float lead = 0.0f;

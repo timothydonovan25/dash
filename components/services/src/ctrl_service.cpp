@@ -90,7 +90,12 @@ void ctrl_task(void* arg) {
     core::shift::PeakHold peak_hold;
     float   rpm_peak = 0.0f;
     uint8_t hold_bits = 0;
+    // Over the limit the lamps blink (core::shift::Flasher). The phase is
+    // time, so a steady over-rev with no mask change still toggles them:
+    // the tick compares against lit_mask and writes each half.
+    core::shift::Flasher flasher;
     auto decide_mask = [&]() -> uint8_t {
+        const uint32_t now = d.clock->now_ms();
         const core::config::ShiftView sv = core::config::shift_view(*d.settings);
         sc.base_rpm = sv.base_rpm;
         sc.span_rpm = sv.span_rpm;
@@ -104,7 +109,6 @@ void ctrl_task(void* arg) {
         const uint16_t rpm = core::shift::lamp_rpm(tach.raw_rpm(), tach.rpm_rate(), sc);
         lamp_rpm = rpm;
         if (!sweep_done) {
-            const uint32_t now = d.clock->now_ms();
             const uint32_t first = d.system ? d.system->first_frame_ms : 0;
             if (first != 0) {
                 core::sweep::Config wc;
@@ -121,7 +125,8 @@ void ctrl_task(void* arg) {
         }
         const uint8_t m = core::shift::pattern(lamp_rpm, sc, prev_mask);
         prev_mask = m;   // the hysteresis is the pattern's alone
-        return static_cast<uint8_t>(m | hold_bits);
+        return flasher.apply(static_cast<uint8_t>(m | hold_bits),
+                             core::shift::over_limit(lamp_rpm, sc), now, sc);
     };
 
     // After a failed lamp write, the next attempt waits kRetryTicks.

@@ -186,5 +186,34 @@ int main() {
         CHECK(core::shift::hold_lamp(9500, c) == 0x80);
     }
 
+    CASE("over the limit the lamps blink, starting lit");
+    {
+        core::shift::Config c;   // flash 8800, period 125 ms
+        core::shift::Flasher f;
+        // Under the limit the mask goes through as it is.
+        CHECK(f.apply(0x0F, false, 1000, c) == 0x0F);
+        // Crossing: lit at once, whatever the mask was.
+        CHECK(f.apply(0xFF, true, 1003, c) == 0xFF);
+        CHECK(f.apply(0xFF, true, 1003 + 61, c) == 0xFF);
+        CHECK(f.apply(0xFF, true, 1003 + 62, c) == 0x00);
+        CHECK(f.apply(0xFF, true, 1003 + 124, c) == 0x00);
+        CHECK(f.apply(0xFF, true, 1003 + 125, c) == 0xFF);
+        // Held over for a second: lit half the time, not stuck either way.
+        int lit = 0;
+        for (uint32_t t = 1003; t < 2003; t += 2) lit += f.apply(0xFF, true, t, c) == 0xFF;
+        CHECK(lit >= 245 && lit <= 255);   // 62 of each odd 125
+        // Dropping under ends it, and the next crossing starts lit again
+        // even mid-way through what would have been a dark half.
+        CHECK(f.apply(0x7F, false, 2050, c) == 0x7F);
+        CHECK(f.apply(0xFF, true, 2100, c) == 0xFF);
+        // Across the clock's wrap.
+        core::shift::Flasher w;
+        CHECK(w.apply(0xFF, true, 0xFFFFFFF0u, c) == 0xFF);
+        CHECK(w.apply(0xFF, true, 0xFFFFFFF0u + 70u, c) == 0x00);
+        // A period of 0 is solid.
+        c.flash_period_ms = 0;
+        CHECK(w.apply(0xFF, true, 5, c) == 0xFF);
+    }
+
     return check::report("shift");
 }

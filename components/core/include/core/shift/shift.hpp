@@ -31,6 +31,10 @@ struct Config {
     // either way (test_tach), which at a 150 ms lead would wobble a lamp by
     // more than the hysteresis. BRINGUP: measure the real tach's jitter.
     uint16_t lead_floor_rpm_s = 1000;
+    // Over flash_rpm the lamps blink, on for half of this, off for half.
+    // 125 ms is 8 Hz: fast enough to read as a warning out of the corner of
+    // an eye, slow enough that an LED off for 62 ms is plainly off.
+    uint16_t flash_period_ms = 125;
 };
 
 // The rpm the lamps are decided on: `rpm`, plus (rpm_per_s - the floor)
@@ -75,5 +79,22 @@ uint8_t hold_lamp(uint16_t peak_rpm, const Config& c);
 // True when RPM is past flash_rpm. The caller decides the blink rate, so
 // this stays free of any notion of time.
 bool over_limit(uint16_t rpm, const Config& c);
+
+// The blink over the limit, for the lamps themselves. Over the limit every
+// lamp is on for the first half of each period and off for the second,
+// counted from when the rpm crossed, so the first thing the rider sees is
+// all eight lit, never a dark bar. Under it, `mask` goes through untouched.
+//
+// `ctrl` runs one on every tick and edge and the sim runs the same one, so
+// the window blinks when, and as fast as, the handlebar does.
+class Flasher {
+public:
+    uint8_t apply(uint8_t mask, bool over, uint32_t t_ms, const Config& c);
+    void reset() { over_ = false; }
+
+private:
+    bool     over_ = false;
+    uint32_t since_ms_ = 0;    // when the rpm went over
+};
 
 }  // namespace core::shift

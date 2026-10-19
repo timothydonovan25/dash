@@ -362,7 +362,6 @@ class App:
         self.sim = sim
         self.pod = pod
         self.root = root
-        self.blink = False
         self.native_size = (0, 0)
         root.title("dash — simulator")
         root.configure(bg="#0d0f14")
@@ -686,14 +685,10 @@ class App:
         self.photo = tk.PhotoImage(data=buf.getvalue())
         self.canvas.itemconfig(self.image_id, image=self.photo)
 
-        # Over the limit, everything flashes -- the caller owns the blink
-        # rate, which is why core/shift has no notion of time in it.
-        self.blink = not self.blink
+        # The mask is what the lamps show, the blink over the limit already
+        # in it (core::shift::Flasher, as `ctrl` runs it).
         for i, lamp in enumerate(self.lamps):
-            if flash:
-                on = self.blink
-            else:
-                on = bool(lamps & (1 << i))
+            on = bool(lamps & (1 << i))
             lamp.configure(bg=LAMP_COLOURS[i] if on else LAMP_OFF)
 
         # What this frame would have cost the real panel. The laptop will

@@ -36,7 +36,9 @@
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac> key=value...\n
-//        (slip=KIND/pct, alert=TEXT, spaces as _, `-` for none;
+//        (lamps: as lit this frame, the over-limit blink in it; flash: over
+//        the limit at all;
+//        slip=KIND/pct, alert=TEXT, spaces as _, `-` for none;
 //        bl=backlight percent, which the front end dims the picture by;
 //        phase=lap phase 0 no line 1 armed 2 timing, track=saved track or -1.
 //        Saved tracks live in sim_card/tracks/, so they outlast a run)
@@ -606,6 +608,8 @@ int main() {
     // `ctrl`'s held peak (core::shift::PeakHold), and the lamp it keeps lit.
     core::shift::PeakHold peak_hold;
     uint8_t hold_bits = 0;
+    core::shift::Flasher flasher;
+    uint8_t lit_lamps = 0;     // what the lamps show, blink included
     // The tach's rate of climb, for predictive lamps: fed the bike's rpm
     // every tick, where ctrl feeds it every tach edge.
     core::tach::RateEstimator rpm_rate;
@@ -799,6 +803,9 @@ int main() {
         hold_bits = held > 0.0f ? core::shift::hold_lamp(static_cast<uint16_t>(held), sc) : 0;
         lamp_mask = core::shift::pattern(rpm, sc, lamp_mask);
         const bool flash = core::shift::over_limit(rpm, sc);
+        // What the handlebar shows, blink and all: `ctrl`'s own Flasher.
+        lit_lamps = flasher.apply(static_cast<uint8_t>(lamp_mask | hold_bits),
+                                  flash, now, sc);
         controls.shift_mask = lamp_mask;
         controls.shift_flash = flash;
         controls.rpm_peak = held;
@@ -969,7 +976,7 @@ int main() {
         std::printf("FRAME %u %d %s %s %.4f laps=%u delta=%d valid=%d "
                     "ref=%zu match=%.1f wire=%.2f px=%u tx=%u peak=%.2f "
                     "over=%u busy=%d pend=%u slip=%s/%u alert=%s bl=%u phase=%u track=%d\n",
-                    static_cast<uint8_t>(lamp_mask | hold_bits), flash ? 1 : 0, app.mode_name(),
+                    lit_lamps, flash ? 1 : 0, app.mode_name(),
                     app.current().name(), bike.lap_fraction(),
                     lapv.count, lapv.delta_ms, lapv.delta_valid ? 1 : 0,
                     delta.reference_points(), delta.last_match_ft(),
