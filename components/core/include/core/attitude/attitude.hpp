@@ -220,17 +220,26 @@ private:
     bool     started_ = false;
 };
 
-// Calibrate level's measurement: a second of raw samples from a bike
-// standing still, averaged. One sample that moved -- the rider leaning on
-// it, a foot on the peg -- and the run is refused rather than storing a
-// level that was not one. The mean feeds Filter::calibrate_level (its
-// accelerometer) and Filter::set_gyro_bias (its gyro).
+// A second of raw samples from a bike standing still, averaged. One sample
+// that moved -- the rider leaning on it, a foot on the peg, the bars swung
+// -- and the run is refused rather than storing a level, or a gyro bias,
+// that was not one. Two users: Calibrate level, whose mean feeds
+// Filter::calibrate_level (its accelerometer) and Filter::set_gyro_bias
+// (its gyro), and `imu` at boot, which takes only the gyro bias from it.
+//
+// "Still" is three tests. Within kStillG of 1 g, and every gyro axis under
+// kStillDps, sample by sample. And the gravity vector no more than kDriftG
+// from where it was at the first sample: a slow turn under kStillDps --
+// bars eased round at 4 dps -- passes the first two, and averaged it is a
+// 4 dps bias, which on the bars is a lean error of degrees for the ride.
+// 0.035 g is 2 degrees, so what gets through is under ~2 dps over the
+// second, and a rocking that comes back averages out.
 class LevelCal {
 public:
     static constexpr size_t kSamples = 200;        // 1 s at 200 Hz
-    // Still: within this of 1 g, and every gyro axis under this.
     static constexpr float kStillG   = 0.05f;
     static constexpr float kStillDps = 5.0f;
+    static constexpr float kDriftG   = 0.035f;
 
     enum class Result : uint8_t { Idle, Pending, Done, Moved };
 
@@ -244,6 +253,7 @@ public:
 private:
     struct Sum { double ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0; };
     Sum    sum_;
+    float  ax0_ = 0.0f, ay0_ = 0.0f, az0_ = 0.0f;   // gravity at the first sample
     Sample mean_;
     size_t n_ = 0;
     bool   active_ = false;

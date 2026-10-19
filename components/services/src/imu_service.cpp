@@ -80,41 +80,25 @@ void imu_task(void* arg) {
     float mount_roll = d.settings->imu_roll_offset_deg;
     float mount_pitch = d.settings->imu_pitch_offset_deg;
     filter.set_mount_offset(mount_roll, mount_pitch);
-    core::attitude::LevelCal level;
+    // Static for the frame's sake too, both of them (~0.1 kB each).
+    static core::attitude::LevelCal level;
     uint32_t level_gen = d.slots->imu_request.generation();
     // After a calibration, until `logic` has applied its two edits: the old
     // values still in Settings are not a change to go back to.
     uint32_t level_wait_until_ms = 0;
 
-    // Zero the gyro against a stationary bike. If the rider is already
-    // moving this is wrong, so it is only taken while the readings are
-    // consistent with sitting still.
-    {
-        hal::IImu::Sample s[kBatch];
-        size_t n = 0;
-        double gx = 0, gy = 0, gz = 0;
-        size_t taken = 0;
-        for (int i = 0; i < 40 && taken < 200; ++i) {
-            if (d.imu && hal::ok(d.imu->read_fifo(s, kBatch, n))) {
-                for (size_t k = 0; k < n; ++k) {
-                    const float mag = std::sqrt(s[k].ax_g * s[k].ax_g +
-                                                s[k].ay_g * s[k].ay_g +
-                                                s[k].az_g * s[k].az_g);
-                    if (std::fabs(mag - 1.0f) > 0.05f) continue;   // moving
-                    gx += s[k].gx_dps;
-                    gy += s[k].gy_dps;
-                    gz += s[k].gz_dps;
-                    ++taken;
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-        if (taken > 50) {
-            filter.set_gyro_bias(static_cast<float>(gx / taken),
-                                 static_cast<float>(gy / taken),
-                                 static_cast<float>(gz / taken));
-        }
-    }
+    // Zero the gyro against a stationary bike: a still second, by the same
+    // test Calibrate level uses (core::attitude::LevelCal), taken from the
+    // main loop's own samples so the lean is live meanwhile. A run that
+    // moves starts again, until kBootBiasMs; a bike that never sits still
+    // that long keeps a zero bias rather than a wrong one. This used to
+    // average whatever came in the first 0.4 s with only the accelerometer
+    // checked, and the IMU is on the bars: swinging them while getting on
+    // went into the bias, a yaw-rate error that reads as lean all ride.
+    constexpr uint32_t kBootBiasMs = 10000;
+    const uint32_t boot_ms = d.clock->now_ms();
+    static core::attitude::LevelCal boot_bias;
+    boot_bias.start();
 
     g_imu_task = xTaskGetCurrentTaskHandle();
     float imu_temp_c = 0.0f;
@@ -194,12 +178,28 @@ void imu_task(void* arg) {
                     // Calibrate level: a still second, then the offsets go
                     // to `logic` as edits, like any other. The filter takes
                     // them now; the compare above then finds them equal.
+                    if (boot_bias.active()) {
+                        switch (boot_bias.feed(a)) {
+                            case core::attitude::LevelCal::Result::Done: {
+                                const core::attitude::Sample& m = boot_bias.mean();
+                                filter.set_gyro_bias(m.gx_dps, m.gy_dps, m.gz_dps);
+                                break;
+                            }
+                            case core::attitude::LevelCal::Result::Moved:
+                                if (a.t_ms - boot_ms < kBootBiasMs) boot_bias.start();
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+
                     switch (level.feed(a)) {
                         case core::attitude::LevelCal::Result::Done: {
                             const core::attitude::Sample& m = level.mean();
                             float roll = 0.0f, pitch = 0.0f;
                             filter.calibrate_level(m, roll, pitch);
                             filter.set_gyro_bias(m.gx_dps, m.gy_dps, m.gz_dps);
+                            boot_bias = core::attitude::LevelCal{};   // this one is newer
                             mount_roll = roll;
                             mount_pitch = pitch;
                             // logic applies them within a pass; a second is

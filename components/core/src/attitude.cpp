@@ -319,8 +319,15 @@ LevelCal::Result LevelCal::feed(const Sample& raw) {
     if (!active_) return Result::Idle;
     const float mag = std::sqrt(raw.ax_g * raw.ax_g + raw.ay_g * raw.ay_g +
                                 raw.az_g * raw.az_g);
+    if (n_ == 0) {
+        ax0_ = raw.ax_g;
+        ay0_ = raw.ay_g;
+        az0_ = raw.az_g;
+    }
+    const float dx = raw.ax_g - ax0_, dy = raw.ay_g - ay0_, dz = raw.az_g - az0_;
     if (std::fabs(mag - 1.0f) > kStillG || std::fabs(raw.gx_dps) > kStillDps ||
-        std::fabs(raw.gy_dps) > kStillDps || std::fabs(raw.gz_dps) > kStillDps) {
+        std::fabs(raw.gy_dps) > kStillDps || std::fabs(raw.gz_dps) > kStillDps ||
+        dx * dx + dy * dy + dz * dz > kDriftG * kDriftG) {
         active_ = false;
         return Result::Moved;
     }

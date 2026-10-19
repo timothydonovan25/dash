@@ -630,5 +630,35 @@ int main() {
         CHECK(!cal.active());
     }
 
+    CASE("a slow turn under the gyro limit is not still");
+    {
+        // The bars eased round at 4 dps: every sample is under kStillDps and
+        // within kStillG of 1 g, so only the gravity vector moving gives it
+        // away. Averaged, it would be a 4 dps bias. Here about the board's
+        // x axis, so gravity swings across y; refused once it has turned 2°.
+        auto turning = [](float dps, uint32_t i) {
+            Sample s;
+            const float ang = dps * static_cast<float>(i) * 0.005f * 3.14159265f / 180.0f;
+            s.gx_dps = dps;
+            s.ay_g = std::sin(ang);
+            s.az_g = std::cos(ang);
+            s.t_ms = i * 5;
+            return s;
+        };
+        LevelCal cal;
+        cal.start();
+        LevelCal::Result r = LevelCal::Result::Pending;
+        uint32_t i = 0;
+        for (; i < LevelCal::kSamples && r == LevelCal::Result::Pending; ++i) r = cal.feed(turning(4.0f, i));
+        CHECK(r == LevelCal::Result::Moved);
+        CHECK(i < LevelCal::kSamples);
+        // At 1.5 dps it turns 1.5° in the second and is let through: the
+        // error it can leave is bounded, not zero.
+        cal.start();
+        r = LevelCal::Result::Pending;
+        for (i = 0; i < LevelCal::kSamples && r == LevelCal::Result::Pending; ++i) r = cal.feed(turning(1.5f, i));
+        CHECK(r == LevelCal::Result::Done);
+    }
+
     return check::report("attitude");
 }
