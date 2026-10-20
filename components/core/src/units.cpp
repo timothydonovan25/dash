@@ -109,6 +109,10 @@ float volume_for_display(float gal, System s, const char** unit) {
 size_t fmt_float(char* buf, size_t n, float v, int decimals) {
     if (n == 0) return 0;
     if (!std::isfinite(v)) return emit_lit(buf, n, "--");
+    // render_fixed scales into an int64_t, and a float past it (1e19 at no
+    // decimals, 1e13 at six) is undefined behaviour to convert. No reading
+    // on this dash is that big; one that is, is garbage, and reads as such.
+    if (std::fabs(static_cast<double>(v)) * 1e6 >= 9.0e18) return emit_lit(buf, n, "--");
     char tmp[40];
     const size_t len = render_fixed(tmp, v, decimals);
     return emit(buf, n, tmp, len);
@@ -157,7 +161,9 @@ size_t fmt_delta(char* buf, size_t n, int32_t ms, bool valid, int decimals) {
     // The sign is the whole point of a delta, so it is always drawn — a
     // rider glancing down reads the colour and the sign, not the digits.
     tmp[k++] = ms < 0 ? '-' : '+';
-    const float secs = static_cast<float>(ms < 0 ? -ms : ms) / 1000.0f;
+    // Widened before the negation: -INT32_MIN does not fit an int32_t.
+    const int64_t mag = ms < 0 ? -static_cast<int64_t>(ms) : ms;
+    const float secs = static_cast<float>(mag) / 1000.0f;
     k += render_fixed(tmp + k, secs, decimals);
     return emit(buf, n, tmp, k);
 }

@@ -140,6 +140,46 @@ int main() {
         CHECK_NEAR(p.last[M::Brake1].x, 44.0, 1.0);
     }
 
+    CASE("slowing and riding on is not a stop, however long until the next one");
+    {
+        // 65 down to 45 over 2 s, then on at 45 for a minute, then a real
+        // 0.8 g stop. The 60-0 was left open the whole minute and scored
+        // the stop at the end as a braking distance of most of a mile.
+        Timer t;
+        const Config c;
+        uint32_t now = drive(t, c, 1000, 1000, [](double) { return 65.0; });
+        now = drive(t, c, now + 20, 2000, [](double s) { return 65.0 - 10.0 * s; });
+        now = drive(t, c, now + 20, 60000, [](double) { return 45.0; });
+        CHECK(t.publish(false).phase != 3);
+        const double a = 0.8 * kG;
+        drive(t, c, now + 20, 4000, [&](double s) {
+            const double v = 45.0 - a * s / kFtPerSPerMph;
+            return v > 0.0 ? v : 0.0;
+        });
+        const M p = t.publish(false);
+        CHECK(p.last[M::Brake2].ms == 0);           // no 60-0: it never stopped from 60
+        CHECK(p.last[M::Brake1].ms != 0);           // the 30-0 of the real stop
+        CHECK(p.last[M::Brake1].x < 50.0f);
+    }
+
+    CASE("easing off below the start speed and riding on abandons the stop");
+    {
+        // 35 down to 20, back up to 28 (still under 30 + regain), on at 28,
+        // then a stop: the 30-0 is abandoned at the climb from 20.
+        Timer t;
+        const Config c;
+        uint32_t now = drive(t, c, 1000, 1000, [](double) { return 35.0; });
+        now = drive(t, c, now + 20, 3000, [](double s) {
+            return s < 1.5 ? 35.0 - 10.0 * s : 20.0 + 8.0 * (s - 1.5) / 1.5;
+        });
+        CHECK(t.publish(false).phase != 3);
+        drive(t, c, now + 20, 3000, [](double s) {
+            const double v = 28.0 - 14.0 * s;
+            return v > 0.0 ? v : 0.0;
+        });
+        CHECK(t.publish(false).last[M::Brake1].ms == 0);
+    }
+
     CASE("a speed estimate that drops out abandons the run");
     {
         Timer t;

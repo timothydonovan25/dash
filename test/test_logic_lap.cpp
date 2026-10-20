@@ -349,6 +349,50 @@ int main() {
         delete trace;
     }
 
+    CASE("the trace is in true feet at any latitude, not at 40 degrees");
+    {
+        // 500 ft east then 500 ft north at 60°N, where a degree of longitude
+        // is half a degree of latitude. The frame used cos(40°) everywhere
+        // and drew the eastward leg 766 ft long.
+        core::state::Slots     slots;
+        core::config::Settings settings;
+        services::Deps         deps;
+        services::LogicState   state;
+        NoCommands             none;
+        auto* trace = new core::state::TrackBuffer<core::state::TrackPoint, 4096>();
+        deps.slots = &slots;
+        deps.settings = &settings;
+        deps.trip_trace = trace;
+        const double lat0 = 60.0, lon0 = 10.0;
+        const double ft_per_deg_lon = kFtPerDegLat * std::cos(lat0 * kPi / 180.0);
+        const core::geo::LatLon pts[] = {
+            {lat0, lon0},
+            {lat0, lon0 + 500.0 / ft_per_deg_lon},
+            {lat0 + 500.0 / kFtPerDegLat, lon0 + 500.0 / ft_per_deg_lon}};
+        core::state::Gnss g;
+        uint32_t now = 10000;
+        for (const core::geo::LatLon& p : pts) {
+            g.fix = true;
+            g.lat = p.lat;
+            g.lon = p.lon;
+            g.utc_ms += 1000;
+            g.rx_ms = now;
+            slots.gnss.publish(g);
+            services::logic_tick(deps, state, none, now);
+            now += 1000;
+        }
+        CHECK(trace->size() == 3);
+        core::state::TrackPoint a, b, c;
+        trace->read(0, a);
+        trace->read(1, b);
+        trace->read(2, c);
+        CHECK_NEAR(b.x_ft - a.x_ft, 500.0, 1.0);
+        CHECK_NEAR(b.y_ft - a.y_ft, 0.0, 1.0);
+        CHECK_NEAR(c.y_ft - b.y_ft, 500.0, 1.0);
+        CHECK_NEAR(c.x_ft - b.x_ft, 0.0, 1.0);
+        delete trace;
+    }
+
     CASE("a fix is acted on in the pass it wakes; blackbox rows keep the tick grid");
     {
         // The firmware's `logic`: Scheduled ticks every 20 ms, and an Event

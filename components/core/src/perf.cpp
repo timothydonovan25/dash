@@ -137,10 +137,12 @@ void Timer::update(const Input& in, const Config& c) {
                 b.on = true;
                 b.t0 = at(f);
                 b.ft = (from + v) * 0.5f * kFtPerSPerMph * ((1.0f - f) * dt / 1000.0f);
+                b.min_mph = v;
             }
             continue;
         }
-        if (v > from + c.brake_regain_mph) {
+        if (v < b.min_mph) b.min_mph = v;
+        if (v > b.min_mph + c.brake_regain_mph || in.t_ms - b.t0 > c.max_brake_ms) {
             b.on = false;
             continue;
         }

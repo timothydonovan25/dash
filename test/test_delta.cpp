@@ -217,6 +217,49 @@ int main() {
         CHECK(worst < 1000);
     }
 
+    CASE("a lap's first fix past the line matches the reference's start, not its end");
+    {
+        // Fixes fall where they fall: the reference lap's first came 80 ft
+        // past the line and its last 8 ft short of it, and this lap's first
+        // is 5 ft past. Nearest-anywhere picked the reference's last point,
+        // read a delta of minus a lap, and never matched again that lap.
+        Tracker t;
+        Config cfg;
+        const Oval oval;
+        const float circ = 2.0f * 3.14159265f * oval.radius_ft;
+        const float step_ft = oval.base_speed_ftps / 10.0f;      // 10 Hz
+        const auto ride = [&](float first_ft, bool best, int& valid, int32_t& last,
+                              bool& first_valid, int32_t& first_delta) {
+            t.start_lap();
+            valid = 0;
+            bool first_seen = false;
+            for (float s = first_ft; s < circ; s += step_ft) {
+                float x, y;
+                oval.at(s / circ, 0.0f, x, y);
+                t.sample(x, y, static_cast<uint32_t>(s / oval.base_speed_ftps * 1000.0f), cfg);
+                int32_t d = 0;
+                const bool v = t.delta_ms(d);
+                if (!first_seen) { first_seen = true; first_valid = v; first_delta = d; }
+                if (v) { ++valid; last = d; }
+            }
+            t.finish_lap(best);
+        };
+        int valid = 0;
+        int32_t last = 0, fd = 0;
+        bool fv = false;
+        // The reference: first fix 80 ft past the line. Its last lands
+        // wherever the lap's length leaves it; pick the circumference so it
+        // is 8 ft short.
+        ride(80.0f, true, valid, last, fv, fd);
+        ride(5.0f, false, valid, last, fv, fd);
+        // The first can only be as good as the reference's first point, 75
+        // ft on: about -0.9 s. Not -21 s, a whole lap of this oval.
+        CHECK(fv);
+        CHECK(std::abs(fd) <= 1000);
+        CHECK(valid > 100);                   // and matched all the way round
+        CHECK(std::abs(last) <= 200);
+    }
+
     CASE("clear() forgets the reference");
     {
         Tracker t;

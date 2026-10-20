@@ -501,6 +501,21 @@ esp_err_t fw_post(httpd_req_t* r) {
         return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "not a dash.bin");
     }
 
+    // Not while an install is under way. One whose upload was cut off is
+    // still waiting on the stream (ota gives up after 10 s of silence), and
+    // xStreamBufferReset does nothing while a reader is blocked on it: a
+    // retry inside that window fed its bytes to the old install as the rest
+    // of the old image, both failed, and this request could be answered
+    // with the old one's verdict. The page says to try again shortly.
+    {
+        const core::ota::Install now = d.slots->ota.get().install;
+        if (now == core::ota::Install::Checking || now == core::ota::Install::Writing) {
+            return send_status(r, "409 Conflict",
+                               "{\"ok\":false,\"error\":\"an install is still running, "
+                               "try again in a few seconds\"}");
+        }
+    }
+
     // Anything left from an upload that was cut off goes first.
     xStreamBufferReset(sb);
     const uint32_t gen_before = d.slots->ota.generation();

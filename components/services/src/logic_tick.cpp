@@ -1,6 +1,7 @@
 #include "services/logic_tick.hpp"
 #include "core/units/units.hpp"
 #include "core/log/log.hpp"
+#include <cmath>
 
 namespace services {
 namespace {
@@ -9,12 +10,19 @@ namespace {
 // it has none: ten missed fixes at 10 Hz.
 constexpr int32_t kFixSilentMs = 1000;
 
-// Local feet from a reference fix, for the map traces. Fine over a track;
-// this is a breadcrumb, not a survey.
+// Local feet from a reference fix, for the map traces, the lap delta and
+// saved references. Fine over a track; this is a breadcrumb, not a survey.
+// A degree of longitude is cos(latitude) of a degree of latitude, at the
+// origin's latitude: it was cos(40°) wherever the bike was, which stretched
+// east-west by 12% at 47° and squashed it by 11% at 33°, and the delta
+// matcher's distances with it. Still linear, so a saved reference moves
+// between frames by where its line sits (core::track::shift); a frame
+// started a mile away at the same track changes the scale by 1e-4.
 void to_local_ft(const core::geo::LatLon& origin, const core::geo::LatLon& p,
                  float& x_ft, float& y_ft) {
+    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
     const double lat_ft_per_deg = 364000.0;
-    const double lon_ft_per_deg = 364000.0 * 0.7660444;   // cos(40 deg)
+    const double lon_ft_per_deg = 364000.0 * std::cos(origin.lat * kDeg2Rad);
     x_ft = static_cast<float>((p.lon - origin.lon) * lon_ft_per_deg);
     y_ft = static_cast<float>((p.lat - origin.lat) * lat_ft_per_deg);
 }

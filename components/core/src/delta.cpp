@@ -41,6 +41,7 @@ void Tracker::start_lap() {
     rec_count_ = 0;
     match_ = 0;
     anchored_ = false;
+    at_start_ = true;
     valid_ = false;
     delta_ms_ = 0;
 }
@@ -50,6 +51,7 @@ void Tracker::clear() {
     ref_count_ = 0;
     match_ = 0;
     anchored_ = false;
+    at_start_ = false;
     valid_ = false;
     delta_ms_ = 0;
     last_match_ft_ = 0.0f;
@@ -63,9 +65,12 @@ void Tracker::load_reference(const Point* pts, size_t n) {
         for (size_t i = 0; i < n; ++i) ref_[i] = pts[i];
         ref_count_ = n;
     }
-    // Whatever was matched was matched against the old one.
+    // Whatever was matched was matched against the old one. It can arrive
+    // mid-lap (a saved track's, off the card), so where the rider is on it
+    // is anybody's guess: the next search is the whole lap.
     match_ = 0;
     anchored_ = false;
+    at_start_ = false;
     valid_ = false;
     delta_ms_ = 0;
 }
@@ -100,12 +105,22 @@ void Tracker::sample(float x_ft, float y_ft, uint32_t elapsed_ms,
     // runs near itself — a hairpin, or a return road beside the straight.
     // A global nearest-point search would happily jump to the other branch
     // and report a delta of half a lap.
+    //
+    // Except at the start of a lap. The rider has just crossed the line, and
+    // the reference's last point -- a few feet short of the line -- is often
+    // nearer than its first, which can be a whole fix interval past it (88
+    // ft at 60 mph). Searching everything anchored the lap at the end of the
+    // reference: a delta of minus a lap, then nothing, since every window
+    // after it looked only at the reference's last few points. So the first
+    // search of a lap is the reference's start, as far as a window reaches.
     size_t first = 0;
     size_t last = ref_count_ - 1;
     if (anchored_) {
         first = match_ > c.search_back ? match_ - c.search_back : 0;
         const size_t ahead = match_ + c.search_forward;
         last = ahead < ref_count_ - 1 ? ahead : ref_count_ - 1;
+    } else if (at_start_) {
+        last = c.search_forward < ref_count_ - 1 ? c.search_forward : ref_count_ - 1;
     }
 
     size_t best_i = first;
@@ -132,6 +147,7 @@ void Tracker::sample(float x_ft, float y_ft, uint32_t elapsed_ms,
 
     match_ = best_i;
     anchored_ = true;
+    at_start_ = false;
 
     // Along the reference line, not at its nearest stored point: the rider
     // is usually between two of them, and snapping to one was up to half a

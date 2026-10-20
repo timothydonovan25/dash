@@ -45,9 +45,14 @@ struct Config {
     float    dist_ft[3]     = {60.0f, 330.0f, 660.0f};
     float    abort_drop_mph = 3.0f;
     // A braking run is abandoned if the speed comes back this far above
-    // where it started: the rider was only easing off.
+    // the lowest it reached: the rider eased off and rode on.
     float    brake_regain_mph = 2.0f;
     uint32_t max_run_ms     = 60000;
+    // And if it has not reached a stop in this long. Without it, slowing
+    // from 65 to 45 and riding on at 45 left the 60-0 run open for as long
+    // as the ride lasted, and the next stop, minutes later, scored a
+    // "braking distance" of miles. A 0.2 g stop from 60 takes 14 s.
+    uint32_t max_brake_ms   = 15000;
 };
 
 // The thresholds a rider of these units expects: 0-30/0-60 mph, or
@@ -72,6 +77,7 @@ private:
         bool     on = false;
         uint32_t t0 = 0;
         float    ft = 0.0f;
+        float    min_mph = 0.0f;   // the lowest this run has reached
     };
 
     void finish(int metric, uint32_t ms, float x);

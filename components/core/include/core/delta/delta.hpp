@@ -107,6 +107,9 @@ private:
 
     size_t  match_ = 0;
     bool    anchored_ = false;      // false until the first match of a lap
+    // A lap has just started and nothing has matched yet: the rider is at
+    // the line, so the first search is the reference's start, not all of it.
+    bool    at_start_ = false;
     bool    valid_ = false;
     int32_t delta_ms_ = 0;
     float   last_match_ft_ = 0.0f;

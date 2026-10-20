@@ -98,5 +98,13 @@ int main() {
     // Zero-length buffers are not a crash.
     CHECK(fmt_float(nullptr, 0, 1.0f, 0) == 0);
 
+    // Too big for the fixed-point digits: "--", not undefined behaviour.
+    fmt_float(b.b, sizeof b.b, 3.0e18f, 0);   CHECK(eq(b.b, "--"));
+    fmt_float(b.b, sizeof b.b, -3.0e18f, 2);  CHECK(eq(b.b, "--"));
+    fmt_float(b.b, sizeof b.b, 1.0e9f, 0);    CHECK(eq(b.b, "1000000000"));   // exact in a float
+    // The most negative delta has no positive twin in an int32_t.
+    fmt_delta(b.b, sizeof b.b, INT32_MIN, true, 1);
+    CHECK(std::strncmp(b.b, "-2147483.", 9) == 0);   // the last digit is the float's
+
     return check::report("units");
 }
