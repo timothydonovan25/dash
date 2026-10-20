@@ -206,6 +206,12 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         sm.gy_dps = gy - bias_[1];
         sm.gz_dps = gz - bias_[2];
         sm.temp_c = static_cast<int8_t>(p[13]) / 2.07f + 25.0f;
+        // Bytes 14-15: the part's timestamp, on its own oscillator. Not used
+        // for t_ms; logged so the first rides can measure the real ODR and
+        // the error of the back-dating below. The header's bits 3:2 say
+        // what it holds (0b10 an ODR timestamp). BRINGUP: never seen.
+        sm.chip_ts = static_cast<uint16_t>((p[14] << 8) | p[15]);
+        sm.fifo_hdr = p[0];
         uint32_t t = core::attitude::sample_time_ms(now_ms, i, depth, kSamplePeriodMs);
         // Belt and braces: never at or before the previous sample, and never
         // in the future for it.

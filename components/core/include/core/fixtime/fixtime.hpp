@@ -3,7 +3,8 @@
 // The lap timer used Gnss::rx_ms: the system clock when the fix's first
 // sentence finished arriving. That is the fix's time plus the receiver's
 // output latency (which varies fix to fix with what it computed), the
-// sentence's time on the UART, and up to one 5 ms poll of `gnss`. A lap
+// sentence's time on the UART, and up to ~1.5 ms for the UART's interrupt to
+// hand the bytes on (bsp::kGpsRxFullBytes). A lap
 // time is the difference of two crossings, so both crossings' jitter is in
 // it.
 //

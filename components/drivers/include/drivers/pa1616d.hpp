@@ -10,7 +10,7 @@ namespace drivers {
 class Pa1616d final : public hal::IGnss {
 public:
     hal::Status init() override;
-    hal::Status read(char* out, size_t max, size_t& count) override;
+    hal::Status read(char* out, size_t max, size_t& count, uint32_t wait_ms) override;
     hal::Status send_command(const char* nmea_body) override;
 
 private:

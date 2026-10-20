@@ -424,6 +424,80 @@ def section_fusion(r, det, events):
             r.line("|speedo - fused| p99 while moving", f"{pct(diffs, 99):.2f} mph")
 
 
+def imu_chip_clock(r, imu):
+    """The part's own timestamp against the firmware's back-dated Time: the
+    real sample rate, how far the two clocks drift apart, and how wrong the
+    back-dating is, worst after a stall (Drain > 0)."""
+    if not imu.has("ChipTs"):
+        r.note("no ChipTs column (a log from before the chip timestamp was logged)")
+        return
+    ts, chip, hdr, drain = imu["Time"], imu["ChipTs"], imu["Hdr"], imu["Drain"]
+    kinds = [(int(h) >> 2) & 3 for h in hdr if isinstance(h, float)]
+    odr = sum(1 for k in kinds if k == 2)
+    r.line("packets with an ODR timestamp (Hdr bits 3:2 = 10)",
+           f"{odr} of {len(kinds)}")
+    if odr < len(kinds) * 0.9:
+        r.note("the FIFO is not carrying an ODR timestamp; check TMST_CONFIG and "
+               "FIFO_CONFIG1's FIFO_TMST_FSYNC_EN against the datasheet")
+        return
+    # Segments of consecutive rows: a ring drop or a stall over ~50 ms makes
+    # the 16-bit difference ambiguous (it wraps every 65.5 ms at 1 us).
+    segs, cur = [], []
+    for i in range(len(ts)):
+        ok = all(isinstance(v, float) for v in (ts[i], chip[i]))
+        if ok and cur and ts[i] - ts[cur[-1]] < 0.05:
+            cur.append(i)
+        else:
+            if len(cur) > 1:
+                segs.append(cur)
+            cur = [i] if ok else []
+    if len(cur) > 1:
+        segs.append(cur)
+    deltas = [(int(chip[b]) - int(chip[a])) % 65536
+              for s in segs for a, b in zip(s, s[1:])]
+    if not deltas:
+        return
+    raw = median(deltas)
+    unit_us = 1 if raw > 2000 else 16     # TMST_RES: 1 us, or 16 us
+    period_us = raw * unit_us
+    r.line("chip interval, median", f"{raw:.0f} ticks = {period_us:.1f} us "
+           f"(assuming {unit_us} us ticks), ODR {1e6 / period_us:.2f} Hz")
+    r.verdict(abs(period_us - 5000) < 5000 * 0.03,
+              f"real ODR within 3 % of 200 Hz ({(period_us / 5000 - 1) * 100:+.2f} %)")
+    # Per segment: Time against the unwrapped chip clock, a straight-line
+    # fit (the slope is the two crystals' drift), and what is left over is
+    # the back-dating's error.
+    res_all, res_backed, ppm = [], [], []
+    for s in segs:
+        if len(s) < 200:
+            continue
+        c, t = [0.0], [ts[s[0]]]
+        for a, b in zip(s, s[1:]):
+            c.append(c[-1] + ((int(chip[b]) - int(chip[a])) % 65536) * unit_us / 1e6)
+            t.append(ts[b])
+        mc, mt = mean(c), mean(t)
+        var = sum((x - mc) ** 2 for x in c)
+        if var <= 0:
+            continue
+        slope = sum((x - mc) * (y - mt) for x, y in zip(c, t)) / var
+        ppm.append((slope - 1) * 1e6)
+        for k, i in enumerate(s):
+            e = abs(t[k] - (mt + slope * (c[k] - mc))) * 1000
+            res_all.append(e)
+            if drain[i]:
+                res_backed.append(e)
+    if not res_all:
+        r.note("no run of rows long enough to fit the two clocks")
+        return
+    r.line("P4 clock against the chip's", f"{median(ppm):+.0f} ppm (median of {len(ppm)} runs)")
+    r.line("back-dated Time error p50 / p99",
+           f"{pct(res_all, 50):.2f} / {pct(res_all, 99):.2f} ms")
+    if res_backed:
+        r.line("... on rows from a backed-up FIFO, p50 / p99",
+               f"{pct(res_backed, 50):.2f} / {pct(res_backed, 99):.2f} ms")
+    r.verdict(pct(res_all, 99) < 3.0, "back-dated sample times within 3 ms (p99)")
+
+
 def section_imu(r, imu, det, info):
     st = info.get("settings", {})
     r.section("6. The IMU: rate, mount, bias, vibration",
@@ -440,6 +514,7 @@ def section_imu(r, imu, det, info):
     backed = sum(1 for d in imu["Drain"] if d and d > 0)
     r.line("samples from a backed-up FIFO", f"{backed} ({backed / imu.n * 100:.2f} %)")
     r.verdict(len(big) < imu.n * 0.001, f"{len(big)} IMU gaps over 7.5 ms")
+    imu_chip_clock(r, imu)
     for ax in ("Ax", "Ay", "Az"):
         a = vals(imu[ax])
         clip = sum(1 for v in a if abs(v) > 15.8)

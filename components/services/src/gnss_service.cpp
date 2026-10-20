@@ -12,6 +12,11 @@
 namespace services {
 namespace {
 
+// The longest `gnss` waits for a byte. It wakes as soon as one arrives (the
+// UART's interrupt, through the driver's ring buffer); this only bounds how
+// late a dead receiver's fix is aged out and a retry is picked up.
+constexpr uint32_t kWaitMs = 50;
+
 void gnss_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
@@ -39,7 +44,7 @@ void gnss_task(void* arg) {
 
         char buf[256];
         size_t n = 0;
-        const hal::Status s = d.gnss ? d.gnss->read(buf, sizeof buf, n)
+        const hal::Status s = d.gnss ? d.gnss->read(buf, sizeof buf, n, kWaitMs)
                                      : hal::Status::NotPresent;
         const uint32_t now = d.clock->now_ms();
 
@@ -79,10 +84,11 @@ void gnss_task(void* arg) {
             wake_logic(d);
         }
 
-        // 5 ms, not 20: the poll is how late a fix is stamped, and the lap
-        // timer interpolates line crossings from that stamp. Reading an
-        // idle UART is a few microseconds.
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // No sleep on success: the read above is the wait, and it returns
+        // when bytes arrive, so a fix is stamped within ~1.5 ms of its
+        // sentence ending (the lap timer interpolates crossings from that
+        // stamp). A read that failed did not wait, so this one does.
+        if (!hal::ok(s)) vTaskDelay(pdMS_TO_TICKS(kWaitMs));
     }
 }
 

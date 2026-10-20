@@ -182,6 +182,8 @@ void imu_task(void* arg) {
                         r.temp_c = batch[i].temp_c;
                         r.batch_n = i == 0 ? static_cast<uint8_t>(n) : 0;
                         r.drain = static_cast<uint8_t>(drain);
+                        r.chip_ts = batch[i].chip_ts;
+                        r.fifo_hdr = batch[i].fifo_hdr;
                         raw_log->push(r);
                     }
                     core::attitude::Sample a;

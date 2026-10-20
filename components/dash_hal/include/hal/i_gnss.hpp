@@ -6,6 +6,7 @@
 // bungeed to the seat.
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include "hal/status.hpp"
 
 namespace hal {
@@ -15,9 +16,10 @@ public:
     virtual ~IGnss() = default;
     virtual Status init() = 0;
 
-    // Non-blocking. Ok with count == 0 means nothing has arrived yet, which
-    // is the normal case at 50 Hz against a 10 Hz receiver.
-    virtual Status read(char* out, size_t max, size_t& count) = 0;
+    // Waits up to `wait_ms` for the first byte, then returns it with
+    // whatever else has arrived, without waiting for `max`. Ok with
+    // count == 0 means nothing came in that time, which is not an error.
+    virtual Status read(char* out, size_t max, size_t& count, uint32_t wait_ms) = 0;
 
     // Body only, without the '$' or the checksum — the driver adds those.
     // Used to set the fix rate at boot. Not required to work.

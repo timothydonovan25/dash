@@ -283,7 +283,7 @@ int session_of(const char* name) {
 
 size_t imu_header(char* buf, size_t n) {
     return literal(buf, n,
-        "Time,Ax,Ay,Az,Gx,Gy,Gz,TempC,Batch,Drain\n");
+        "Time,Ax,Ay,Az,Gx,Gy,Gz,TempC,Batch,Drain,ChipTs,Hdr\n");
 }
 
 size_t format_imu(char* buf, size_t n, const ImuRow& r) {
@@ -297,7 +297,9 @@ size_t format_imu(char* buf, size_t n, const ImuRow& r) {
     o.f(r.gz_dps, 3);  o.sep();
     o.f(r.temp_c, 1);  o.sep();
     o.u(r.batch_n);    o.sep();
-    o.u(r.drain);
+    o.u(r.drain);      o.sep();
+    o.u(r.chip_ts);    o.sep();
+    o.u(r.fifo_hdr);
     o.c('\n');
     return o.done();
 }

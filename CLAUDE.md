@@ -40,6 +40,10 @@ uncommitted work does not follow you. Commit and push before switching
 machines; `git pull` on arrival. (Until 2026-10-17 the folder was synced by
 Syncthing, `.git` and `build/` included; that is gone.)
 
+- **Run `fastfetch` before starting a serious task**, to know which machine
+  this is. The laptop is `kao@thinkpad` (ThinkPad X1 Extreme Gen 4i); the
+  desktop is `Desktop`. The Python env, the build tree and what has been
+  pulled all depend on it.
 - `build/`, `build-host/` and `build-sim/` are in `.gitignore`, so each
   machine has its own. The laptop's ESP-IDF Python env is
   `idf6.0_py3.14_env`, the desktop's is `idf6.0_py3.12_env`. A build tree
@@ -172,7 +176,9 @@ Things that will bite you:
   never shares with the PCA9955B.
 - **SPI2 carries only the IMU and the SD card** (SD in SPI mode). Give each
   device its own clock. **Never call `spi_device_acquire_bus()`** — the
-  IDF driver serialises per transaction on its own.
+  IDF driver serialises the bus on its own. The IDF's SD host does call
+  it, for a whole SD command including the card's busy time, so the IMU
+  waits out each one; its FIFO absorbs it (architecture §5.1).
 - **The tach is an inductive wrap on the plug lead, 5–10 V.** R34/C19 may
   filter its spike away; see `p4-board-pin-map.md` §6.3 before blaming
   firmware for a dead tach.

@@ -56,16 +56,24 @@ hal::Status Pa1616d::init() {
     return hal::Status::Ok;
 }
 
-hal::Status Pa1616d::read(char* out, size_t max, size_t& count) {
+hal::Status Pa1616d::read(char* out, size_t max, size_t& count, uint32_t wait_ms) {
     count = 0;
     if (!installed_ || max == 0) return hal::Status::NotPresent;
+    uint8_t* p = reinterpret_cast<uint8_t*>(out);
 
-    // Non-blocking: `gnss` is a 50 Hz loop against a 10 Hz receiver, so most
-    // calls return nothing and that is not an error.
-    const int n = uart_read_bytes(kPort, reinterpret_cast<uint8_t*>(out),
-                                  static_cast<uint32_t>(max), 0);
+    // One byte with the wait, the rest without. uart_read_bytes does not
+    // return early with what it has: asked for `max` with a timeout, it
+    // waits for all of them. Asked for one, it returns as soon as the
+    // driver's interrupt has put anything in the ring buffer, which is what
+    // wakes `gnss` when a sentence arrives.
+    int n = uart_read_bytes(kPort, p, 1, pdMS_TO_TICKS(wait_ms));
     if (n < 0) return hal::Status::IoError;
-    count = static_cast<size_t>(n);
+    if (n == 0) return hal::Status::Ok;
+    count = 1;
+    if (max > 1) {
+        n = uart_read_bytes(kPort, p + 1, static_cast<uint32_t>(max - 1), 0);
+        if (n > 0) count += static_cast<size_t>(n);
+    }
     return hal::Status::Ok;
 }
 

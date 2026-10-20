@@ -79,6 +79,17 @@ bool init_uart1() {
         return false;
     }
     if (uart_param_config(UART_NUM_1, &cfg) != ESP_OK) return false;
+
+    // The driver's interrupt moves bytes from the hardware FIFO to the ring
+    // buffer `gnss` waits on only when the FIFO holds 120 of them or the line
+    // has been idle for 10 characters. RMC and GGA come back to back, so the
+    // end of the first sentence of a fix could sit in the FIFO for ~20 ms at
+    // 57600, by an amount that moved with the sentence lengths, and that is
+    // when the fix is stamped. 8 bytes is 1.4 ms at 57600, and a couple of
+    // hundred interrupts a second of a few microseconds each.
+    if (uart_set_rx_full_threshold(UART_NUM_1, kGpsRxFullBytes) != ESP_OK) return false;
+    if (uart_set_rx_timeout(UART_NUM_1, kGpsRxIdleChars) != ESP_OK) return false;
+
     return uart_set_pin(UART_NUM_1, kGpsTx, kGpsRx, UART_PIN_NO_CHANGE,
                         UART_PIN_NO_CHANGE) == ESP_OK;
 }

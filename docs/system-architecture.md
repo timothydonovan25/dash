@@ -321,7 +321,7 @@ core 0 is yours.
 |---|---|---|---|---|
 | `ctrl` | 0 | 18 | 500 Hz + every tach edge | tach math, wheel speed, shift-light output; every PCA9955B write (lamps, backlight, config, re-init) |
 | `imu` | 0 | 15 | 200 Hz, INT1 | ICM-42688-P FIFO, attitude filter, jumps |
-| `gnss` | 0 | 12 | 20 ms poll | NMEA parse, position |
+| `gnss` | 0 | 12 | on UART data | NMEA parse, position |
 | `logic` | 0 | 10 | 50 Hz + on demand | lap timer, trip, fuel, command drain; woken by a new fix or a command |
 | `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue, pod bus recovery |
 | `render` | 1 | 6 | 120 Hz | frame snapshot, widgets, 8080 panel bus |
@@ -354,11 +354,23 @@ to be late** — display, card, Bluetooth, Wi-Fi.
 
 ### 5.1 Bus ownership
 
-- **SPI2** — IMU and SD card (SD in SPI mode). Two tasks touch it (`imu`,
-  `logger`). This is safe. The IDF `spi_master` driver serialises
-  transactions per bus on its own. Do **not** call
-  `spi_device_acquire_bus()` anywhere, or you break that. SD write-busy
-  time can stall the IMU for tens of ms; its FIFO absorbs it.
+- **SPI2** — IMU and SD card (SD in SPI mode). `imu` uses the IMU; the
+  card is used by `logger`, `storage`, `ota` and `wifi`, under the one lock
+  in `drivers/sdcard`. Sharing is safe: the IDF `spi_master` driver
+  serialises access per bus. It does **not** interleave the two devices
+  transaction by transaction, though. The IDF's SD-over-SPI host
+  (`esp_driver_sdspi/src/sdspi_host.c`, `sdspi_host_start_command`) calls
+  `spi_device_acquire_bus()` itself and holds the bus for a whole SD
+  command: a multi-block write, and the polling while the card signals
+  busy. So the IMU waits out every SD command, usually about a millisecond
+  and, while the card is busy, tens of ms or more. The bus lock has no
+  priority inheritance, so a task that preempts the card's caller (on core
+  1, `render` preempts `logger`) stretches the wait. The IMU's 2 kB FIFO
+  holds ~640 ms at 200 Hz and `imu` drains it all on the next read, so
+  this costs latency, not samples; the `_imu` detail rows log the FIFO
+  backlog per read. Our own code still never calls
+  `spi_device_acquire_bus()`: a second holder would only lengthen the IMU's
+  waits.
 - **i80 LCD bus** — the panel only, 8-bit 8080 via LCD_CAM. Owned by
   `render`. DMA, no contention.
 - **I2C0** — handlebar pod only, 100 kHz. Owned by `input`.

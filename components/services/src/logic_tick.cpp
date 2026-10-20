@@ -948,7 +948,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         if (d.lap_trace) d.lap_trace->push(p);
         if (d.delta && s.lap.state().phase == core::lap::Phase::Timing) {
             // Lap time at the fix, not at this pass: the position is the
-            // fix's, and the pass runs a little after it (the gnss poll, or
+            // fix's, and the pass runs a little after it (the gnss wake, or
             // a whole tick if the fix arrived with no wake).
             const uint32_t cur = s.lap.state().current_ms;
             const uint32_t age = now - s.last_fix_ms;

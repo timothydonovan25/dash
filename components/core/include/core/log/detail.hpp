@@ -89,6 +89,12 @@ struct ImuRow {
     // write freezing core 0. That is the shared-bus assumption, measured.
     uint8_t  batch_n = 0;
     uint8_t  drain   = 0;
+    // The part's own timestamp and the FIFO packet's header, raw
+    // (hal::IImu::Sample). t_ms is the P4's back-dated guess; the chip's
+    // clock, differenced row to row (it wraps every 65.5 ms at 1 us), is
+    // what the part actually did. tools/ridelog compares the two.
+    uint16_t chip_ts  = 0;
+    uint8_t  fifo_hdr = 0;
 };
 
 size_t imu_header(char* buf, size_t n);

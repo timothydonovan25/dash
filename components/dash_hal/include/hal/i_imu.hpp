@@ -20,6 +20,11 @@ public:
         float    ax_g = 0.0f, ay_g = 0.0f, az_g = 1.0f;
         float    temp_c = 0.0f;
         uint32_t t_ms = 0;
+        // The part's own 16-bit timestamp and the packet's header byte, as
+        // they came, for the detail log only: t_ms is worked out from the
+        // P4's clock, and these let a ride measure how far off that is.
+        uint16_t chip_ts = 0;
+        uint8_t  fifo_hdr = 0;
     };
 
     virtual Status init() = 0;

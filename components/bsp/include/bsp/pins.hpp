@@ -70,6 +70,10 @@ inline constexpr int kGpsRx          = 2;    // U16-5, ESP RX <- GPS TX
 inline constexpr int kGpsTx          = 3;    // U16-6, ESP TX -> GPS RX
 inline constexpr int kGpsBootBaud    = 9600;
 inline constexpr int kGpsRunBaud     = 57600;
+// When the UART's interrupt hands received bytes on (buses.cpp): this many
+// in the FIFO, or the line idle for this many character times.
+inline constexpr int kGpsRxFullBytes = 8;
+inline constexpr int kGpsRxIdleChars = 2;
 
 // ── IMU ──────────────────────────────────────────────────────────────
 // Data ready. The imu task blocks on this rather than polling, and falls
