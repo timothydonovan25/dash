@@ -104,7 +104,9 @@ void imu_task(void* arg) {
     float imu_temp_c = 0.0f;
     const bool have_int = attach_data_ready();
 
+    watchdog_join();
     for (;;) {
+        watchdog_feed();
         // Woken by the part when it has a sample, or by the timeout if the
         // interrupt is not arriving. `imu_timeouts` climbing at the sample
         // rate on the DIAG system screen means INT1 is not working and the

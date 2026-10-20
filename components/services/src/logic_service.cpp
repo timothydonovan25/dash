@@ -46,7 +46,9 @@ void logic_task(void* arg) {
 
     constexpr TickType_t kPeriod = pdMS_TO_TICKS(20);    // 50 Hz
     TickType_t next = xTaskGetTickCount();
+    watchdog_join();
     for (;;) {
+        watchdog_feed();
         // Due already, or woken early? A wake that lands on the deadline
         // counts as the tick, so a busy receiver cannot starve the schedule.
         const TickType_t left = next - xTaskGetTickCount();

@@ -215,6 +215,14 @@ under its transactions: `keeper` decides when (`claim_retry`) and sets a
 bit in `Deps::retry_requests`; `imu`, `gnss`, `input` (the pod's bus),
 `ctrl` (the LED driver) and `render` (the panel) do it.
 
+`ctrl`, `imu`, `logic` and `render` join the task watchdog
+(`services::watchdog_join`, fed once a loop), and on the bike it panics
+(`CONFIG_ESP_TASK_WDT_PANIC`, a build error in `main.cpp` otherwise): one
+that stops for 5 s reboots the board, with a core dump and "task
+watchdog" as the next session's reset reason. Anything added to one of
+those loops must not block that long; a dev image that hangs this way
+comes back as stable. The demo's tasks do not join.
+
 **A flash write freezes core 0** for its whole length — up to ~20 ms when
 NVS erases a page — because IDF suspends the other core's scheduler and
 the P4 has no flash auto-suspend (IDF v6.0). So nothing writes flash while

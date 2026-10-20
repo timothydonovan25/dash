@@ -216,6 +216,12 @@ void start_ble(Deps& d);
 // needed lowering (the bring-up check that the task names still match).
 void demote_radio_tasks(bool report);
 
+// The task watchdog (watchdog.cpp). A task that joins must feed it at
+// least once every CONFIG_ESP_TASK_WDT_TIMEOUT_S (5 s), or the board
+// panics and reboots: ctrl, imu, logic and render, once a loop each.
+void watchdog_join();
+void watchdog_feed();
+
 // Every task's stack high-water mark into DIAG -> System (the tightest
 // task) and the console (stack_watch.cpp). Once a second, from keeper.
 void watch_stacks(ui::SystemInfo& sys, uint32_t now_ms);

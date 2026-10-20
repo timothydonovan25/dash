@@ -176,7 +176,9 @@ void ctrl_task(void* arg) {
         return d.lamps && static_cast<int32_t>(ticks - retry_tick) >= 0;
     };
 
+    watchdog_join();
     for (;;) {
+        watchdog_feed();
         hal::IEngineSense::Counts c;
         const hal::Status s = d.sense ? d.sense->read(c) : hal::Status::NotPresent;
         const int64_t work_start_us = esp_timer_get_time();

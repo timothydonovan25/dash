@@ -221,7 +221,9 @@ void render_task(void* arg) {
     uint32_t frame_no = 1;
     auto deadline_ms = [&] { return start_ms + frame_no * 1000u / kFrameHz; };
 
+    watchdog_join();
     for (;;) {
+        watchdog_feed();
         // Wait here rather than at the bottom of the loop, so a button press
         // is acted on the moment it arrives instead of after the rest of the
         // period has run out. That is the difference between a menu that

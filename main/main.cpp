@@ -40,6 +40,12 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #endif
 #endif
 
+// ctrl, imu, logic and render join the task watchdog (services/watchdog.cpp).
+// Without panic a stuck one only prints, to a console nobody has on the bike.
+#if !CONFIG_ESP_TASK_WDT_PANIC || CONFIG_ESP_TASK_WDT_TIMEOUT_S < 2
+#error "CONFIG_ESP_TASK_WDT_PANIC must be on (timeout at least 2 s): delete sdkconfig and rebuild"
+#endif
+
 // Stable and dev firmware (§11.7) rest on the bootloader's rollback: a dev
 // image never confirms itself, so any reset returns to stable. Without it a
 // dev build that hangs is a USB reflash. Same sdkconfig trap as above, and
