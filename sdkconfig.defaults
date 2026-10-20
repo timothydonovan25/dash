@@ -101,6 +101,11 @@ CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_TRANSPORT_UART=n
 # Off core 0 (§11.4). main.cpp fails the build if this is ever lost.
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+# NimBLE's callouts on FreeRTOS timers, not esp_timer. The esp_timer task
+# is IDF's, at priority 22 on core 0 -- above `ctrl` -- and every NimBLE
+# timeout would run there. FreeRTOS's timer task is at 1, so it can preempt
+# nothing. main.cpp fails the build if this is lost.
+CONFIG_BT_NIMBLE_USE_ESP_TIMER=n
 # Peripheral only. No central or GATT client (they were only for AMS,
 # §11.3). Observer comes back with the TPMS scan.
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y

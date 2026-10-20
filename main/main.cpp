@@ -32,6 +32,12 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #if !CONFIG_BT_CONTROLLER_DISABLED
 #error "the BLE controller is the C6's, over esp_hosted; the P4 has none"
 #endif
+// Pinning the host is not enough on its own: with esp_timer, NimBLE's
+// callouts run in IDF's esp_timer task, priority 22 on core 0. FreeRTOS
+// timers run at priority 1 instead.
+#if CONFIG_BT_NIMBLE_USE_ESP_TIMER
+#error "CONFIG_BT_NIMBLE_USE_ESP_TIMER must be off (esp_timer runs above ctrl on core 0): delete sdkconfig and rebuild"
+#endif
 #endif
 
 // Stable and dev firmware (§11.7) rest on the bootloader's rollback: a dev

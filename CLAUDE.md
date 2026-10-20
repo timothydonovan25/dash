@@ -199,7 +199,10 @@ on every edge (`EngineSense::notify_on_tach`), so the lamps are decided at
 the edge, not at the next 2 ms tick. ESP-Hosted's tasks and IDF's
 `sys_evt` are created above 18 and are lowered at run time
 (`services::demote_radio_tasks`, from main before `ctrl` starts and once a
-second after); lwIP is pinned to core 1 in sdkconfig.
+second after); lwIP is pinned to core 1 in sdkconfig. IDF's `esp_timer` task
+is at 22 on core 0 too, so NimBLE uses FreeRTOS timers
+(`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, a build error in `main.cpp` otherwise).
+ESP-Hosted's host port still makes esp_timers.
 
 A device's re-init runs on the task that owns it, never on another core
 under its transactions: `keeper` decides when (`claim_retry`) and sets a

@@ -45,6 +45,9 @@
 #if !CONFIG_BT_NIMBLE_PINNED_TO_CORE_1
 #error "NimBLE must be pinned to core 1: delete sdkconfig and rebuild"
 #endif
+#if CONFIG_BT_NIMBLE_USE_ESP_TIMER
+#error "CONFIG_BT_NIMBLE_USE_ESP_TIMER must be off (esp_timer runs above ctrl on core 0): delete sdkconfig and rebuild"
+#endif
 
 namespace {
 
