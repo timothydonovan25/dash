@@ -261,7 +261,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 48 host tests, all passing.
+the media half of step 9 is written. 49 host tests, all passing.
 
 **`core/`** — all host-tested:
 
@@ -322,6 +322,25 @@ the media half of step 9 is written. 48 host tests, all passing.
   fsync 5 s after the first uncommitted write or when the bike stops (was
   every empty-ring pass, ~4.5 a second at 10 Hz). A cut loses up to ~7 s
   of rows
+- `log/detail.hpp` (1.36) the **detail log**, for the first rides: five
+  more files a session in `detail/` beside the blackbox, each from one
+  producer through its own ring. `_imu` every raw sample at 200 Hz (sensor
+  axes, before mount and bias; FIFO backlog per read), `_tach` at 50 Hz
+  from `ctrl` (per-window pulse intervals, extra/missed pulses by
+  `PulseWindow`, edges the ISR's refractory window threw away and how long
+  after the spark, edge-to-ctrl and edge-to-lamp latency, tick work time),
+  `_det` at 50 Hz from `logic` (every speed source and fusion's verdict,
+  the attitude filter's insides now on the `Attitude` slot, stunt lift,
+  rpm/mph), `_evt` from `logic` (`EventWatcher`: every command, health
+  changes, fixes, laps, jumps, tricks, gear and engine changes, power cuts,
+  ring drops; the file opens with the firmware, the reset reason and every
+  setting), `_diag` at 1 Hz from `logger` (heap, stacks, timing, temps,
+  battery, device states, rows and drops per stream, the card's own write
+  times). CONFIG → Log → Detail log, on by default, ~130 MB an hour.
+  `session_of` counts detail names so a session number is never reused.
+  `SdCard` holds up to six files open (max_files 10). `tools/ridelog`
+  reads a session off the card and reports, per assumption, what the ride
+  measured
 - `media/` the §11.1 Feed line parser: bounded, UTF-8-safe, `P` as an anchor
 - `ota/` stable/dev slot roles from the bootloader's rollback state, the
   image header check, parked-only gating

@@ -272,7 +272,8 @@ size_t log_file_name(char* buf, size_t n, Date date, unsigned session);
 
 // The session number in a log's file name (no directory), either form, or
 // -1 if it is not one. A new session takes one more than the highest on the
-// card: renaming frees "sNNN.csv", so a free plain name is not enough.
+// card: renaming frees "sNNN.csv", so a free plain name is not enough. A
+// detail file's name (core/log/detail.hpp, "s007_imu.csv") counts too.
 int session_of(const char* name);
 
 }  // namespace core::log

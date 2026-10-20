@@ -37,6 +37,11 @@ ui::SystemInfo         g_system;
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
 EXT_RAM_BSS_ATTR core::log::Ring<core::log::Record, 512>                 g_blackbox;
+// The detail log's rings (core/log/detail.hpp), ~230 kB together.
+EXT_RAM_BSS_ATTR core::log::ImuRing                                      g_imu_log;
+EXT_RAM_BSS_ATTR core::log::TachRing                                     g_tach_log;
+EXT_RAM_BSS_ATTR core::log::DetRing                                      g_det_log;
+EXT_RAM_BSS_ATTR core::log::EvtRing                                      g_evt_log;
 EXT_RAM_BSS_ATTR core::delta::Tracker                                    g_delta;
 // Saved tracks, `logic` to `storage` and back: a reference lap and a whole
 // file's scratch, ~40 kB.
@@ -138,6 +143,10 @@ services::Deps& build() {
     g_deps.trip_trace = &g_trip_trace;
     g_deps.lap_trace  = &g_lap_trace;
     g_deps.blackbox   = &g_blackbox;
+    g_deps.imu_log    = &g_imu_log;
+    g_deps.tach_log   = &g_tach_log;
+    g_deps.det_log    = &g_det_log;
+    g_deps.evt_log    = &g_evt_log;
     g_deps.delta      = &g_delta;
     g_deps.lap_history= &g_lap_history;
     g_deps.tracks     = &g_tracks;

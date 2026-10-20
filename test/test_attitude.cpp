@@ -377,6 +377,31 @@ int main() {
         CHECK_NEAR(f.lean_deg(), 0.0, 0.5);
     }
 
+    CASE("the filter's insides are published for the detail log");
+    {
+        // In a steady bar-mounted corner, with a bias set: the slot carries
+        // what the getters say, so the log records the filter's own numbers.
+        Filter f;
+        f.set_gyro_bias(0.5f, -0.25f, 0.125f);
+        const Truth corner = steady(30.0, 25.0, true);
+        bool slid = false;
+        float steer_seen = 0.0f;
+        ride_gps(f, cfg, 4000, true, [&](uint32_t) { return Moment{corner, corner.yaw_dps}; },
+                 [&](uint32_t) { slid = slid || f.sliding(); steer_seen = f.steer_deg(); });
+        core::state::Attitude a;
+        f.publish_into(a);
+        CHECK(a.steer_deg == f.steer_deg());
+        CHECK(a.steer_deg == steer_seen);
+        CHECK(a.accel_lean_deg == f.accel_lean_deg());
+        CHECK(a.slide_rate_dps == f.slide_rate_dps());
+        CHECK(a.sliding == f.sliding());
+        CHECK(a.bias_gx_dps == 0.5f);
+        CHECK(a.bias_gy_dps == -0.25f);
+        CHECK(a.bias_gz_dps == 0.125f);
+        CHECK(a.steer_deg != 0.0f);           // a turned bar is in the corner
+        CHECK(std::fabs(a.accel_lean_deg - a.lean_deg) > 5.0f);   // and the accel lies
+    }
+
     CASE("the mount offset comes out of every reading");
     {
         // Board bolted in 8 degrees off level.

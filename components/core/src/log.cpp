@@ -250,21 +250,7 @@ size_t log_file_name(char* buf, size_t n, Date date, unsigned session) {
     return static_cast<size_t>(len);
 }
 
-int session_of(const char* name) {
-    if (!name) return -1;
-    const size_t n = std::strlen(name);
-    // ...sNNN.csv, with the 's' first or after the date's '_'.
-    if (n < 8 || std::strcmp(name + n - 4, ".csv") != 0) return -1;
-    const char* s = name + n - 8;
-    if (s[0] != 's') return -1;
-    if (s != name && s[-1] != '_') return -1;
-    int v = 0;
-    for (int i = 1; i <= 3; ++i) {
-        if (s[i] < '0' || s[i] > '9') return -1;
-        v = v * 10 + (s[i] - '0');
-    }
-    return v;
-}
+// session_of() is in detail.cpp: it knows the detail files' names too.
 
 void FlushPolicy::buffered(uint32_t now_ms) {
     if (!has_rows_) {

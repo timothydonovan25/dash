@@ -164,7 +164,26 @@ void imu_task(void* arg) {
                 const float speed = fu.speed_valid
                                         ? fu.speed_mph
                                         : d.slots->motion.get().best_mph;
+                // Every sample as the part gave it, for the detail log
+                // (core/log/detail.hpp): sensor axes, before the mount
+                // rotation and the bias, so the filter can be re-run.
+                core::log::ImuRing* raw_log =
+                    d.settings->detail_log ? d.imu_log : nullptr;
                 for (size_t i = 0; i < n; ++i) {
+                    if (raw_log) {
+                        core::log::ImuRow r;
+                        r.t_ms = batch[i].t_ms;
+                        r.ax_g = batch[i].ax_g;
+                        r.ay_g = batch[i].ay_g;
+                        r.az_g = batch[i].az_g;
+                        r.gx_dps = batch[i].gx_dps;
+                        r.gy_dps = batch[i].gy_dps;
+                        r.gz_dps = batch[i].gz_dps;
+                        r.temp_c = batch[i].temp_c;
+                        r.batch_n = i == 0 ? static_cast<uint8_t>(n) : 0;
+                        r.drain = static_cast<uint8_t>(drain);
+                        raw_log->push(r);
+                    }
                     core::attitude::Sample a;
                     a.gx_dps = batch[i].gx_dps;
                     a.gy_dps = batch[i].gy_dps;

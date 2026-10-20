@@ -12,212 +12,525 @@
 // hundreds on a slow card -- and at 5 that was keeper's 20 Hz health table
 // among others. The ring holds ten seconds; this only needs the average
 // rate, which the idle time on core 1 has plenty of.
+//
+// It also drains the detail log (core/log/detail.hpp) into detail/: four
+// more rings, one per producer, and a fifth file it writes itself, the 1 Hz
+// diag row, read off the slots and SystemInfo. Each of the six files has its
+// own RAM block and its own FlushPolicy; one sync commits them all. The
+// card's own write times go into the diag row, because every ring's size
+// rests on a guess at how long a card can stall.
 #include "services/services.hpp"
+#include "core/log/detail.hpp"
 #include "core/log/log.hpp"
+#include "bsp/pins.hpp"
 #include "drivers/sdcard.hpp"
 
+#include "esp_app_desc.h"
 #include "esp_attr.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdio>
+#include <cstring>
 
 namespace services {
 namespace {
 
+using core::log::Stream;
+using core::log::kStreamCount;
+
 // 8 kB per write, as §9.2 says. An SD card charges roughly the same latency
-// for 512 bytes as for 8 kB, so the batch size is free throughput.
+// for 512 bytes as for 8 kB, so the batch size is free throughput. The raw
+// IMU file is the fastest at ~12 kB/s, so its block is twice that.
 constexpr size_t kBlockBytes = 8192;
+constexpr size_t kImuBlockBytes = 16384;
+constexpr size_t kSmallBlockBytes = 4096;   // events, diag
 constexpr size_t kBatch = 64;
+
+// A write or sync this slow counts in the diag row's SdSlow.
+constexpr uint32_t kSlowMs = 100;
+constexpr uint32_t kDiagEveryMs = 1000;
+
+struct Out {
+    char*    block = nullptr;
+    size_t   cap = 0;
+    size_t   used = 0;
+    char     path[48] = {};
+    bool     header = false;      // its header is in the block or on the card
+    bool     on_card = false;     // something has been written under `path`
+    uint32_t rows = 0;
+    core::log::FlushPolicy flush;
+};
+
+// What each drain pops into, a batch at a time.
+struct Batches {
+    core::log::Record   main[kBatch];
+    core::log::ImuRow   imu[kBatch];
+    core::log::TachRow  tach[kBatch];
+    core::log::DetRow   det[kBatch];
+    core::log::EventRow evt[kBatch];
+};
+
+struct Logger {
+    Deps*            d = nullptr;
+    drivers::SdCard* card = nullptr;
+    Out              out[kStreamCount];
+    int              session = -1;
+    bool             dated = false;
+    core::log::Date  date;            // year 0 until the GPS gives one
+    uint32_t         next_diag_ms = 0;
+    // The card, this diag second.
+    uint32_t         sd_bytes = 0;
+    uint32_t         sd_max_ms = 0;
+    uint16_t         sd_slow = 0;
+    uint16_t         sd_errors = 0;
+    char             line[1024] = {};
+    Batches*         batch = nullptr;
+};
+
+uint32_t now_ms(const Logger& L) { return L.d->clock->now_ms(); }
+
+// The card's time for one call, into this second's figures.
+void account(Logger& L, uint32_t t0, hal::Status s, size_t bytes) {
+    const uint32_t dt = now_ms(L) - t0;
+    if (dt > L.sd_max_ms) L.sd_max_ms = dt;
+    if (dt >= kSlowMs && L.sd_slow < UINT16_MAX) ++L.sd_slow;
+    if (hal::ok(s)) {
+        L.sd_bytes += static_cast<uint32_t>(bytes);
+    } else if (s != hal::Status::Busy && L.sd_errors < UINT16_MAX) {
+        ++L.sd_errors;
+    }
+}
+
+hal::Status append(Logger& L, Out& o) {
+    const uint32_t t0 = now_ms(L);
+    const hal::Status s = L.card->append(o.path, o.block, o.used);
+    account(L, t0, s, o.used);
+    return s;
+}
+
+hal::Status sync_all(Logger& L) {
+    const uint32_t t0 = now_ms(L);
+    const hal::Status s = L.card->sync();
+    account(L, t0, s, 0);
+    return s;
+}
+
+void report(Logger& L, hal::Status s) {
+    if (hal::ok(s)) {
+        L.d->health->report_ok(core::state::Dev::Sd, now_ms(L));
+    } else {
+        L.d->health->report_error(core::state::Dev::Sd, static_cast<int32_t>(s), now_ms(L));
+    }
+}
+
+// The block goes to the card because it is full. Busy is another task
+// holding the card lock past the 3 s wait, not a dead card: try again rather
+// than throw a block of ride away. The rings hold ten seconds meanwhile.
+void write_full(Logger& L, Out& o) {
+    if (o.used == 0) return;
+    hal::Status s = append(L, o);
+    for (int retry = 0; s == hal::Status::Busy && retry < 2; ++retry) s = append(L, o);
+    o.used = 0;
+    o.flush.written(now_ms(L));
+    if (hal::ok(s)) o.on_card = true;
+    report(L, s);
+}
+
+// Text into a stream's block, sending the block first if it would not fit.
+void emit(Logger& L, Out& o, const char* text, size_t len) {
+    if (len >= o.cap) len = o.cap - 1;
+    if (o.used + len >= o.cap) write_full(L, o);
+    std::memcpy(o.block + o.used, text, len);
+    o.used += len;
+    o.flush.buffered(now_ms(L));
+}
+
+void emit_str(Logger& L, Out& o, const char* text) { emit(L, o, text, std::strlen(text)); }
+
+const char* reset_name(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:   return "power-on";
+        case ESP_RST_EXT:       return "external pin";
+        case ESP_RST_SW:        return "software";
+        case ESP_RST_PANIC:     return "panic";
+        case ESP_RST_INT_WDT:   return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:  return "task watchdog";
+        case ESP_RST_WDT:       return "other watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        case ESP_RST_SDIO:      return "SDIO";
+        case ESP_RST_USB:       return "USB";
+        case ESP_RST_JTAG:      return "JTAG";
+        default:                return "other";
+    }
+}
+
+// What every detail file starts with: which firmware, which session, and
+// how this power-on began. A brownout reset on the bike is the battery or
+// the wiring, and it should be in the file rather than in a guess.
+void detail_preamble(Logger& L, Out& o, Stream s) {
+    const esp_app_desc_t* app = esp_app_get_description();
+    const esp_reset_reason_t rr = esp_reset_reason();
+    std::snprintf(L.line, sizeof L.line,
+                  "# dash detail log: %s\n# firmware %s %s\n# session %d, reset %s (%d)\n",
+                  core::log::stream_suffix(s), app->version, app->date, L.session,
+                  reset_name(rr), static_cast<int>(rr));
+    emit_str(L, o, L.line);
+}
+
+// The events file also carries every setting as it stood at key-on, and the
+// numbers baked in rather than set: an edit later is a `cmd` event.
+void settings_preamble(Logger& L, Out& o) {
+    const core::config::Settings& st = *L.d->settings;
+    std::snprintf(L.line, sizeof L.line, "# tach refractory %d us\n", bsp::kTachRefractoryUs);
+    emit_str(L, o, L.line);
+    for (size_t i = 0; i < core::config::item_count(); ++i) {
+        const core::config::ConfigItem& it = core::config::items()[i];
+        if (it.kind == core::config::Kind::Action) continue;
+        char value[32];
+        core::config::format(st, it, value, sizeof value);
+        std::snprintf(L.line, sizeof L.line, "# setting %s/%s = %s [0x%04X]\n",
+                      it.group, it.label, value, static_cast<unsigned>(it.key));
+        emit_str(L, o, L.line);
+    }
+}
+
+void write_header(Logger& L, Stream s) {
+    Out& o = L.out[s];
+    size_t n = 0;
+    switch (s) {
+        case core::log::kMain:
+            // The RaceRender marker has to be the very first line.
+            n = core::log::csv_header(L.line, sizeof L.line);
+            emit(L, o, L.line, n);
+            o.header = true;
+            return;
+        case core::log::kImu:  detail_preamble(L, o, s); n = core::log::imu_header(L.line, sizeof L.line); break;
+        case core::log::kTach: detail_preamble(L, o, s); n = core::log::tach_header(L.line, sizeof L.line); break;
+        case core::log::kDet:  detail_preamble(L, o, s); n = core::log::det_header(L.line, sizeof L.line); break;
+        case core::log::kEvt:
+            detail_preamble(L, o, s);
+            settings_preamble(L, o);
+            n = core::log::event_header(L.line, sizeof L.line);
+            break;
+        case core::log::kDiag: detail_preamble(L, o, s); n = core::log::diag_header(L.line, sizeof L.line); break;
+        case kStreamCount: return;
+    }
+    emit(L, o, L.line, n);
+    o.header = true;
+}
+
+void reset_streams(Logger& L) {
+    for (Out& o : L.out) {
+        o.used = 0;
+        o.header = false;
+        o.on_card = false;
+        o.path[0] = '\0';
+        o.flush = core::log::FlushPolicy{};
+    }
+    L.session = -1;
+    L.dated = false;
+    L.date = core::log::Date{};
+}
+
+void clear_detail_rings(Deps& d) {
+    if (d.imu_log) d.imu_log->clear();
+    if (d.tach_log) d.tach_log->clear();
+    if (d.det_log) d.det_log->clear();
+    if (d.evt_log) d.evt_log->clear();
+}
+
+// One file set per power-on (or card insertion). There is no real-time clock
+// on this board and the GPS may not have the date yet, so it starts as
+// sNNN and is renamed to the date once it is known (core::log::
+// log_file_name). The session number is one past the highest on the card in
+// either form and in either directory: a renamed file frees its plain name,
+// a second ride on the same day must not land on the first one's dated name,
+// and a blackbox deleted from the Wi-Fi page may leave its detail behind.
+bool pick_session(Logger& L) {
+    int highest = -1;
+    const auto take = [](const char* name, size_t, void* ctx) {
+        int& h = *static_cast<int*>(ctx);
+        const int v = core::log::session_of(name);
+        if (v > h) h = v;
+    };
+    L.card->list("logs", take, &highest);
+    L.card->list(core::log::kDetailDir, take, &highest);
+    const int session = (highest + 1) % 1000;
+    for (uint8_t s = 0; s < kStreamCount; ++s) {
+        Out& o = L.out[s];
+        if (core::log::stream_file_name(o.path, sizeof o.path, core::log::Date{},
+                                        static_cast<unsigned>(session),
+                                        static_cast<Stream>(s)) == 0) {
+            return false;
+        }
+    }
+    if (L.card->exists(L.out[core::log::kMain].path)) return false;
+    L.session = session;
+    return true;
+}
+
+// The day, once the GPS has said it. Whatever is buffered goes out under the
+// old name first, so nothing is written to a name that is about to stop
+// existing. Once, success or not: a rename that failed (a name taken, a card
+// error) keeps the session name rather than retrying every pass.
+void maybe_date(Logger& L) {
+    if (L.dated) return;
+    const core::state::Gnss g = L.d->slots->gnss.get();
+    if (g.year == 0) return;
+    core::log::Date utc;
+    utc.year = g.year;
+    utc.month = g.month;
+    utc.day = g.day;
+    L.date = core::log::local_date(utc, g.utc_ms,
+                                   L.d->settings ? L.d->settings->tz_offset_h : 0);
+    for (uint8_t s = 0; s < kStreamCount; ++s) {
+        Out& o = L.out[s];
+        char dated[sizeof o.path];
+        if (core::log::stream_file_name(dated, sizeof dated, L.date,
+                                        static_cast<unsigned>(L.session),
+                                        static_cast<Stream>(s)) == 0) {
+            continue;
+        }
+        if (!o.on_card) {
+            // Nothing on the card yet: just start under the date.
+            if (!L.card->exists(dated)) std::snprintf(o.path, sizeof o.path, "%s", dated);
+            continue;
+        }
+        if (o.used > 0 && hal::ok(append(L, o))) {
+            o.used = 0;
+            o.flush.written(now_ms(L));
+        }
+        if (o.used == 0 && hal::ok(L.card->rename(o.path, dated))) {
+            std::snprintf(o.path, sizeof o.path, "%s", dated);
+        }
+    }
+    L.dated = true;
+}
+
+size_t drain_main(Logger& L) {
+    Deps& d = *L.d;
+    Out& o = L.out[core::log::kMain];
+    if (!o.header) write_header(L, core::log::kMain);
+    core::log::Record* rows = L.batch->main;
+    const size_t n = d.blackbox->pop_batch(rows, kBatch);
+    for (size_t i = 0; i < n; ++i) {
+        size_t len = 0;
+        // A lap tag goes in immediately before the row it happened on.
+        // RaceRender takes them anywhere in the file but insists they be
+        // in chronological order, and this is the only place that sees
+        // the records in order.
+        if (rows[i].lap_done_ms != 0) {
+            len = core::log::format_lap_marker(L.line, sizeof L.line,
+                                               rows[i].lap_num,
+                                               rows[i].lap_done_ms);
+        }
+        len += core::log::format_csv(L.line + len, sizeof L.line - len, rows[i]);
+        emit(L, o, L.line, len);
+        ++o.rows;
+    }
+    return n;
+}
+
+template <typename Row, size_t N>
+size_t drain(Logger& L, Stream s, core::log::Ring<Row, N>* ring, Row* batch,
+             size_t (*format)(char*, size_t, const Row&)) {
+    if (!ring) return 0;
+    Out& o = L.out[s];
+    if (!o.header) write_header(L, s);
+    const size_t n = ring->pop_batch(batch, kBatch);
+    for (size_t i = 0; i < n; ++i) {
+        const size_t len = format(L.line, sizeof L.line, batch[i]);
+        emit(L, o, L.line, len);
+        ++o.rows;
+    }
+    return n;
+}
+
+// The machine, once a second: read, not produced, so `logger` is its one
+// writer and it needs no ring.
+void write_diag(Logger& L) {
+    Deps& d = *L.d;
+    Out& o = L.out[core::log::kDiag];
+    if (!o.header) write_header(L, core::log::kDiag);
+    EXT_RAM_BSS_ATTR static core::log::DiagRow r;   // ~0.2 kB; one logger task
+    r = core::log::DiagRow{};
+    r.t_ms = now_ms(L);
+    if (const ui::SystemInfo* si = d.system) {
+        r.heap_free_b = si->heap_free_b;
+        r.heap_min_b = si->heap_min_b;
+        r.psram_free_b = si->psram_free_b;
+        std::memcpy(r.stack_low_task, si->stack_low_task, sizeof r.stack_low_task);
+        r.stack_low_task[sizeof r.stack_low_task - 1] = '\0';
+        r.stack_low_free_b = si->stack_low_free_b;
+        r.ctrl_late = si->ctrl_late;
+        r.render_hz_x10 = si->render_hz_x10;
+        r.imu_timeouts = si->imu_timeouts;
+        r.gnss_sentences = si->gnss_sentences;
+        r.gnss_bad_csum = si->gnss_bad_csum;
+        r.pod_recoveries = si->pod_recoveries;
+        r.pod_stuck = si->pod_stuck;
+        r.chip_temp_c = si->chip_temp_c;
+        r.chip_temp_ok = si->chip_temp_ok;
+    }
+    r.imu_temp_c = d.slots->attitude.get().imu_temp_c;
+    r.vbat = d.slots->elec.get().vbat;
+    const core::state::Battery bat = d.slots->battery.get();
+    r.rest_v = bat.rest_v;
+    r.crank_v = bat.crank_min_v;
+    r.charge_v = bat.charge_v;
+    r.battery_verdict = bat.verdict;
+    const core::state::Gnss g = d.slots->gnss.get();
+    r.fix = g.fix;
+    r.sats = g.sats;
+    r.quality = g.quality;
+    r.hdop = g.hdop;
+    const core::state::Trip t = d.slots->trip.get();
+    r.odo_mi = t.odo_mi;
+    r.eng_hours = t.eng_hours;
+    r.fuel_used_gal = t.fuel_used_gal;
+    for (uint8_t s = 0; s < kStreamCount; ++s) r.rows[s] = L.out[s].rows;
+    r.dropped[core::log::kMain] = d.blackbox ? d.blackbox->dropped() : 0;
+    r.dropped[core::log::kImu] = d.imu_log ? d.imu_log->dropped() : 0;
+    r.dropped[core::log::kTach] = d.tach_log ? d.tach_log->dropped() : 0;
+    r.dropped[core::log::kDet] = d.det_log ? d.det_log->dropped() : 0;
+    r.dropped[core::log::kEvt] = d.evt_log ? d.evt_log->dropped() : 0;
+    r.sd_bytes = L.sd_bytes;
+    r.sd_max_ms = L.sd_max_ms;
+    r.sd_slow = L.sd_slow;
+    r.sd_errors = L.sd_errors;
+    L.sd_bytes = 0;
+    L.sd_max_ms = 0;
+    L.sd_slow = 0;
+    L.sd_errors = 0;
+    const core::state::Health h = d.slots->health.get();
+    for (uint8_t i = 0; i < core::state::kDevCount; ++i) {
+        r.dev_state[i] = static_cast<uint8_t>(h.dev[i].state);
+        r.dev_faults[i] = h.dev[i].fault_count;
+    }
+    const core::state::BleDiag bd = d.slots->ble_diag.get();
+    r.rssi_dbm = bd.has_rssi ? bd.rssi_dbm : 0;
+    r.wifi_state = static_cast<uint8_t>(d.slots->wifi.get().state);
+    const size_t n = core::log::format_diag(L.line, sizeof L.line, r);
+    emit(L, o, L.line, n);
+    ++o.rows;
+}
+
+// When each block goes to the card and when the files are committed
+// (core::log::FlushPolicy, one per file): a block when its oldest row is 2 s
+// old, all of them committed 5 s after the first uncommitted write or when
+// the bike stops. One sync commits every open file, so it is done once.
+void flush(Logger& L) {
+    const uint32_t now = now_ms(L);
+    const bool stopped = still_for_flash(*L.d);
+    const core::log::FlushConfig cfg;
+    bool want_sync = false;
+    for (Out& o : L.out) {
+        const core::log::Flush f = o.flush.decide(now, stopped, cfg);
+        if (f != core::log::Flush::None && o.used > 0) {
+            // Kept for the next pass if the card was only busy.
+            const hal::Status st = append(L, o);
+            if (st != hal::Status::Busy) {
+                o.used = 0;
+                o.flush.written(now);
+                if (hal::ok(st)) o.on_card = true;
+                else report(L, st);
+            }
+        }
+        if (f == core::log::Flush::WriteAndSync && o.used == 0) want_sync = true;
+    }
+    if (!want_sync) return;
+    // Busy is another task holding the card lock past its 3 s wait, and the
+    // next pass tries again. Anything else, failed or not, waits for the
+    // next interval: a card that will not sync is not retried every pass
+    // (rule 5).
+    const hal::Status st = sync_all(L);
+    if (st == hal::Status::Busy) return;
+    for (Out& o : L.out) {
+        if (o.used == 0) o.flush.synced();
+    }
+    if (!hal::ok(st)) report(L, st);
+}
 
 void logger_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
-
-    // Static and in PSRAM, not on the stack: the block alone is bigger than
-    // this task's 6 kB stack, and the batch below is 6.6 kB more. One logger
-    // task, so these are its own; nothing here is time-critical enough to
-    // care about PSRAM's latency.
-    EXT_RAM_BSS_ATTR static char block[kBlockBytes];
-    EXT_RAM_BSS_ATTR static core::log::Record batch[kBatch];
-    size_t   used = 0;
-    char     path[40] = {};
-    int      session = -1;
-    bool     dated = false;
-    bool     header_written = false;
-    uint32_t written_records = 0;
-    // When the block goes to the card and when the file is committed: not
-    // every time the ring runs dry, which at 10 Hz was between every row.
-    core::log::FlushPolicy flush;
-    const core::log::FlushConfig flush_cfg;
+    // Static and in PSRAM, not on the stack: the blocks alone are bigger
+    // than this task's stack, and none of it is in internal RAM's tight
+    // .bss. One logger task, so these are its own; nothing here is
+    // time-critical enough to care about PSRAM's latency.
+    EXT_RAM_BSS_ATTR static Logger L;
+    EXT_RAM_BSS_ATTR static Batches batches;
+    EXT_RAM_BSS_ATTR static char main_block[kBlockBytes];
+    EXT_RAM_BSS_ATTR static char imu_block[kImuBlockBytes];
+    EXT_RAM_BSS_ATTR static char tach_block[kBlockBytes];
+    EXT_RAM_BSS_ATTR static char det_block[kBlockBytes];
+    EXT_RAM_BSS_ATTR static char evt_block[kSmallBlockBytes];
+    EXT_RAM_BSS_ATTR static char diag_block[kSmallBlockBytes];
+    L.d = &d;
+    L.batch = &batches;
+    const auto give = [](Out& o, char* block, size_t cap) { o.block = block; o.cap = cap; };
+    give(L.out[core::log::kMain], main_block, sizeof main_block);
+    give(L.out[core::log::kImu], imu_block, sizeof imu_block);
+    give(L.out[core::log::kTach], tach_block, sizeof tach_block);
+    give(L.out[core::log::kDet], det_block, sizeof det_block);
+    give(L.out[core::log::kEvt], evt_block, sizeof evt_block);
+    give(L.out[core::log::kDiag], diag_block, sizeof diag_block);
+    reset_streams(L);
 
     for (;;) {
         // The supply has been cut and the board is on its capacitors. A
         // write started now would probably be the one that is interrupted,
         // and a half-written FAT cluster costs more than a few lost rows.
-        // Nothing is popped, so the ring simply fills; if power returns the
+        // Nothing is popped, so the rings simply fill; if power returns the
         // drain carries on where it was.
         if (d.power_fail.load(std::memory_order_relaxed)) {
             vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
-        auto* card = static_cast<drivers::SdCard*>(d.card);
-        if (!d.blackbox || !card || !card->present()) {
-            // No card, or it has been pulled. Keep draining the ring so the
-            // producer never wedges, and throw the records away — a dropped
+        L.card = static_cast<drivers::SdCard*>(d.card);
+        if (!d.blackbox || !L.card || !L.card->present()) {
+            // No card, or it has been pulled. Keep draining the rings so the
+            // producers never wedge, and throw the records away — a dropped
             // log is a nuisance, a stalled `logic` task is not.
             if (d.blackbox) d.blackbox->clear();
-            used = 0;
-            flush = core::log::FlushPolicy{};
-            header_written = false;
-            path[0] = '\0';           // a card put back starts a new file
+            clear_detail_rings(d);
+            reset_streams(L);         // a card put back starts new files
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
 
-        if (path[0] == '\0') {
-            // One file per power-on (or card insertion). There is no real-
-            // time clock on this board and the GPS may not have the date
-            // yet, so it starts as logs/sNNN.csv and is renamed to the date
-            // below once it is known (core::log::log_file_name). The session
-            // number is one past the highest on the card in either form: a
-            // renamed file frees its plain name, and a second ride on the
-            // same day must not land on the first one's dated name.
-            int highest = -1;
-            card->list("logs", [](const char* name, size_t, void* ctx) {
-                int& h = *static_cast<int*>(ctx);
-                const int v = core::log::session_of(name);
-                if (v > h) h = v;
-            }, &highest);
-            session = (highest + 1) % 1000;
-            dated = false;
-            if (core::log::log_file_name(path, sizeof path, core::log::Date{},
-                                         static_cast<unsigned>(session)) == 0 ||
-                card->exists(path)) {
-                path[0] = '\0';
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                continue;
-            }
+        if (L.session < 0 && !pick_session(L)) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
         }
+        maybe_date(L);
 
-        // The day, once the GPS has said it. Whatever is buffered goes out
-        // under the old name first, so nothing is written to a name that is
-        // about to stop existing.
-        if (!dated) {
-            const core::state::Gnss g = d.slots->gnss.get();
-            if (g.year != 0) {
-                core::log::Date utc;
-                utc.year = g.year;
-                utc.month = g.month;
-                utc.day = g.day;
-                const core::log::Date local = core::log::local_date(
-                    utc, g.utc_ms, d.settings ? d.settings->tz_offset_h : 0);
-                char dated_path[sizeof path];
-                if (core::log::log_file_name(dated_path, sizeof dated_path, local,
-                                             static_cast<unsigned>(session)) > 0) {
-                    if (!header_written) {
-                        // Nothing on the card yet: just start under the date.
-                        if (!card->exists(dated_path)) {
-                            std::snprintf(path, sizeof path, "%s", dated_path);
-                        }
-                    } else {
-                        if (used > 0 && hal::ok(card->append(path, block, used))) {
-                            used = 0;
-                            flush.written(d.clock->now_ms());
-                        }
-                        if (used == 0 && hal::ok(card->rename(path, dated_path))) {
-                            std::snprintf(path, sizeof path, "%s", dated_path);
-                        }
-                    }
-                }
-                // Once, success or not: a rename that failed (a name taken,
-                // a card error) keeps the session name rather than retrying
-                // every pass.
-                dated = true;
+        const bool detail = d.settings && d.settings->detail_log;
+        size_t n = drain_main(L);
+        if (detail) {
+            n += drain(L, core::log::kImu, d.imu_log, batches.imu, core::log::format_imu);
+            n += drain(L, core::log::kTach, d.tach_log, batches.tach, core::log::format_tach);
+            n += drain(L, core::log::kDet, d.det_log, batches.det, core::log::format_det);
+            n += drain(L, core::log::kEvt, d.evt_log, batches.evt, core::log::format_event);
+            const uint32_t now = now_ms(L);
+            if (static_cast<int32_t>(now - L.next_diag_ms) >= 0) {
+                L.next_diag_ms = now + kDiagEveryMs;
+                write_diag(L);
             }
-        }
-
-        if (!header_written) {
-            char head[256];
-            const size_t n = core::log::csv_header(head, sizeof head);
-            if (hal::ok(card->append(path, head, n))) {
-                header_written = true;
-                flush.written(d.clock->now_ms());
-            }
-        }
-
-        const size_t n = d.blackbox->pop_batch(batch, kBatch);
-
-        for (size_t i = 0; i < n; ++i) {
-            char line[256];
-            size_t len = 0;
-            // A lap tag goes in immediately before the row it happened on.
-            // RaceRender takes them anywhere in the file but insists they be
-            // in chronological order, and this is the only place that sees
-            // the records in order.
-            if (batch[i].lap_done_ms != 0) {
-                char tag[64];
-                const size_t t = core::log::format_lap_marker(
-                    tag, sizeof tag, batch[i].lap_num, batch[i].lap_done_ms);
-                for (size_t k = 0; k < t && len + 1 < sizeof line; ++k) {
-                    line[len++] = tag[k];
-                }
-            }
-            len += core::log::format_csv(line + len, sizeof line - len, batch[i]);
-            if (used + len >= sizeof block) {
-                // Busy is another task holding the card lock past the 3 s
-                // wait, not a dead card: try again rather than throw 8 kB of
-                // ride away. The blackbox ring holds ten seconds meanwhile.
-                hal::Status s = card->append(path, block, used);
-                for (int retry = 0; s == hal::Status::Busy && retry < 2; ++retry) {
-                    s = card->append(path, block, used);
-                }
-                used = 0;
-                flush.written(d.clock->now_ms());
-                if (hal::ok(s)) {
-                    d.health->report_ok(core::state::Dev::Sd, d.clock->now_ms());
-                } else {
-                    d.health->report_error(core::state::Dev::Sd,
-                                           static_cast<int32_t>(s),
-                                           d.clock->now_ms());
-                }
-            }
-            for (size_t k = 0; k < len; ++k) block[used++] = line[k];
-            flush.buffered(d.clock->now_ms());
-            ++written_records;
+        } else {
+            // Turned off: the producers stop pushing, and whatever was in
+            // flight goes. The files stay as they are; turned on again, the
+            // same files carry on.
+            clear_detail_rings(d);
         }
 
         if (d.system) {
-            d.system->log_records = written_records;
+            d.system->log_records = L.out[core::log::kMain].rows;
             d.system->log_dropped = d.blackbox->dropped();
         }
 
-        // The block goes out when its oldest row is 2 s old, and the file is
-        // committed 5 s after the first uncommitted write or when the bike
-        // stops (core::log::FlushPolicy). This used to append and fsync
-        // whenever the ring was empty -- at 10 Hz, between almost every row,
-        // about 4.5 card writes a second each spinning through the card's
-        // busy time on this core with SPI2 held from the IMU.
-        const uint32_t now = d.clock->now_ms();
-        const core::log::Flush f = flush.decide(now, still_for_flash(d), flush_cfg);
-        if (f != core::log::Flush::None && used > 0) {
-            // Kept for the next pass if the card was only busy.
-            if (card->append(path, block, used) != hal::Status::Busy) {
-                used = 0;
-                flush.written(now);
-            }
-        }
-        if (f == core::log::Flush::WriteAndSync && used == 0) {
-            // Busy is another task holding the card lock past its 3 s wait,
-            // and the next pass tries again. Anything else, failed or not,
-            // waits for the next interval: a card that will not sync is not
-            // retried every pass (rule 5).
-            const hal::Status s = card->sync();
-            if (s != hal::Status::Busy) {
-                flush.synced();
-                if (!hal::ok(s)) {
-                    d.health->report_error(core::state::Dev::Sd, static_cast<int32_t>(s), now);
-                }
-            }
-        }
+        flush(L);
         vTaskDelay(pdMS_TO_TICKS(n == 0 ? 200 : 20));
     }
 }

@@ -354,6 +354,14 @@ void Filter::publish_into(state::Attitude& a) const {
     a.g_lat        = ly_;
     a.g_lon        = lx_;
     a.g_vert       = lz_;
+    a.steer_deg      = steer_deg_;
+    a.accel_lean_deg = accel_lean_deg_;
+    a.heading_deg    = heading_deg_;
+    a.slide_rate_dps = slide_rate_dps_;
+    a.sliding        = sliding();
+    a.bias_gx_dps    = bias_gx_;
+    a.bias_gy_dps    = bias_gy_;
+    a.bias_gz_dps    = bias_gz_;
 }
 
 }  // namespace core::attitude

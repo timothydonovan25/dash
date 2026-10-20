@@ -162,6 +162,10 @@ const ConfigItem kItems[] = {
     // written whatever this says.
     choice(0x0901, "Rate", "Log", FIELD(log_rate),
            core::log::kRateLabels, core::log::kRateCount),
+    // Everything the first rides are for, in detail/ beside the blackbox:
+    // raw IMU at 200 Hz, the tach and wheel pulses, the filters' insides,
+    // events, the machine's health. About 130 MB an hour.
+    boolean(0x0902, "Detail log", "Log", FIELD(detail_log)),
 };
 
 #undef FIELD

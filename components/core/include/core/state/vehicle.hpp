@@ -72,6 +72,20 @@ struct Attitude {
     // with temperature, so it is worth seeing; it is also the nearest thing
     // to an inside-the-dash thermometer. 0 until the IMU has reported.
     float    imu_temp_c  = 0.0f;
+
+    // The filter's insides, for the detail log (core/log/detail.hpp): what
+    // each lean figure rests on. The steering angle it took out (bar-mounted
+    // IMU), what the accelerometer alone says, the gyro heading and the slide
+    // check against the GPS course, and the gyro bias it is using, in the
+    // sensor's axes. No screen reads them.
+    float    steer_deg      = 0.0f;
+    float    accel_lean_deg = 0.0f;
+    float    heading_deg    = 0.0f;
+    float    slide_rate_dps = 0.0f;
+    bool     sliding        = false;
+    float    bias_gx_dps    = 0.0f;
+    float    bias_gy_dps    = 0.0f;
+    float    bias_gz_dps    = 0.0f;
 };
 
 struct Gnss {

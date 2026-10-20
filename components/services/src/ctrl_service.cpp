@@ -19,6 +19,7 @@
 #include "drivers/engine_sense.hpp"
 #include "drivers/pca9955b.hpp"
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -38,6 +39,30 @@ constexpr uint32_t kResendTicks = kHz;
 // than retrying every tick: a wedged bus would otherwise spend each tick in
 // an I2C timeout (rule 5).
 constexpr uint32_t kRetryTicks = kHz / 20;   // 50 ms
+
+// A detail-log row every this many ticks: 50 Hz (core/log/detail.hpp).
+constexpr uint32_t kDetailTicks = kHz / 50;
+
+// What the detail log's tach row collects between two of its rows. Plain
+// counters and maxima, a few adds a tick; nothing here touches a bus.
+struct TachWindow {
+    core::log::PulseWindow tach, front, rear;
+    uint32_t tach_rej0 = 0, front_rej0 = 0, rear_rej0 = 0;   // totals at the last row
+    uint32_t ring_us = 0;
+    uint16_t edge_wakes = 0;
+    uint32_t wake_lat_max_us = 0;
+    uint32_t lamp_lat_max_us = 0;
+    uint32_t work_max_us = 0;
+    uint16_t lamp_writes = 0;
+    uint16_t lamp_errors = 0;
+
+    void read(const hal::IEngineSense::Counts& c) {
+        if (c.tach_ring_us > ring_us) ring_us = c.tach_ring_us;
+    }
+    static void max_into(uint32_t& m, int64_t v) {
+        if (v > 0 && static_cast<uint64_t>(v) > m) m = static_cast<uint32_t>(v);
+    }
+};
 
 void ctrl_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
@@ -72,6 +97,10 @@ void ctrl_task(void* arg) {
     uint32_t health_gen = d.slots->health.generation() - 1;
     bool front_live = true;
     bool rear_live = true;
+
+    // The detail log's tach row (core/log/detail.hpp). Static, so ctrl's
+    // frame stays small; one ctrl task.
+    static TachWindow tw;
 
     // Woken by the tach ISR on every edge past its refractory window.
     drivers::EngineSense::notify_on_tach(xTaskGetCurrentTaskHandle());
@@ -150,6 +179,7 @@ void ctrl_task(void* arg) {
     for (;;) {
         hal::IEngineSense::Counts c;
         const hal::Status s = d.sense ? d.sense->read(c) : hal::Status::NotPresent;
+        const int64_t work_start_us = esp_timer_get_time();
 
         core::tach::WheelConfig fc;
         fc.circumference_mm = d.settings->front_circumference_mm;
@@ -161,6 +191,12 @@ void ctrl_task(void* arg) {
         tach.update(c.tach_pulses, c.tach_edge_us, c.t_us, tach_config());
         front.update(c.front_pulses, c.front_edge_us, c.t_us, fc);
         rear.update(c.rear_pulses, c.rear_edge_us, c.t_us, rc);
+        if (hal::ok(s)) {
+            tw.tach.update(c.tach_pulses, c.tach_edge_us);
+            tw.front.update(c.front_pulses, c.front_edge_us);
+            tw.rear.update(c.rear_pulses, c.rear_edge_us);
+            tw.read(c);
+        }
 
         // The held peak first, so this tick's lamps carry it. Not during the
         // start-up sweep, which owns the lamps.
@@ -317,12 +353,59 @@ void ctrl_task(void* arg) {
         // least one write a second for the tracker to see.
         const uint32_t now_ms = now_ms_early;
         if (wrote) {
+            ++tw.lamp_writes;
+            if (!hal::ok(lamp_status)) ++tw.lamp_errors;
             if (hal::ok(lamp_status)) {
                 d.health->report_ok(core::state::Dev::LedDriver, now_ms);
             } else {
                 d.health->report_error(core::state::Dev::LedDriver,
                                        static_cast<int32_t>(lamp_status), now_ms);
             }
+        }
+
+        TachWindow::max_into(tw.work_max_us, esp_timer_get_time() - work_start_us);
+
+        // The detail log's row, at 50 Hz. Built from what this tick already
+        // has; pushing it is a copy into PSRAM that never waits.
+        if (ticks % kDetailTicks == 0) {
+            core::log::TachRow row;
+            row.t_ms = now_ms;
+            row.tach = tw.tach.take();
+            row.front = tw.front.take();
+            row.rear = tw.rear.take();
+            row.tach_rejected = c.tach_rejected - tw.tach_rej0;
+            row.front_rejected = static_cast<uint16_t>(c.front_rejected - tw.front_rej0);
+            row.rear_rejected = static_cast<uint16_t>(c.rear_rejected - tw.rear_rej0);
+            row.tach_ring_us = tw.ring_us;
+            row.raw_rpm = tach.raw_rpm();
+            row.rpm = tach.rpm();
+            row.rpm_rate = tach.rpm_rate();
+            row.lamp_rpm = lamp_rpm;
+            row.mask = lit_mask;
+            row.neutral = c.neutral;
+            row.sense_ok = hal::ok(s);
+            row.front_mph = m.front_mph;
+            row.rear_mph = m.rear_mph;
+            row.edge_wakes = tw.edge_wakes;
+            row.wake_lat_max_us = tw.wake_lat_max_us;
+            row.lamp_lat_max_us = tw.lamp_lat_max_us;
+            row.work_max_us = tw.work_max_us;
+            row.lamp_writes = tw.lamp_writes;
+            row.lamp_errors = tw.lamp_errors;
+            row.late = static_cast<uint16_t>(late);
+            if (d.tach_log && d.settings->detail_log) d.tach_log->push(row);
+            if (hal::ok(s)) {
+                tw.tach_rej0 = c.tach_rejected;
+                tw.front_rej0 = c.front_rejected;
+                tw.rear_rej0 = c.rear_rejected;
+            }
+            tw.ring_us = 0;
+            tw.edge_wakes = 0;
+            tw.wake_lat_max_us = 0;
+            tw.lamp_lat_max_us = 0;
+            tw.work_max_us = 0;
+            tw.lamp_writes = 0;
+            tw.lamp_errors = 0;
         }
 
         // Until the next tick, every tach edge wakes this loop to decide the
@@ -338,12 +421,24 @@ void ctrl_task(void* arg) {
 
             hal::IEngineSense::Counts ec;
             if (!d.sense || !hal::ok(d.sense->read(ec))) continue;
+            ++tw.edge_wakes;
+            tw.tach.update(ec.tach_pulses, ec.tach_edge_us);
+            tw.read(ec);
+            // The edge to this task acting on it: the core-0 budget, measured.
+            TachWindow::max_into(tw.wake_lat_max_us,
+                                 static_cast<int64_t>(ec.t_us - ec.tach_edge_us));
             tach.update(ec.tach_pulses, ec.tach_edge_us, ec.t_us, tach_config());
             const uint8_t em = decide_mask();
             if (em != lit_mask && may_try()) {
                 const hal::Status es = d.lamps->set_mask(em);
                 const uint32_t t = d.clock->now_ms();
+                ++tw.lamp_writes;
+                if (!hal::ok(es)) ++tw.lamp_errors;
                 if (hal::ok(es)) {
+                    // The whole path, edge to lamp written: the 3 ms budget.
+                    TachWindow::max_into(tw.lamp_lat_max_us,
+                                         esp_timer_get_time() -
+                                             static_cast<int64_t>(ec.tach_edge_us));
                     lit_mask = em;
                     d.health->report_ok(core::state::Dev::LedDriver, t);
                 } else {

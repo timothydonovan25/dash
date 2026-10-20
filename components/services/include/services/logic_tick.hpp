@@ -123,6 +123,14 @@ struct LogicState {
     // the table entries they change.
     core::gearcal::Guide   guide;
     core::gearcal::Learner learner;
+
+    // The detail log (core/log/detail.hpp): what changed since the last
+    // pass, and the scratch the events and the 50 Hz row are built in, here
+    // rather than on logic's stack.
+    core::log::EventWatcher events;
+    core::log::Watched      watched;
+    core::log::EventRow     event_out[core::log::EventWatcher::kMaxPerPass];
+    core::log::DetRow       det;
 };
 
 // Why this pass is running. `logic` ticks on a fixed 50 Hz schedule and is

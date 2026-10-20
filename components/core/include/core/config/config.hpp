@@ -115,6 +115,10 @@ struct Settings {
     // Blackbox — how often `logic` puts a row in the ring. One of
     // core::log::Rate, not a Hz number; see the note on that enum.
     uint8_t log_rate = static_cast<uint8_t>(core::log::kDefaultRate);
+    // The detail log beside it (core/log/detail.hpp): raw IMU, tach and
+    // wheel pulses, the filters' insides, events and the machine's health.
+    // On until the bike has been proven; ~130 MB an hour.
+    bool    detail_log = true;
 
     // Fuel model
     float fuel_idle_gph = 0.18f;

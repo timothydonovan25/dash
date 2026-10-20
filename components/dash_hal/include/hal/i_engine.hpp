@@ -67,6 +67,16 @@ public:
 
         uint64_t t_us         = 0;   // when the set was latched together
         bool     neutral      = false;
+
+        // Edges each ISR threw away inside its refractory window, totals
+        // since boot; and for the tach, the latest of them after the edge
+        // it kept, in us, the largest since the previous read (read() takes
+        // it). For the detail log: the window is a guess at how long one
+        // spark rings, and this is how long it really does.
+        uint32_t tach_rejected  = 0;
+        uint32_t front_rejected = 0;
+        uint32_t rear_rejected  = 0;
+        uint32_t tach_ring_us   = 0;
     };
 
     // One latched read, so the counts and the timestamp agree. Reading them

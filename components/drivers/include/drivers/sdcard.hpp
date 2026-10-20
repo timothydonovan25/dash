@@ -31,13 +31,16 @@ public:
 
     hal::Status init() override;
     bool   present() const override { return mounted_; }
+    // Files appended to are held open, up to kOpenFiles of them (the
+    // blackbox and the five detail logs), the least recently written one
+    // closed to make room for another. sync() commits every one of them.
     hal::Status append(const char* path, const void* data, size_t len) override;
     hal::Status sync() override;
     hal::Status size_of(const char* path, size_t& out) override;
     hal::Status read_at(const char* path, size_t offset, void* buf,
                         size_t len, size_t& got) override;
 
-    // Closes the log file, which flushes it, and unmounts. Safe to call
+    // Closes the log files, which flushes them, and unmounts. Safe to call
     // with nothing mounted. False if the card lock never came free, in
     // which case nothing was touched and the caller tries again.
     bool unmount();
@@ -46,7 +49,7 @@ public:
     // size it had at its last sync.
     hal::Status list(const char* dir, ListFn fn, void* ctx) override;
     hal::Status remove(const char* path) override;
-    // Renames a file, closing it first if it is the one being appended to;
+    // Renames a file, closing it first if it is one being appended to;
     // the next append() reopens it under whatever name it is given. Fails
     // rather than overwrite an existing `to`.
     hal::Status rename(const char* from, const char* to) override;
@@ -60,8 +63,19 @@ public:
     bool card_detect();
     bool detected() const { return detected_; }
 
+    static constexpr int kOpenFiles = 6;
+
 private:
-    hal::Status sync_locked();
+    struct Open {
+        void*    file = nullptr;     // FILE*
+        char     path[64] = {};
+        uint32_t unsynced = 0;
+        uint32_t used = 0;           // append() counter when last written
+    };
+    Open* find_open(const char* path);
+    void  close_open(Open& o);
+    void  close_all();
+    hal::Status sync_one(Open& o);
 
     StaticSemaphore_t lock_buf_;
     SemaphoreHandle_t lock_;
@@ -69,9 +83,8 @@ private:
     bool  detected_ = false;
     bool  cd_ready_ = false;
     void* card_ = nullptr;        // sdmmc_card_t*
-    void* open_file_ = nullptr;   // FILE*, kept open between appends
-    char  open_path_[64] = {};
-    uint32_t unsynced_ = 0;
+    Open     open_[kOpenFiles];   // kept open between appends
+    uint32_t appends_ = 0;
 };
 
 }  // namespace drivers

@@ -15,6 +15,7 @@ idf_component_register(
          "src/input.cpp"
          "src/tach.cpp"
          "src/log.cpp"
+         "src/detail.cpp"
          "src/delta.cpp"
          "src/gear.cpp"
          "src/power.cpp"

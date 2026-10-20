@@ -22,7 +22,7 @@ add_library(core STATIC
     ${CORE}/src/sectors.cpp
     ${CORE}/src/trip.cpp     ${CORE}/src/config.cpp  ${CORE}/src/health.cpp
     ${CORE}/src/attitude.cpp ${CORE}/src/jump.cpp    ${CORE}/src/nmea.cpp
-    ${CORE}/src/input.cpp    ${CORE}/src/tach.cpp    ${CORE}/src/log.cpp
+    ${CORE}/src/input.cpp    ${CORE}/src/tach.cpp    ${CORE}/src/log.cpp    ${CORE}/src/detail.cpp
     ${CORE}/src/delta.cpp ${CORE}/src/gear.cpp ${CORE}/src/power.cpp ${CORE}/src/sun.cpp ${CORE}/src/alert.cpp
     ${CORE}/src/media.cpp ${CORE}/src/pairing.cpp ${CORE}/src/ota.cpp
     ${CORE}/src/wifi.cpp

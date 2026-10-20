@@ -82,7 +82,7 @@ void wake_logic(Deps& d) {
 
 void start_logic(Deps& d, CommandQueue& q) {
     g_logic_arg = {&d, &q};
-    xTaskCreatePinnedToCore(logic_task, "logic", 4096, &g_logic_arg, 10,
+    xTaskCreatePinnedToCore(logic_task, "logic", 5120, &g_logic_arg, 10,
                             nullptr, 0);
 }
 

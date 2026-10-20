@@ -182,7 +182,9 @@ public:
     // the quickest way to prove the filter is doing something.
     float accel_lean_deg() const { return accel_lean_deg_; }
 
-    // Fills the lean, pitch, yaw-rate and g fields. The jump fields belong
+    // Fills the lean, pitch, yaw-rate and g fields, and the filter's insides
+    // the detail log records (steering, accelerometer lean, heading, slide,
+    // bias). The jump fields belong
     // to core/jump and are left alone. The yaw rate is about the world's
     // vertical, > 0 turning right; the g vector is in the frame's axes.
     void publish_into(state::Attitude& a) const;

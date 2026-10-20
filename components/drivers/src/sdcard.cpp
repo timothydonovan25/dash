@@ -61,7 +61,7 @@ hal::Status SdCard::init() {
     // The directories the firmware writes into. fopen() does not make a
     // missing one, so a fresh card would refuse every log and every track.
     // EEXIST on every mount after the first is the normal case.
-    for (const char* dir : {"logs", "tracks", "games"}) {
+    for (const char* dir : {"logs", "detail", "tracks", "games"}) {
         char full[32];
         std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
         mkdir(full, 0777);
@@ -85,11 +85,7 @@ bool SdCard::unmount() {
         SemaphoreHandle_t l;
         ~Give() { xSemaphoreGive(l); }
     } give{lock_};
-    if (open_file_) {
-        std::fclose(static_cast<FILE*>(open_file_));
-        open_file_ = nullptr;
-        open_path_[0] = '\0';
-    }
+    close_all();
     if (mounted_) {
         esp_vfs_fat_sdcard_unmount(kMount, static_cast<sdmmc_card_t*>(card_));
         mounted_ = false;
@@ -104,26 +100,31 @@ hal::Status SdCard::append(const char* path, const void* data, size_t len) {
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !data || len == 0) return hal::Status::Unsupported;
 
-    // The file is held open between calls. Opening per append costs a
+    // The files are held open between calls. Opening per append costs a
     // directory walk and a FAT update every time, which on this bus is
-    // milliseconds the logger does not have to spend.
-    if (!open_file_ || std::strncmp(open_path_, path, sizeof open_path_) != 0) {
-        if (open_file_) std::fclose(static_cast<FILE*>(open_file_));
+    // milliseconds the logger does not have to spend -- and with six logs
+    // written in turn, one open file meant a close and an open per write.
+    Open* o = find_open(path);
+    if (!o) {
+        // A free entry, or the one written longest ago.
+        o = &open_[0];
+        for (Open& e : open_) {
+            if (!e.file) { o = &e; break; }
+            if (e.used < o->used) o = &e;
+        }
+        if (o->file) close_open(*o);
         char full[96];
         std::snprintf(full, sizeof full, "%s/%s", kMount, path);
-        open_file_ = std::fopen(full, "ab");
-        if (!open_file_) {
-            open_path_[0] = '\0';
-            return hal::Status::IoError;
-        }
-        std::snprintf(open_path_, sizeof open_path_, "%s", path);
+        o->file = std::fopen(full, "ab");
+        if (!o->file) return hal::Status::IoError;
+        std::snprintf(o->path, sizeof o->path, "%s", path);
     }
+    o->used = ++appends_;
 
-    const size_t written =
-        std::fwrite(data, 1, len, static_cast<FILE*>(open_file_));
+    const size_t written = std::fwrite(data, 1, len, static_cast<FILE*>(o->file));
     if (written != len) return hal::Status::IoError;
 
-    if (++unsynced_ >= kSyncEveryWrites) return sync_locked();
+    if (++o->unsynced >= kSyncEveryWrites) return sync_one(*o);
     return hal::Status::Ok;
 }
 
@@ -152,9 +153,7 @@ hal::Status SdCard::remove(const char* path) {
     if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !*path) return hal::Status::Unsupported;
-    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
-        return hal::Status::Busy;
-    }
+    if (find_open(path)) return hal::Status::Busy;
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     return std::remove(full) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
@@ -165,12 +164,7 @@ hal::Status SdCard::rename(const char* from, const char* to) {
     if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!from || !*from || !to || !*to) return hal::Status::Unsupported;
-    if (open_file_ && std::strncmp(open_path_, from, sizeof open_path_) == 0) {
-        std::fclose(static_cast<FILE*>(open_file_));
-        open_file_ = nullptr;
-        open_path_[0] = '\0';
-        unsynced_ = 0;
-    }
+    if (Open* o = find_open(from)) close_open(*o);
     char a[96], b[96];
     std::snprintf(a, sizeof a, "%s/%s", kMount, from);
     std::snprintf(b, sizeof b, "%s/%s", kMount, to);
@@ -184,10 +178,8 @@ hal::Status SdCard::write_file(const char* path, const void* data, size_t len) {
     if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
-    // Never the file append() is holding open: that is the log.
-    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
-        return hal::Status::Busy;
-    }
+    // Never a file append() is holding open: that is a log.
+    if (find_open(path)) return hal::Status::Busy;
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     FILE* f = std::fopen(full, "wb");
@@ -206,9 +198,7 @@ hal::Status SdCard::write_at(const char* path, size_t offset, const void* data,
     if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
-    if (open_file_ && std::strncmp(open_path_, path, sizeof open_path_) == 0) {
-        return hal::Status::Busy;
-    }
+    if (find_open(path)) return hal::Status::Busy;
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     // Only ever on the end: a piece that does not follow the last is an
@@ -275,18 +265,41 @@ hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
 hal::Status SdCard::sync() {
     const Hold hold(lock_);
     if (!hold.held()) return hal::Status::Busy;
-    return sync_locked();
+    hal::Status worst = hal::Status::Ok;
+    for (Open& o : open_) {
+        if (!o.file) continue;
+        const hal::Status st = sync_one(o);
+        if (!hal::ok(st)) worst = st;
+    }
+    return worst;
 }
 
-hal::Status SdCard::sync_locked() {
-    if (!open_file_) return hal::Status::Ok;
-    unsynced_ = 0;
+hal::Status SdCard::sync_one(Open& o) {
+    if (!o.file) return hal::Status::Ok;
+    o.unsynced = 0;
     // fflush pushes our buffer at the filesystem; fsync makes FAT commit it.
     // Both are needed for a log that survives the ignition being switched off
     // mid-ride, which is the normal way this bike stops.
-    if (std::fflush(static_cast<FILE*>(open_file_)) != 0) return hal::Status::IoError;
-    if (fsync(fileno(static_cast<FILE*>(open_file_))) != 0) return hal::Status::IoError;
+    if (std::fflush(static_cast<FILE*>(o.file)) != 0) return hal::Status::IoError;
+    if (fsync(fileno(static_cast<FILE*>(o.file))) != 0) return hal::Status::IoError;
     return hal::Status::Ok;
+}
+
+SdCard::Open* SdCard::find_open(const char* path) {
+    if (!path) return nullptr;
+    for (Open& o : open_) {
+        if (o.file && std::strncmp(o.path, path, sizeof o.path) == 0) return &o;
+    }
+    return nullptr;
+}
+
+void SdCard::close_open(Open& o) {
+    if (o.file) std::fclose(static_cast<FILE*>(o.file));
+    o = Open{};
+}
+
+void SdCard::close_all() {
+    for (Open& o : open_) close_open(o);
 }
 
 }  // namespace drivers

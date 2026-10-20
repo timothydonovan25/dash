@@ -61,7 +61,10 @@ hal::Status sdcard_mount(const char* mount_point, void** card_out) {
     // Never format. A card that will not mount is a card to look at on a
     // laptop, not one to erase — it may be the only copy of a session.
     mount.format_if_mount_failed = false;
-    mount.max_files = 4;
+    // SdCard holds up to six logs open (the blackbox and the detail log's
+    // five), and the Wi-Fi page, `ota` and the track store each open one of
+    // their own. A FIL is ~0.6 kB of internal heap each, allocated here.
+    mount.max_files = 10;
     mount.allocation_unit_size = 16 * 1024;
 
     sdmmc_card_t* card = nullptr;

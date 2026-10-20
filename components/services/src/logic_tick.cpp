@@ -244,6 +244,142 @@ void publish_gear_cal(Deps& d, const LogicState& s) {
     d.slots->gear_cal.publish(c);
 }
 
+
+// --- detail log (core/log/detail.hpp) ------------------------------------
+
+// Out of line for logic_tick's frame, which is at the 1 kB limit.
+__attribute__((noinline))
+void log_command(Deps& d, uint32_t now, const core::state::Command& cmd) {
+    if (d.evt_log) d.evt_log->push(core::log::command_event(now, cmd));
+}
+
+// This pass's events, and on a Scheduled pass the 50 Hz row of what the
+// filters made of the sensors. Its own function, kept out of line, so its
+// slot copies are not in logic_tick's frame (CLAUDE.md, 1.28). The scratch
+// is LogicState's.
+__attribute__((noinline))
+void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
+                const core::state::Gnss& g, const core::state::Motion& m,
+                const core::state::Engine& e, const core::state::Attitude& att,
+                const core::state::Health& health,
+                const core::fusion::SpeedInput& fi,
+                const core::fusion::SpeedOutput& fo) {
+    const bool still = still_for_flash(d);
+    const core::state::Lap lap = d.slots->lap.get();
+
+    if (d.evt_log) {
+        const core::state::Stunt st = d.slots->stunt.get();
+        const core::state::Perf pf = d.slots->perf.get();
+        const core::state::Battery bat = d.slots->battery.get();
+        core::log::Watched& w = s.watched;
+        w.health = health;
+        w.fix = g.fix;
+        w.sats = g.sats;
+        w.hdop = g.hdop;
+        w.lap_count = lap.count;
+        w.last_lap_ms = lap.last_ms;
+        w.last_done_ms = lap.last_done_ms;
+        w.last_was_best = lap.last_was_best;
+        w.split_at_ms = lap.split_at_ms;
+        w.split_sector = lap.split_sector;
+        w.split_ms = lap.split_ms;
+        w.lap_phase = static_cast<uint8_t>(lap.phase);
+        w.airborne = att.airborne;
+        w.land_ms = att.land_ms;
+        w.airtime_ms = att.airtime_ms;
+        w.land_g = att.last_land_g;
+        w.sliding = att.sliding;
+        w.slide_rate_dps = att.slide_rate_dps;
+        w.stunt_seq = st.seq;
+        w.stunt_kind = st.kind;
+        w.stunt_grade = st.grade;
+        w.stunt_ms = st.ms;
+        w.stunt_peak_deg = st.peak_deg;
+        w.stunt_points = st.points;
+        w.perf_seq = pf.seq;
+        w.perf_event = pf.event;
+        w.perf_best = pf.event_best;
+        if (pf.event < core::state::Perf::kCount) {
+            w.perf_ms = pf.last[pf.event].ms;
+            w.perf_x = pf.last[pf.event].x;
+        }
+        w.front_verdict = static_cast<uint8_t>(s.wheels.front());
+        w.rear_verdict = static_cast<uint8_t>(s.wheels.rear());
+        w.power_fail = d.power_fail.load(std::memory_order_relaxed);
+        w.battery_verdict = bat.verdict;
+        w.rest_v = bat.rest_v;
+        w.crank_v = bat.crank_min_v;
+        w.gear = e.gear;
+        w.rpm = e.rpm;
+        w.mph = m.best_mph;
+        w.moving = !still;
+        w.gearcal_phase = static_cast<uint8_t>(s.guide.phase());
+        w.fusion_resets = fo.resets;
+        w.suspect = fo.suspect;
+        w.dropped[core::log::kMain] = d.blackbox ? d.blackbox->dropped() : 0;
+        w.dropped[core::log::kImu] = d.imu_log ? d.imu_log->dropped() : 0;
+        w.dropped[core::log::kTach] = d.tach_log ? d.tach_log->dropped() : 0;
+        w.dropped[core::log::kDet] = d.det_log ? d.det_log->dropped() : 0;
+        w.dropped[core::log::kEvt] = d.evt_log->dropped();
+        const size_t n = s.events.watch(w, now, s.event_out,
+                                        core::log::EventWatcher::kMaxPerPass);
+        for (size_t i = 0; i < n; ++i) d.evt_log->push(s.event_out[i]);
+    }
+
+    if (d.det_log && scheduled) {
+        core::log::DetRow& r = s.det;
+        r = core::log::DetRow{};
+        r.t_ms = now;
+        r.shown_mph = m.best_mph;
+        r.front_mph = m.front_mph;
+        r.rear_mph = m.rear_mph;
+        r.gps_mph = g.speed_mph;
+        r.hdop = g.hdop;
+        r.gps_new = fi.gps_new;
+        r.fused_mph = fo.mph;
+        r.fused_sigma = fo.sigma_mph;
+        r.fused_valid = fo.valid;
+        r.used = fo.used;
+        r.rejected = fo.rejected;
+        r.suspect = fo.suspect;
+        r.resets = fo.resets;
+        r.accel_g = fi.accel_g;
+        r.accel_bias_g = fo.bias_g;
+        r.front_verdict = static_cast<uint8_t>(s.wheels.front());
+        r.rear_verdict = static_cast<uint8_t>(s.wheels.rear());
+        r.lean_deg = att.lean_deg;
+        r.accel_lean_deg = att.accel_lean_deg;
+        r.pitch_deg = att.pitch_deg;
+        r.steer_deg = att.steer_deg;
+        r.yaw_rate_dps = att.yaw_rate_dps;
+        r.slide_rate_dps = att.slide_rate_dps;
+        r.heading_deg = att.heading_deg;
+        r.sliding = att.sliding;
+        r.airborne = att.airborne;
+        r.g_lat = att.g_lat;
+        r.g_lon = att.g_lon;
+        r.g_vert = att.g_vert;
+        r.bias_gx = att.bias_gx_dps;
+        r.bias_gy = att.bias_gy_dps;
+        r.bias_gz = att.bias_gz_dps;
+        r.ground_deg = s.stunt.ground_deg();
+        r.lift_deg = s.stunt.lift_deg();
+        r.stunt_kind = d.slots->stunt.get().live_kind;
+        r.rpm = e.rpm;
+        r.ratio = m.best_mph > 3.0f ? e.rpm / m.best_mph : 0.0f;
+        r.gear = e.gear;
+        r.neutral = e.neutral;
+        r.shift_mask = e.shift_mask;
+        r.lap_phase = static_cast<uint8_t>(lap.phase);
+        r.dist_to_line_ft = lap.dist_to_line_ft;
+        r.perf_phase = d.slots->perf.get().phase;
+        r.gearcal_phase = static_cast<uint8_t>(s.guide.phase());
+        r.vbat = d.slots->elec.get().vbat;
+        r.still = still;
+        d.det_log->push(r);
+    }
+}
+
 }  // namespace
 
 void logic_restore(Deps& d, LogicState& s) {
@@ -287,7 +423,11 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
 
     // --- commands -------------------------------------------------------
     core::state::Command cmd;
+    const bool detail = d.settings && d.settings->detail_log;
     while (commands.take(cmd)) {
+        // Every command, as it is acted on: what the rider pressed and every
+        // edit, with what it was set to.
+        if (detail) log_command(d, now, cmd);
         switch (cmd.id) {
             case core::state::CommandId::LapSetLine:
                 // The screen asked; this task decides whether the fix is
@@ -869,6 +1009,8 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             (e.ecu_online ? core::log::kFlagEcu : 0));
         d.blackbox->push(rec);
     }
+
+    if (detail) detail_log(d, s, now, scheduled, g, m, e, att, health, fi, fo);
 }
 
 }  // namespace services

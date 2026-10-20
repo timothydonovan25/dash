@@ -449,6 +449,20 @@ as "CRF250F-Dash" on `demo_p4/`, and nothing has connected to either yet.
    at least 6. If it reads 0, a newer esp_hosted renamed its tasks and
    they are still at 23.
 
+7. **Read the detail log after every early ride.** With CONFIG → Log →
+   Detail log on (the default), each power-on writes `detail/<stem>_imu,
+   _tach, _det, _evt, _diag.csv` beside `logs/<stem>.csv`. Pull the card
+   and run `python3 tools/ridelog/ridelog.py /path/to/card` (`--session N`
+   for an older one, `--plots DIR` with matplotlib). It reports, one
+   assumption at a time: drops and card stalls, the reset reason
+   (brownout is the wiring), tach ringing against the refractory window
+   and missed or extra sparks, edge-to-lamp latency against 3 ms, each
+   wheel's circumference error against GPS, fusion's gate use, IMU gaps,
+   clipping, rest bias and mount, the vibration spectrum, the steering
+   estimate, slide-gate rates, rpm/mph clusters against the gear table,
+   and every health change. `_diag`'s DropXxx columns staying at 0 is the
+   first thing to check: the rings hold about ten seconds of card stall.
+
 ### 9.1 Firmware slots: stable and dev
 
 Do this before trusting any of it with a ride. Each step is something only

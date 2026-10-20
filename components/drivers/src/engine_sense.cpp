@@ -26,6 +26,11 @@ struct Channel {
     std::atomic<uint32_t> edge_us_lo{0};
     uint32_t              last_edge_us = 0;   // ISR-private
     uint32_t              refractory_us = 0;
+    // Edges thrown away inside the window, and the latest of them after the
+    // edge that was kept, the largest since read() last took it. For the
+    // detail log: how long a spark really rings, against the window.
+    std::atomic<uint32_t> rejected{0};
+    std::atomic<uint32_t> ring_max_us{0};
 };
 
 Channel g_tach;
@@ -46,7 +51,14 @@ void IRAM_ATTR edge_isr(void* arg) {
     // Ringing rejection. Without a filter cap on the tach input, one spark
     // rings for tens of microseconds and every ring is an edge. Anything
     // inside the window is the same event.
-    if (ch->refractory_us && (now - ch->last_edge_us) < ch->refractory_us) return;
+    if (ch->refractory_us && (now - ch->last_edge_us) < ch->refractory_us) {
+        ch->rejected.fetch_add(1, std::memory_order_relaxed);
+        const uint32_t gap = now - ch->last_edge_us;
+        if (gap > ch->ring_max_us.load(std::memory_order_relaxed)) {
+            ch->ring_max_us.store(gap, std::memory_order_relaxed);
+        }
+        return;
+    }
 
     ch->last_edge_us = now;
     ch->edge_us_lo.store(now, std::memory_order_relaxed);
@@ -156,6 +168,10 @@ hal::Status EngineSense::read(Counts& out) {
     out.front_edge_us = widen(front_lo, now);
     out.rear_edge_us = widen(rear_lo, now);
     out.t_us = now;
+    out.tach_rejected = g_tach.rejected.load(std::memory_order_relaxed);
+    out.front_rejected = g_front.rejected.load(std::memory_order_relaxed);
+    out.rear_rejected = g_rear.rejected.load(std::memory_order_relaxed);
+    out.tach_ring_us = g_tach.ring_max_us.exchange(0, std::memory_order_relaxed);
 
     // Neutral is a plain GPIO on this board. It reads LOW in neutral —
     // opto-isolated and pulled up — and is inverted here so that nothing

@@ -35,6 +35,7 @@
 #include "core/config/config.hpp"
 #include "core/health/health.hpp"
 #include "core/log/log.hpp"
+#include "core/log/detail.hpp"
 #include "core/delta/delta.hpp"
 #include "core/flash/flash.hpp"
 #include "services/track_store.hpp"
@@ -84,6 +85,15 @@ struct Deps {
     // card. 512 records at 50 Hz is ten seconds of slack, which is longer
     // than any SD stall anyone has measured.
     core::log::Ring<core::log::Record, 512>* blackbox = nullptr;
+
+    // The detail log (core/log/detail.hpp), one ring per producer, all
+    // drained by `logger` into detail/. Pushed only while CONFIG -> Log ->
+    // Detail log is on. Any of them may be null (the sim, a test), and its
+    // producer then skips it.
+    core::log::ImuRing*  imu_log  = nullptr;   // imu, 200 Hz raw samples
+    core::log::TachRing* tach_log = nullptr;   // ctrl, 50 Hz pulses and timing
+    core::log::DetRing*  det_log  = nullptr;   // logic, 50 Hz filter state
+    core::log::EvtRing*  evt_log  = nullptr;   // logic, events
 
     // Lap delta against the session best. Two point traces, so it is far too
     // big for a task stack and lives here like the others.
