@@ -31,6 +31,11 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_COMPILER_CXX_RTTI=n
+# -O2. The default -Og left render's shadow compare and font blending, the
+# attitude filter and tach-to-lamp all unoptimised. Back to
+# CONFIG_COMPILER_OPTIMIZATION_DEBUG only for a bring-up build whose
+# backtraces need reading (bringup.md §2), never one that rides.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # No CAN, no SD in this build — see demo_p4/README.md.
 

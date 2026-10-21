@@ -19,6 +19,12 @@ struct Defaults {
     float b = 1.5f;
 };
 
+// Not a whole number of words: the last word is partly padding, and only
+// sizeof(T) bytes of it may be read or written.
+struct Odd {
+    uint8_t c[7] = {1, 2, 3, 4, 5, 6, 7};
+};
+
 struct Wide {
     uint32_t a[16];
     bool consistent() const {
@@ -47,6 +53,20 @@ int main() {
     Published<Defaults> d;
     CHECK(d.get().a == 7);
     CHECK(d.get().b == 1.5f);
+
+    CASE("a size that is not a whole number of words round-trips");
+    {
+        Published<Odd> o;
+        CHECK(o.get().c[0] == 1 && o.get().c[6] == 7);
+        Odd v;
+        for (int i = 0; i < 7; ++i) v.c[i] = static_cast<uint8_t>(200 + i);
+        o.publish(v);
+        const Odd r = o.get();
+        bool same = true;
+        for (int i = 0; i < 7; ++i) same = same && r.c[i] == 200 + i;
+        CHECK(same);
+        static_assert(sizeof(Odd) == 7, "the case is about a ragged last word");
+    }
 
     CASE("a read inside an unfinished publish returns the last completed value");
     static Published<int, MidPublish> s;

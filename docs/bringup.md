@@ -98,9 +98,10 @@ pads H8/H9 (U16-56/57) as a fallback.
 the demo board was v1.3. If yours is v3 or later, that setting has to
 change (§11 explains why editing the defaults alone is not enough).
 
-**What you should see.** `dash v2 — N config items`, then twelve tasks
+**What you should see.** `dash v2 — N config items`, then thirteen tasks
 starting (`ctrl`, `imu`, `gnss`, `logic`, `input` on core 0; `render`,
-`logger`, `storage`, `keeper`, `ota`, `ble`, `wifi` on core 1), then `running`.
+`logger`, `storage`, `keeper`, `power`, `ota`, `ble`, `wifi` on core 1),
+then `running`.
 `wifi` is silent until the hotspot is turned on; when it is, check its
 `up: internal free` line before uploading anything (architecture §11.7.1).
 `ota: running <version> from ota_0, stable; other slot empty` says the
@@ -125,6 +126,34 @@ checks it. The estimate is about half a second from the switch to lamps
 and screen, never measured: the log's millisecond stamps from the first
 `I (` line to `main: running` are the number to write down here, and a
 scope on 12 V against the backlight gives the rails as well.
+
+**The watchdog, once, on purpose.** `ctrl`, `imu`, `logic` and `render`
+join the task watchdog and the bike panics on it (5 s). Build once with an
+endless loop at the top of `logic`'s loop, behind a flag, and check:
+the board reboots about 5 s after the hang; the next session's `_evt` says
+`task watchdog`; DIAG → System reads **CRASHED in logic** and the DIAG
+menu says CRASHED; `idf.py coredump-info` names the loop. Time it from the
+hang to the dash drawing again. Writing the core dump erases up to 116 kB
+of flash before the reboot, so this is also the number for how long a
+crash on a ride leaves the dash dark. Clear the dump afterwards:
+`parttool.py --port /dev/ttyACM0 erase_partition --partition-name=coredump`.
+
+**The console with nobody listening.** On the bike the USB-Serial/JTAG
+console has no host. Unplug USB (run from the bike supply), and compare
+`ctrl` overruns and the `_diag` timings with and without the Wi-Fi
+hotspot toggling, which logs at every change. If a log line blocks for its
+timeout each time, lower `CONFIG_LOG_DEFAULT_LEVEL` for bike builds.
+
+**Optimisation.** The build is `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`).
+If a backtrace is unreadable during bring-up, a `-Og` build
+(`CONFIG_COMPILER_OPTIMIZATION_DEBUG`) reads better; go back before riding,
+so the detail log's timings are the build that rides.
+
+**QIO flash, on the demo board first.** Both projects flash in DIO at
+80 MHz. QIO roughly halves a cache refill from flash (`render` and the
+350 kB font notice). It needs the module's flash to have its QE bit set:
+try `CONFIG_ESPTOOLPY_FLASHMODE_QIO` on the demo, boot it cold several
+times, and only then on the bike.
 
 **If nothing enumerates on USB**, hold BOOT (SW1, GPIO35) and tap reset
 (SW3) for download mode. GPIO36 must be high for that, which R20 does.
@@ -169,9 +198,13 @@ be an I2C fault (§4).
 | Colours right, garbage in places | A data line: D0–D7 are panel pins 17–24, which land on connector pads 24–17, from GPIO33 down to GPIO26. |
 
 The panel runs **RGB565, two bytes per pixel**, on this bus: 30.7 ms per
-full frame at 10 MHz, about 15 MHz in spec. `render` runs at 60 Hz and sends only
-changed widgets: on SPEED, the tach bar and speed tile are about 4.7 ms
-of a 16.7 ms period. A full repaint takes two periods. If you find yourself
+full frame at 10 MHz, about 15 MHz in spec. `render` runs at 120 Hz and
+sends only what changed, and only where it differs from the shadow copy:
+SPEED's riding frame is about 1 ms on the wire, against an 8.3 ms period.
+**Raise the write clock** once the panel is right: `kTftWrHz` in steps
+(12.5, 15, 20 MHz), `panel_test` and a ride's worth of screens at each,
+and keep the last one with no speckle, wrong colour or torn band. Every
+blit and the 31 ms full frame shrink in proportion. If you find yourself
 writing panel command sequences, stop — that is the `esp_lcd_ili9488`
 managed component's job.
 
@@ -276,8 +309,27 @@ from the accelerometer, so it will read nonsense while stationary and that
 is correct. Check `Config::rake_deg` and `wheelbase_ft` against the bike:
 they size the steering correction.
 
-The IMU shares SPI2 with the SD card. If IMU samples arrive in bursts
-while logging, that is SD write-busy time; the FIFO absorbs it. If the IMU
+**The part's own timestamp.** Each `_imu` row carries the chip's 16-bit
+timestamp (`ChipTs`) and the packet header (`Hdr`), and `ridelog` §6 fits
+the firmware's back-dated times against them. Check `Hdr` first: bits 3:2
+should be `10` (an ODR timestamp), which is 104 decimal in a full
+accel+gyro+temp packet. If they are `00`, the FIFO carries no timestamp
+and TMST_CONFIG / FIFO_CONFIG1's FIFO_TMST_FSYNC_EN need setting
+(`icm42688p.cpp`, from the datasheet). Then read the real ODR, the drift
+between the two clocks, and the back-dating's p99 error, overall and after
+a stall.
+
+**Gyro bias against temperature.** Leave the dash on, parked, engine off,
+from a cold start for 20–30 minutes (sun on it, if possible). Average
+`Gx`/`Gy`/`Gz` in `_imu` over a few seconds at a time and fit each against
+`TempC` (`ridelog` does not do this yet). The datasheet's typical drift is
+about 0.005 °/s per °C; your part's slope and how well temperature
+explains it decide whether a correction is worth writing.
+
+The IMU shares SPI2 with the SD card, and the IDF's SD host holds the bus
+for a whole SD command, busy time included (architecture §5.1). If IMU
+samples arrive in bursts while logging, that is SD write-busy time; the
+FIFO absorbs it, and `Drain` > 0 in `_imu` counts it. If the IMU
 faults intermittently at 24 MHz, drop `bsp::kSpiHzImu` toward 10 MHz —
 the bus is about 90 mm long with no source termination.
 
@@ -301,6 +353,14 @@ sentences, so a parse bug is unlikely — the suspicion should fall on
 UART1 first. The module's output is 2.8 V logic against the P4's ~2.5 V
 input threshold: workable, but a marginal edge looks like checksum
 errors.
+
+**The UART is interrupt-driven.** `gnss` blocks in the driver and wakes
+when bytes arrive; UART1 hands bytes on after 8 in its FIFO or 2 idle
+characters (`kGpsRxFullBytes`, `kGpsRxIdleChars`), so a fix is stamped
+within ~1.5 ms of its sentence. Check that bad checksums do not climb any
+faster than they did (they would if the FIFO overran), and that `ctrl`
+overruns stay at 0 with the GPS streaming: the UART interrupt is on core 0,
+a couple of hundred times a second.
 
 JP1 is an optional external antenna. The PA1616D switches to it on its
 own when it draws current; nothing in firmware selects it.
@@ -441,7 +501,14 @@ as "CRF250F-Dash" on `demo_p4/`, and nothing has connected to either yet.
    bonds, and Bonds reads 2. CONFIG → Forget phone sets Bonds to 0; both
    phones must then forget the dash in their own settings before pairing
    again.
-6. **Re-measure tach to lamp with a phone connected and streaming**, on
+6. **NimBLE runs on FreeRTOS timers**, not esp_timer
+   (`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, so its timeouts are not above
+   `ctrl` on core 0). No board has run NimBLE this way. Try it on the demo
+   first: bond, disconnect, walk out of range and back, reconnect without
+   pairing again, and let the 30 s encrypt deadline expire on a phone that
+   connects and never pairs. Any stall here is the FreeRTOS timer task
+   (priority 1) not getting time.
+7. **Re-measure tach to lamp with a phone connected and streaming**, on
    the same scope setup as §8. The budget is still 3 ms. ESP-Hosted
    creates its SDIO tasks at priority 23 with no core pinning, and `ble`
    lowers them to 8 after start-up. The log says so:
@@ -449,7 +516,7 @@ as "CRF250F-Dash" on `demo_p4/`, and nothing has connected to either yet.
    at least 6. If it reads 0, a newer esp_hosted renamed its tasks and
    they are still at 23.
 
-7. **Read the detail log after every early ride.** With CONFIG → Log →
+8. **Read the detail log after every early ride.** With CONFIG → Log →
    Detail log on (the default), each power-on writes `detail/<stem>_imu,
    _tach, _det, _evt, _diag.csv` beside `logs/<stem>.csv`. Pull the card
    and run `python3 tools/ridelog/ridelog.py /path/to/card` (`--session N`
@@ -510,6 +577,10 @@ the flash calls are not.
 | `drivers.hpp:10` | The general warning that none of this has run |
 | `ble_service.cpp` `kHostedPrio` | ESP-Hosted's tasks lowered from 23 to 8. Check SDIO keeps up and `ctrl` is unaffected |
 | `ota_service.cpp` | Rollback, install and promote: never run against the real bootloader (§9.1) |
+| `icm42688p.cpp` `chip_ts` | Whether the FIFO carries the part's timestamp: read `Hdr` (§6) |
+| `bsp/pins.hpp` `kGpsRxFullBytes` | UART1 hands on bytes after 8 / 2 idle characters: checksums and `ctrl` overruns (§7) |
+| `services/watchdog.cpp` | Task-watchdog panic: trigger it once, time the reboot (§2) |
+| `sdkconfig.defaults` `BT_NIMBLE_USE_ESP_TIMER=n` | NimBLE on FreeRTOS timers: bond, reconnect, encrypt deadline (§9) |
 
 And the hardware values to settle on the bench, from
 `p4-board-pin-map.md` §6: C19 and R34 (tach), R6 (neutral pull-up), and

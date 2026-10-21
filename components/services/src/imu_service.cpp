@@ -149,7 +149,9 @@ void imu_task(void* arg) {
         // batches of 16, and a part that keeps saying "full" is not allowed
         // to keep this task here.
         for (int drain = 0; drain < kMaxBatchesPerWake; ++drain) {
-            hal::IImu::Sample batch[kBatch];
+            // Static, so the frame stays under 1 kB at -O2 (640 B of
+            // samples since they carry the chip's timestamp); one imu task.
+            static hal::IImu::Sample batch[kBatch];
             size_t n = 0;
             const hal::Status s = d.imu ? d.imu->read_fifo(batch, kBatch, n)
                                         : hal::Status::NotPresent;

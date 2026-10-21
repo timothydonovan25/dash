@@ -110,9 +110,12 @@ SlotState state_of(const esp_partition_t* p) {
     }
 }
 
+// Not strncpy: at -O2 GCC proves it can truncate and -Werror stops the
+// build (stringop-truncation), though truncating is the point here.
 void copy_str(char* dst, size_t cap, const char* src) {
-    std::strncpy(dst, src, cap - 1);
-    dst[cap - 1] = '\0';
+    const size_t n = strnlen(src, cap - 1);
+    std::memcpy(dst, src, n);
+    dst[n] = '\0';
 }
 
 // What the other slot holds, refreshed after anything that changes it.

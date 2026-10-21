@@ -37,46 +37,58 @@ class Published {
     // and no formal data race for the reader's speculative copy.
     static constexpr size_t kWords = (sizeof(T) + 3) / 4;
 
+    // Word i of a T, straight from or into its bytes. There is no whole-T
+    // staging array: with get() inlined at -O2 that array and the T it was
+    // copied into were two copies of the slot in the caller's frame, 312
+    // bytes for Health, and logic_tick went over its 1 kB.
+    static constexpr size_t bytes_in(size_t i) {
+        return sizeof(T) - i * 4 < 4 ? sizeof(T) - i * 4 : 4;
+    }
+    static void store_words(std::atomic<uint32_t>* b, const T& v) {
+        const auto* p = reinterpret_cast<const unsigned char*>(&v);
+        for (size_t i = 0; i < kWords; ++i) {
+            uint32_t w = 0;
+            std::memcpy(&w, p + i * 4, bytes_in(i));
+            b[i].store(w, std::memory_order_relaxed);
+        }
+    }
+    static void load_words(const std::atomic<uint32_t>* b, T& out) {
+        auto* p = reinterpret_cast<unsigned char*>(&out);
+        for (size_t i = 0; i < kWords; ++i) {
+            const uint32_t w = b[i].load(std::memory_order_relaxed);
+            std::memcpy(p + i * 4, &w, bytes_in(i));
+        }
+    }
+
 public:
     // Before the first publish a reader gets T{}, member defaults and all,
     // as it did when the slot was a plain T: not zero bytes.
-    Published() {
-        const T init{};
-        uint32_t w[kWords] = {};
-        std::memcpy(w, &init, sizeof(T));
-        for (size_t i = 0; i < kWords; ++i) buf_[0][i].store(w[i], std::memory_order_relaxed);
-    }
+    Published() { store_words(buf_[0], T{}); }
 
     // Writer task only. Never call this from two tasks.
     void publish(const T& v) {
         const uint32_t n = count_.load(std::memory_order_relaxed);
-        uint32_t w[kWords] = {};
-        std::memcpy(w, &v, sizeof(T));
         // Orders the previous count store before these data stores, so a
         // reader that sees any of them also sees the count move on and
         // throws its copy away.
         std::atomic_thread_fence(std::memory_order_release);
-        std::atomic<uint32_t>* b = buf_[(n + 1) & 1u];
-        for (size_t i = 0; i < kWords; ++i) b[i].store(w[i], std::memory_order_relaxed);
+        store_words(buf_[(n + 1) & 1u], v);
         Hook::mid();
         count_.store(n + 1, std::memory_order_release);
     }
 
     // Any reader, any task.
+    // The copy lands in the returned T as it is read; a copy the writer
+    // overtook is simply read again over the top of it.
     T get() const {
+        T out;
         for (;;) {
             const uint32_t n = count_.load(std::memory_order_acquire);
-            const std::atomic<uint32_t>* b = buf_[n & 1u];
-            uint32_t w[kWords];
-            for (size_t i = 0; i < kWords; ++i) w[i] = b[i].load(std::memory_order_relaxed);
+            load_words(buf_[n & 1u], out);
             std::atomic_thread_fence(std::memory_order_acquire);
             // Unchanged: the writer has not started on this buffer since.
             // Do not "optimise" this second load away.
-            if (count_.load(std::memory_order_relaxed) == n) {
-                T out;
-                std::memcpy(&out, w, sizeof(T));
-                return out;
-            }
+            if (count_.load(std::memory_order_relaxed) == n) return out;
         }
     }
 

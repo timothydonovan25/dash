@@ -493,7 +493,7 @@ UART1 (GPS) and the i80 LCD bus are brought up in one place, and a driver
 only ever adds a device to a bus.
 
 **`drivers/`, `services/`, `main/`** — compile clean for esp32p4 against
-IDF v6.0.2 and link into a 1.09 MB `dash.bin` (NimBLE and esp_hosted are about 430 kB of it). **Nothing has run.** Compiling
+IDF v6.0.2 and link into a 1.8 MB `dash.bin` (1.40, -O2; NimBLE and esp_hosted were about 430 kB of it when last measured). **Nothing has run.** Compiling
 is not working: the drivers are written against datasheets and a netlist,
 and the board has not arrived yet. See `components/drivers/README.md` for the
 specific BRINGUP holes.
@@ -548,7 +548,8 @@ in PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`; measured on the demo,
 131 kB free). ESP-Hosted falls back to internal RAM silently if PSRAM
 fails, so if this ever boot-loops again, check that first. Check
 `nm build/dash.elf | grep _heap_start` after adding statics; the bike is at
-0x4FF1F810 (1.26; the splits' path buffer is most of `logic`'s 5.8 kB). Big buffers go on a task stack (allocated later) or in PSRAM
+0x4FF20A60 and the demo at 0x4FF2A640 (1.40; the splits' path buffer is most
+of `logic`'s 5.8 kB). Big buffers go on a task stack (allocated later) or in PSRAM
 with `EXT_RAM_BSS_ATTR`, never in a plain static.
 
 **CRUISE → NAV** guides back to one of five named waypoints:

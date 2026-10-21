@@ -1070,7 +1070,8 @@ good, and either would end USB recovery, `tools/flash_dev.py` and Wi-Fi
 uploads to the dev slot. `sdkconfig.defaults` says so and `main.cpp`
 refuses to build with either on.
 
-`dash.bin` is about 1.1 MB, so a slot is under a fifth full.
+`dash.bin` is about 1.8 MB (2.0 MB on the demo, as of 1.40), so a slot is
+under a third full.
 
 **Stable and dev.** The two slots hold a stable image and a dev image. Which
 is which is never stored: it is read off the bootloader's own state for the

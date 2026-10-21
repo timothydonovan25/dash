@@ -380,6 +380,53 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
     }
 }
 
+// One blackbox row. Its own function, kept out of line like detail_log,
+// so the 100-byte Record is not in logic_tick's frame, which at -O2 sits
+// close to the 1 kB limit (CLAUDE.md, 1.28).
+__attribute__((noinline))
+void blackbox_row(Deps& d, LogicState& s, uint32_t now,
+                  const core::state::Gnss& g, const core::state::Motion& m,
+                  const core::state::Engine& e, const core::state::Attitude& a,
+                  const core::fusion::SpeedOutput& fo,
+                  uint32_t lap_done_ms, uint16_t lap_done_index) {
+    core::log::Record rec;
+    rec.front_mph = m.front_mph;
+    rec.rear_mph = m.rear_mph;
+    rec.gps_mph = g.speed_mph;
+    rec.hdop = g.hdop;
+    rec.gps_utc_ms = g.utc_ms;
+    rec.fused_mph = fo.mph;
+    rec.fused_sigma = fo.sigma_mph;
+    rec.alt_ft = g.alt_m * 3.28084f;
+    rec.t_ms = now;
+    rec.speed_mph = m.best_mph;
+    rec.rpm = e.rpm;
+    rec.lean_deg = a.lean_deg;
+    rec.pitch_deg = a.pitch_deg;
+    rec.g_lat = a.g_lat;
+    rec.g_lon = a.g_lon;
+    rec.g_vert = a.g_vert;
+    rec.course_deg = g.course_deg;
+    rec.lat = g.lat;
+    rec.lon = g.lon;
+    rec.lap_ms = s.lap.state().current_ms;
+    rec.lap_done_ms = lap_done_ms;
+    rec.lap_num = lap_done_ms != 0 ? lap_done_index
+                                   : static_cast<uint16_t>(s.lap_count);
+    // RaceRender has no "unknown" gear, so neutral and no-idea share 0.
+    // kFlagNeutral below is the sensed one; this is the inference.
+    rec.gear = e.neutral ? 0 : e.gear;
+    rec.sats = g.sats;
+    rec.flags = static_cast<uint16_t>(
+        (e.neutral ? core::log::kFlagNeutral : 0) |
+        (a.airborne ? core::log::kFlagAirborne : 0) |
+        (g.fix ? core::log::kFlagFix : 0) |
+        (s.lap.state().phase == core::lap::Phase::Timing
+             ? core::log::kFlagTiming : 0) |
+        (e.ecu_online ? core::log::kFlagEcu : 0));
+    d.blackbox->push(rec);
+}
+
 }  // namespace
 
 void logic_restore(Deps& d, LogicState& s) {
@@ -493,9 +540,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 else            s.trip.reset_trip_a();
                 break;
             case core::state::CommandId::ConfigSet:
-                // The config screen has already edited Settings in place,
-                // so for it this is a no-op; the Wi-Fi page has not, and
-                // its value lands here. Then every module holding a copy
+                // Every edit lands here: the CONFIG screen, the Wi-Fi page
+                // and imu's Calibrate level all post ConfigSet, and this is
+                // Settings' one writer. Then every module holding a copy
                 // refreshes, and the keeper sees something to write to NVS.
                 if (d.settings) {
                     if (const core::config::ConfigItem* it =
@@ -971,43 +1018,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         : static_cast<uint8_t>(core::log::kDefaultRate);
     if (d.blackbox && (scheduled || lap_event) &&
         s.log_gate.due(log_rate, now, lap_event)) {
-        const core::state::Attitude& a = att;
-        core::log::Record rec;
-        rec.front_mph = m.front_mph;
-        rec.rear_mph = m.rear_mph;
-        rec.gps_mph = g.speed_mph;
-        rec.hdop = g.hdop;
-        rec.gps_utc_ms = g.utc_ms;
-        rec.fused_mph = fo.mph;
-        rec.fused_sigma = fo.sigma_mph;
-        rec.alt_ft = g.alt_m * 3.28084f;
-        rec.t_ms = now;
-        rec.speed_mph = m.best_mph;
-        rec.rpm = e.rpm;
-        rec.lean_deg = a.lean_deg;
-        rec.pitch_deg = a.pitch_deg;
-        rec.g_lat = a.g_lat;
-        rec.g_lon = a.g_lon;
-        rec.g_vert = a.g_vert;
-        rec.course_deg = g.course_deg;
-        rec.lat = g.lat;
-        rec.lon = g.lon;
-        rec.lap_ms = s.lap.state().current_ms;
-        rec.lap_done_ms = lap_done_ms;
-        rec.lap_num = lap_done_ms != 0 ? lap_done_index
-                                       : static_cast<uint16_t>(s.lap_count);
-        // RaceRender has no "unknown" gear, so neutral and no-idea share 0.
-        // kFlagNeutral below is the sensed one; this is the inference.
-        rec.gear = e.neutral ? 0 : e.gear;
-        rec.sats = g.sats;
-        rec.flags = static_cast<uint16_t>(
-            (e.neutral ? core::log::kFlagNeutral : 0) |
-            (a.airborne ? core::log::kFlagAirborne : 0) |
-            (g.fix ? core::log::kFlagFix : 0) |
-            (s.lap.state().phase == core::lap::Phase::Timing
-                 ? core::log::kFlagTiming : 0) |
-            (e.ecu_online ? core::log::kFlagEcu : 0));
-        d.blackbox->push(rec);
+        blackbox_row(d, s, now, g, m, e, att, fo, lap_done_ms, lap_done_index);
     }
 
     if (detail) detail_log(d, s, now, scheduled, g, m, e, att, health, fi, fo);
