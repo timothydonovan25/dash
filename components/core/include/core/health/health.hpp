@@ -81,6 +81,11 @@ public:
     // device is absent.
     void report_ok(state::Dev d, uint32_t t_ms);
 
+    // Working, but short of spec: the GPS that would not go past 1 Hz. An
+    // Ok device that is limited reads Degraded; errors and silence decide
+    // as before. Set again after every init, which is when it is known.
+    void report_limited(state::Dev d, bool limited);
+
     // Called by a driver on a failed one. `err` is the driver's own code,
     // kept verbatim for the diag screen — this layer does not interpret it.
     void report_error(state::Dev d, int32_t err, uint32_t t_ms);
@@ -115,6 +120,7 @@ private:
         std::atomic<uint32_t> streak{0};
         std::atomic<uint32_t> err_total{0};
         std::atomic<int32_t>  last_err{0};
+        std::atomic<bool>     limited{false};
         // Intent, written by begin_init and set_absent.
         std::atomic<bool>     absent{true};
         std::atomic<bool>     init_pending{false};

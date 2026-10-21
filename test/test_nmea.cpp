@@ -262,5 +262,47 @@ int main() {
         // And the next sentence brings it back: the parser sets `fix` again.
     }
 
+    CASE("LineReader: a whole sentence with a good checksum, and nothing else");
+    {
+        using core::nmea::LineReader;
+        auto feed = [](LineReader& r, const char* s) {
+            int done = 0;
+            for (const char* p = s; *p; ++p) done += r.feed(*p) ? 1 : 0;
+            return done;
+        };
+        LineReader r;
+        CHECK(feed(r, "$PMTK010,001*2E\r\n") == 1);
+        CHECK(std::strcmp(r.line(), "PMTK010,001") == 0);
+        CHECK(feed(r, "$GNRMC,123519.000,A,4807.0380,N,01131.0000,E,0.0,0.0,230394,,,A*70\r\n") == 1);
+        CHECK(std::strncmp(r.line(), "GNRMC,", 6) == 0);
+        // A wrong checksum, no checksum, line noise from the wrong baud rate.
+        CHECK(feed(r, "$PMTK010,001*2F\r\n") == 0);
+        CHECK(feed(r, "$PMTK010,001\r\n") == 0);
+        CHECK(feed(r, "\x8f\x1c\xe0\xf8\x80\x80\r\n\xff") == 0);
+        // Cut short by a new '$': the second one still counts.
+        CHECK(feed(r, "$PMTK0$PMTK001,220,3*30\r\n") == 1);
+        CHECK(std::strcmp(r.line(), "PMTK001,220,3") == 0);
+        // Longer than any real sentence: dropped, and the next one is fine.
+        char longline[200];
+        std::memset(longline, 'A', sizeof longline);
+        longline[0] = '$';
+        longline[sizeof longline - 1] = '\0';
+        CHECK(feed(r, longline) == 0);
+        CHECK(feed(r, "\r\n$PMTK001,313,3*31\r\n") == 1);
+    }
+
+    CASE("ack_flag: the answer to this command, and only this one");
+    {
+        using core::nmea::ack_flag;
+        CHECK(ack_flag("PMTK001,220,3", 220) == 3);
+        CHECK(ack_flag("PMTK001,220,2", 220) == 2);    // valid, action failed
+        CHECK(ack_flag("PMTK001,313,3", 220) == -1);   // someone else's
+        CHECK(ack_flag("PMTK001,2203,3", 220) == -1);
+        CHECK(ack_flag("PMTK010,001", 220) == -1);     // the startup message
+        CHECK(ack_flag("PMTK001,220,", 220) == -1);
+        CHECK(ack_flag("PMTK001,220,3,9", 220) == -1);
+        CHECK(ack_flag("GNRMC,1", 220) == -1);
+    }
+
     return check::report("nmea");
 }

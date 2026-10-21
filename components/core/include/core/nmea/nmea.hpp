@@ -59,6 +59,30 @@ private:
     uint32_t overruns_ = 0;
 };
 
+// Whole sentences with a good checksum, for the receiver's bring-up
+// (drivers/pa1616d.cpp): it listens for any real sentence at a baud rate,
+// and for the PMTK001 answers to its commands. Not the Parser, which keeps
+// only RMC and GGA and needs a fix to write into.
+class LineReader {
+public:
+    // Feed one byte. True when a sentence has just ended with a checksum
+    // that matches; line() is then its body, between '$' and '*'.
+    bool feed(char ch);
+    const char* line() const { return line_; }
+
+private:
+    static constexpr uint16_t kMax = 128;
+    char     line_[kMax] = {};
+    uint16_t len_ = 0;
+    bool     in_ = false;
+    bool     over_ = false;
+};
+
+// The flag of `PMTK001,<cmd>,<flag>` (the receiver's acknowledgement) when
+// `line` answers `cmd`, else -1. Flags: 0 invalid, 1 unsupported, 2 valid
+// but failed, 3 done (GlobalTop PMTK command packet, packet 001).
+int ack_flag(const char* line, uint16_t cmd);
+
 // Exposed for the tests, and useful on its own: NMEA carries position as
 // ddmm.mmmm, which is degrees and minutes jammed together. Reading it as a
 // decimal number puts you a few hundred miles away.

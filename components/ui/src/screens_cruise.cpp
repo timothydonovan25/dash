@@ -173,7 +173,7 @@ void SpeedScreen::update(const Frame& f) {
                        f.fused.speed_valid;
     const float mph = fused ? f.fused.speed_mph : f.motion.best_mph;
     const float shown = u::speed_for_display(mph, units(), &unit);
-    const bool speed_ok = f.health.ok(Dev::Gnss) || f.motion.front_mph > 0.0f ||
+    const bool speed_ok = f.health.working(Dev::Gnss) || f.motion.front_mph > 0.0f ||
                           f.motion.rear_mph > 0.0f;
     speed_.set(shown, speed_ok);
 
@@ -437,7 +437,7 @@ void MediaScreen::enter(Canvas&) {
 }
 
 void MediaScreen::update(const Frame& f) {
-    const bool speed_ok = f.health.ok(Dev::Gnss) || f.motion.front_mph > 0.0f ||
+    const bool speed_ok = f.health.working(Dev::Gnss) || f.motion.front_mph > 0.0f ||
                           f.motion.rear_mph > 0.0f;
     speed_.set(u::speed_for_display(f.motion.best_mph, units(), nullptr), speed_ok);
 
@@ -500,7 +500,7 @@ void MinimalScreen::update(const Frame& f) {
     const char* unit = "mph";
     const float shown = u::speed_for_display(f.motion.best_mph, units(), &unit);
     speed_.configure(unit, 0, 22);
-    const bool speed_ok = f.health.ok(Dev::Gnss) || f.motion.front_mph > 0.0f ||
+    const bool speed_ok = f.health.working(Dev::Gnss) || f.motion.front_mph > 0.0f ||
                           f.motion.rear_mph > 0.0f;
     speed_.set(shown, speed_ok);
 

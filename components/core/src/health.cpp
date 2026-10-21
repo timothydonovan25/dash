@@ -69,6 +69,10 @@ void Tracker::report_ok(Dev d, uint32_t t_ms) {
     c.ok_gen.fetch_add(1, kRel);             // publishes the two stores above
 }
 
+void Tracker::report_limited(Dev d, bool limited) {
+    cell_[ix(d)].limited.store(limited, kRel);
+}
+
 void Tracker::report_error(Dev d, int32_t err, uint32_t t_ms) {
     (void)t_ms;
     Cell& c = cell_[ix(d)];
@@ -134,6 +138,9 @@ void Tracker::tick(uint32_t t_ms, const Policy& p) {
                 st = DevState::Degraded;
             }
         }
+        // Last, and only over an Ok: a limited device that also errs or goes
+        // quiet is judged on that.
+        if (st == DevState::Ok && c.limited.load(kAcq)) st = DevState::Degraded;
         c.state.store(static_cast<uint8_t>(st), kRlx);
     }
 }
@@ -158,6 +165,7 @@ bool Tracker::publish_if_changed(Published<state::Health>& slot, uint32_t t_ms,
     bool changed = !published_once_ || t_ms - last_pub_ms_ >= heartbeat_ms;
     for (uint8_t i = 0; i < state::kDevCount && !changed; ++i) {
         changed = h.dev[i].state != last_pub_.dev[i].state ||
+                  h.dev[i].limited != last_pub_.dev[i].limited ||
                   h.dev[i].fault_count != last_pub_.dev[i].fault_count ||
                   h.dev[i].last_err != last_pub_.dev[i].last_err;
     }
@@ -173,6 +181,7 @@ DevHealth Tracker::operator[](Dev d) const {
     const Cell& c = cell_[ix(d)];
     DevHealth h;
     h.state = static_cast<DevState>(c.state.load(kRlx));
+    h.limited = c.limited.load(kRlx);
     h.fault_count = c.fault_count.load(kRlx);
     h.last_ok_ms = c.last_ok_ms.load(kRlx);
     h.last_err = c.last_err.load(kRlx);

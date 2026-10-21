@@ -559,7 +559,10 @@ void BusScreen::update(const Frame& f) {
     table_.set_row(2, "SPI2 sd",  state_text(f.health[Dev::Sd].state));
     table_.set_row(3, "i80 tft",  state_text(f.health[Dev::Display].state));
     table_.set_row(4, "I2C0 pod", state_text(f.health[Dev::McpPod].state));
-    table_.set_row(5, "UART1 gps",state_text(f.health[Dev::Gnss].state));
+    // Degraded only for being stuck at 1 Hz says which: the receiver works.
+    const core::state::DevHealth& gh = f.health[Dev::Gnss];
+    table_.set_row(5, "UART1 gps", gh.state == core::state::DevState::Degraded && gh.limited
+                                       ? "1 Hz" : state_text(gh.state));
 
     u::fmt_value(v, sizeof v, static_cast<float>(f.health[Dev::McpPod].fault_count),
                  0, true);

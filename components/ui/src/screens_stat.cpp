@@ -41,7 +41,7 @@ void AllDataScreen::update(const Frame& f) {
     const char* unit = "mph";
 
     row_value(v, sizeof v, u::speed_for_display(f.motion.best_mph, units(), &unit),
-              0, unit, f.health.ok(Dev::Gnss));
+              0, unit, f.health.working(Dev::Gnss));
     table_.set_row(0, "Speed", v);
 
     row_value(v, sizeof v, u::rpm_for_display(f.engine.rpm), 0, "rpm", f.engine.rpm > 0.0f);

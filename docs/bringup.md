@@ -341,9 +341,18 @@ Build-order step 6. Take it outside. **Every power-up is a cold start**:
 VBACKUP (U4-4) is tied to VCC, so the module keeps nothing when the dash
 is off. Expect minutes, not seconds.
 
-The module boots at 9600 baud and the driver moves it to 57 600
-(`kGpsBootBaud`, `kGpsRunBaud`). 10 Hz with more than RMC+GGA does not
-fit in 9600, so a fix that arrives and then stalls is the baud switch.
+The module boots at 9600 baud and 1 Hz every time (VBACKUP is VCC, so it
+keeps no setting), and the driver moves it to 57 600 and 10 Hz
+(`kGpsBootBaud`, `kGpsRunBaud`). It sends the baud command at both rates,
+then listens for a sentence that passes its checksum, at 57 600 and then
+9600, up to 1.5 s each; a receiver heard at neither is a fault. Then
+RMC+GGA only, SBAS off (the datasheet allows SBAS only at 5 Hz or slower)
+and 10 Hz, each confirmed by the receiver's `PMTK001` answer. **DIAG → Bus
+reading `UART1 gps  1 Hz`** means it works but stayed slow: still at 9600
+(it never took the baud command), or it refused 10 Hz. The health table
+calls that Degraded, so the DIAG menu shows it; GPS data is still used. A
+P4-only restart (the watchdog) finds it already at 57 600 and must come
+back at 10 Hz: check that once.
 
 DIAG → GPS shows sentence count and bad-checksum count. **Sentences
 climbing with checksums climbing** is a baud or wiring problem.

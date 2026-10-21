@@ -28,9 +28,10 @@
 //                                firmware's own parser: kind C (a call,
 //                                ringing), E (it ended), X (missed),
 //                                M (message), O (other)
-//        dev <imu|gnss|lamps|pod|sd|display> <ok|fail|absent>
+//        dev <imu|gnss|lamps|pod|sd|display> <ok|fail|absent|slow>
 //                                a device working, failing every report, or
-//                                not there (for sd: the card pulled)
+//                                not there (for sd: the card pulled); slow is
+//                                working but limited (the GPS stuck at 1 Hz)
 //        crash <task|none> [new]  a core dump in flash, as keeper reads one
 //                                at boot (DIAG -> System); `new` if this
 //                                boot was the crash
@@ -161,7 +162,7 @@ void host_utc(int shift_h, sim::Controls& c) {
 // are not here: `logic` reports them (core::fusion::WheelCheck), and the
 // dead-sensor toggles are how to break one. Nor the phone, which FakeBle
 // owns, nor the ECU and TPMS, which this board does not have.
-enum class DevMode : uint8_t { Ok, Failing, Absent };
+enum class DevMode : uint8_t { Ok, Failing, Absent, Slow };
 struct NamedDev {
     const char*       name;
     core::state::Dev  dev;
@@ -738,6 +739,7 @@ int main() {
                     if (std::strcmp(b, "ok") == 0) m = DevMode::Ok;
                     else if (std::strcmp(b, "fail") == 0) m = DevMode::Failing;
                     else if (std::strcmp(b, "absent") == 0) m = DevMode::Absent;
+                    else if (std::strcmp(b, "slow") == 0) m = DevMode::Slow;
                 }
             } else if (std::sscanf(line.c_str(), "cmd %31s", a) == 1) {
                 using core::state::Command;
@@ -858,6 +860,7 @@ int main() {
                     break;
                 case DevMode::Failing:
                 case DevMode::Ok:
+                case DevMode::Slow:
                     // Coming back (or arriving): the driver's init first, as
                     // on the bike, or its reports are ignored. Not the ECU or
                     // TPMS, which this board has not got.
@@ -866,8 +869,9 @@ int main() {
                             dev == core::state::Dev::TpmsR) break;
                         health.begin_init(dev, now);
                     }
-                    if (dev_mode[i] == DevMode::Ok) health.report_ok(dev, now);
-                    else health.report_error(dev, -1, now);
+                    health.report_limited(dev, dev_mode[i] == DevMode::Slow);
+                    if (dev_mode[i] == DevMode::Failing) health.report_error(dev, -1, now);
+                    else health.report_ok(dev, now);
                     break;
             }
         }

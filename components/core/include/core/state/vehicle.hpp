@@ -512,6 +512,10 @@ enum class DevState : uint8_t { Absent = 0, Init, Ok, Degraded, Fault };
 
 struct DevHealth {
     DevState state       = DevState::Absent;
+    // Working, but short of what it should do (core::health's limited):
+    // the GPS stuck at 1 Hz. It is why `state` reads Degraded; the data is
+    // still good, which is what working() is for.
+    bool     limited     = false;
     uint16_t fault_count = 0;
     uint32_t last_ok_ms  = 0;
     int32_t  last_err    = 0;
@@ -538,6 +542,14 @@ struct Health {
 
     // The question every widget asks before it shows a number.
     bool ok(Dev d) const { return (*this)[d].state == DevState::Ok; }
+
+    // Delivering good data, if not all of it: Ok, or Degraded only for
+    // being limited (a 1 Hz GPS). For a reading that is right whatever the
+    // rate; a fault still blanks it.
+    bool working(Dev d) const {
+        const DevHealth& h = (*this)[d];
+        return h.state == DevState::Ok || (h.state == DevState::Degraded && h.limited);
+    }
 };
 
 }  // namespace core::state

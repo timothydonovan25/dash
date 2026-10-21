@@ -124,6 +124,56 @@ static uint16_t day_of_year_from_ddmmyy(const char* f, int& year, int& month, in
     return static_cast<uint16_t>(doy + day);
 }
 
+bool LineReader::feed(char ch) {
+    if (ch == '$') {
+        in_ = true;
+        len_ = 0;
+        over_ = false;
+        return false;
+    }
+    if (!in_) return false;
+    if (ch == '\r' || ch == '\n') {
+        in_ = false;
+        if (over_ || len_ < 4) return false;
+        line_[len_] = '\0';
+        // body*hh
+        char* star = nullptr;
+        for (uint16_t i = 0; i < len_; ++i) {
+            if (line_[i] == '*') { star = &line_[i]; break; }
+        }
+        if (!star || star + 2 >= line_ + len_) return false;
+        const int hi = hex_value(star[1]);
+        const int lo = hex_value(star[2]);
+        if (hi < 0 || lo < 0) return false;
+        uint8_t sum = 0;
+        for (const char* p = line_; p < star; ++p) sum ^= static_cast<uint8_t>(*p);
+        if (sum != static_cast<uint8_t>(hi * 16 + lo)) return false;
+        *star = '\0';
+        return true;
+    }
+    if (len_ + 1 >= kMax) {
+        over_ = true;
+        return false;
+    }
+    line_[len_++] = ch;
+    return false;
+}
+
+int ack_flag(const char* line, uint16_t cmd) {
+    static const char kAck[] = "PMTK001,";
+    for (size_t i = 0; i + 1 < sizeof kAck; ++i) {
+        if (line[i] != kAck[i]) return -1;
+    }
+    const char* p = line + sizeof kAck - 1;
+    uint32_t got = 0;
+    int digits = 0;
+    while (is_digit(*p) && digits < 5) { got = got * 10 + static_cast<uint32_t>(*p - '0'); ++p; ++digits; }
+    if (digits == 0 || *p != ',' || got != cmd) return -1;
+    ++p;
+    if (!is_digit(p[0]) || p[1] != '\0') return -1;
+    return p[0] - '0';
+}
+
 Result Parser::feed(char ch, state::Gnss& out) {
     if (ch == '$') {
         // A '$' mid-sentence means the previous one was cut short. Start

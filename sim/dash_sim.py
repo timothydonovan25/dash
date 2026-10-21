@@ -189,7 +189,7 @@ DEVICES = [
     ("sd",      "SD card"),
     ("display", "Display"),
 ]
-DEV_MODES = ["ok", "fail", "absent"]
+DEV_MODES = ["ok", "fail", "absent", "slow"]   # slow: working but limited (a 1 Hz GPS)
 
 # The simulator has no radio, so nothing plays the phone's part of §11.1.
 # Instead it uses whatever is actually

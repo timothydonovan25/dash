@@ -17,6 +17,20 @@ namespace {
 // late a dead receiver's fix is aged out and a retry is picked up.
 constexpr uint32_t kWaitMs = 50;
 
+// The receiver's set-up (Pa1616d::init: a few seconds at most), and what it
+// came to: a fault if nothing answered, Degraded if it is stuck at 1 Hz
+// (limited), Ok at 10 Hz. On a retry too, which used to ignore the result.
+void bring_up(Deps& d) {
+    const hal::Status s = d.gnss->init();
+    const uint32_t now = d.clock->now_ms();
+    if (hal::ok(s)) {
+        d.health->report_limited(core::state::Dev::Gnss, !d.gnss->full_rate());
+        d.health->report_ok(core::state::Dev::Gnss, now);
+    } else {
+        d.health->report_error(core::state::Dev::Gnss, static_cast<int32_t>(s), now);
+    }
+}
+
 void gnss_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
 
@@ -27,12 +41,8 @@ void gnss_task(void* arg) {
     // baud rate takes half a second of waiting, and nothing else in the boot
     // needs the GPS. A missing receiver fails here and the keeper retries it.
     if (d.gnss) {
-        uint32_t now = d.clock->now_ms();
-        d.health->begin_init(core::state::Dev::Gnss, now);
-        const hal::Status s = d.gnss->init();
-        now = d.clock->now_ms();
-        if (hal::ok(s)) d.health->report_ok(core::state::Dev::Gnss, now);
-        else d.health->report_error(core::state::Dev::Gnss, static_cast<int32_t>(s), now);
+        d.health->begin_init(core::state::Dev::Gnss, d.clock->now_ms());
+        bring_up(d);
     }
 
     for (;;) {
@@ -40,7 +50,7 @@ void gnss_task(void* arg) {
         // baud rate: from another task it did so under this loop's reads.
         // A sentence cut in half by it fails its checksum and the parser
         // picks up again at the next '$'.
-        if (take_retry(d, core::state::Dev::Gnss) && d.gnss) d.gnss->init();
+        if (take_retry(d, core::state::Dev::Gnss) && d.gnss) bring_up(d);
 
         char buf[256];
         size_t n = 0;

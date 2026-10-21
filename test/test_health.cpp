@@ -239,6 +239,43 @@ int main() {
         CHECK(t[Dev::Imu].state == DevState::Ok);
     }
 
+    CASE("limited: working but short of spec reads Degraded, and working()");
+    {
+        Tracker t;
+        t.begin_init(Dev::Gnss, 0);
+        t.report_ok(Dev::Gnss, 10);
+        t.report_limited(Dev::Gnss, true);       // the GPS stuck at 1 Hz
+        t.tick(10, p);
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+        CHECK(t[Dev::Gnss].limited);
+        core::state::Health h = t.publish();
+        CHECK(!h.ok(Dev::Gnss));
+        CHECK(h.working(Dev::Gnss));             // its data is still good
+        CHECK(!t.all_ok());
+
+        // Reports keep coming at its slow rate: it stays Degraded, not Fault.
+        for (uint32_t ms = 1000; ms <= 10000; ms += 1000) {
+            t.report_ok(Dev::Gnss, ms);
+            t.tick(ms, p);
+        }
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+        CHECK(!t.claim_retry(Dev::Gnss, 20000, p));   // only a Fault is retried
+
+        // A re-init that got 10 Hz: Ok at the next report.
+        t.report_limited(Dev::Gnss, false);
+        t.report_ok(Dev::Gnss, 10100);
+        t.tick(10100, p);
+        CHECK(t[Dev::Gnss].state == DevState::Ok);
+        CHECK(t.publish().working(Dev::Gnss));
+
+        // Limited and then silent: judged on the silence.
+        t.report_limited(Dev::Gnss, true);
+        t.tick(10150, p);
+        t.tick(10150 + p.stale_ms * 5, p);
+        CHECK(t[Dev::Gnss].state == DevState::Fault);
+        CHECK(!t.publish().working(Dev::Gnss));
+    }
+
     CASE("publish only on change, with a heartbeat for last_ok_ms");
     {
         Tracker t;
