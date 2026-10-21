@@ -19,10 +19,13 @@
 #include "core/waypoint/waypoint.hpp"
 #include "bsp/pins.hpp"
 
+#include "esp_core_dump.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cmath>
+#include <cstring>
 
 namespace services {
 namespace {
@@ -35,8 +38,36 @@ constexpr double kOdoWriteThresholdMi = 0.01;
 constexpr uint32_t kHealthPeriodMs = 50;
 constexpr uint32_t kSlowEvery = 1000 / kHealthPeriodMs;   // passes per second
 
+// Is there a core dump in flash, and which task made it? Once, at boot: a
+// dump only changes with a crash, and a crash is a reboot. The summary is
+// over 1 kB, so it is borrowed from PSRAM for the read and handed back.
+void read_crash_dump(ui::SystemInfo& sys) {
+    if (esp_core_dump_image_check() != ESP_OK) return;     // none, or damaged
+    std::strncpy(sys.crash_task, "?", sizeof sys.crash_task);
+    auto* sum = static_cast<esp_core_dump_summary_t*>(
+        heap_caps_malloc(sizeof(esp_core_dump_summary_t), MALLOC_CAP_SPIRAM));
+    if (sum) {
+        if (esp_core_dump_get_summary(sum) == ESP_OK && sum->exc_task[0]) {
+            std::strncpy(sys.crash_task, sum->exc_task, sizeof sys.crash_task - 1);
+            sys.crash_task[sizeof sys.crash_task - 1] = '\0';
+        }
+        heap_caps_free(sum);
+    }
+    switch (esp_reset_reason()) {
+        case ESP_RST_PANIC:
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:
+            sys.crash_new = true;
+            break;
+        default:
+            break;
+    }
+}
+
 void keeper_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
+    if (d.system) read_crash_dump(*d.system);
 
     core::health::Policy policy;
     double last_saved_odo = -1.0;

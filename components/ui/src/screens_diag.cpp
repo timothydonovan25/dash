@@ -84,9 +84,11 @@ void DiagMenuScreen::update(const Frame& f) {
                 }
                 break;
             }
-            case 3: {   // System: the tightest stack
+            case 3: {   // System: a crash this boot, else the tightest stack
                 const SystemInfo* si = has_ctx() ? ctx().system : nullptr;
-                if (si && si->stack_low_task[0]) {
+                if (si && si->crash_task[0] && si->crash_new) {
+                    std::strcpy(v, "CRASHED");
+                } else if (si && si->stack_low_task[0]) {
                     std::snprintf(v, sizeof v, "stack %u B",
                                   static_cast<unsigned>(si->stack_low_free_b));
                 }
@@ -416,10 +418,23 @@ void SystemScreen::update(const Frame& f) {
     u::fmt_value(v, sizeof v, static_cast<float>(s->ctrl_late), 0, true);
     table_.set_row(5, "Ctrl overruns", v);
 
-    u::fmt_value(v, sizeof v, static_cast<float>(s->log_records), 0, true);
-    table_.set_row(6, "Log records", v);
-    u::fmt_value(v, sizeof v, static_cast<float>(s->log_dropped), 0, true);
-    table_.set_row(7, "Log dropped", v);
+    // Records and drops in one row, like the heap's, to leave a row for
+    // the crash dump.
+    {
+        size_t k = u::fmt_value(v, sizeof v, static_cast<float>(s->log_records), 0, true);
+        if (k + 1 < sizeof v) { v[k++] = '/'; v[k] = '\0'; }
+        u::fmt_value(v + k, sizeof v - k, static_cast<float>(s->log_dropped), 0, true);
+    }
+    table_.set_row(6, "Log rows/drop", v);
+
+    // A core dump in flash: which task, and whether this boot is the crash
+    // (the label says so) or it is an old one nothing has overwritten.
+    if (!s->crash_task[0]) {
+        table_.set_row(7, "Crash dump", "none");
+    } else {
+        std::snprintf(v, sizeof v, "%.13s", s->crash_task);
+        table_.set_row(7, s->crash_new ? "CRASHED in" : "Last crash", v);
+    }
 
     // How hot the dash is getting: the P4's die, and the IMU's, which is
     // the nearest thing to a thermometer inside the case. Supply and VIN

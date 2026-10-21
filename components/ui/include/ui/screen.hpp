@@ -62,6 +62,13 @@ struct SystemInfo {
     // high-water mark in bytes (services::watch_stacks, once a second).
     char     stack_low_task[12] = {};
     uint32_t stack_low_free_b   = 0;
+    // A core dump in flash, from `keeper` at boot: the task that crashed
+    // ("?" if the dump's summary would not read), empty with none. A dump
+    // stays until the next crash overwrites it, so `crash_new` says whether
+    // it is this boot's: the reset was a panic or a watchdog. Read it over
+    // USB with `idf.py coredump-info`.
+    char     crash_task[16] = {};
+    bool     crash_new      = false;
 };
 
 // A program DIAG's menu can start that is not a screen: it takes the panel

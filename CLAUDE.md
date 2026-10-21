@@ -569,6 +569,10 @@ Wi-Fi page also exports any log as a GPX track,
 converted in the page's own JavaScript so the dash does no work. DIAG →
 System shows the P4's die temperature (`drivers::ChipTemp`, keeper, 1 Hz)
 and the IMU's, from its FIFO packets.
+It also shows a core dump left in flash (`keeper` reads it at boot): the
+task that crashed, labelled CRASHED when this boot was the crash, and the
+DIAG menu flags it. Read the dump over USB with `idf.py coredump-info`;
+the sim's `crash <task|none> [new]` stands in for one.
 **Startup** shows a 0.5 s splash before the gauge sweep (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System

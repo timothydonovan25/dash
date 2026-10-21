@@ -22,7 +22,7 @@ idf_component_register(
          "src/watchdog.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core dash_hal ui bsp drivers esp_timer esp_driver_gpio
-    PRIV_REQUIRES esp_system bt esp_hosted esp_partition bootloader_support app_update
+    PRIV_REQUIRES esp_system espcoredump bt esp_hosted esp_partition bootloader_support app_update
                   esp_app_format esp_wifi esp_wifi_remote esp_netif esp_event
                   esp_http_server)
 

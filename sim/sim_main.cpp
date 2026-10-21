@@ -31,6 +31,9 @@
 //        dev <imu|gnss|lamps|pod|sd|display> <ok|fail|absent>
 //                                a device working, failing every report, or
 //                                not there (for sd: the card pulled)
+//        crash <task|none> [new]  a core dump in flash, as keeper reads one
+//                                at boot (DIAG -> System); `new` if this
+//                                boot was the crash
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
 //                                                     bare `media` clears it
 //        quit
@@ -719,6 +722,14 @@ int main() {
                     const uint8_t bit = static_cast<uint8_t>(1u << idx);
                     if (std::strcmp(b, "down") == 0) button_mask |= bit;
                     else button_mask = static_cast<uint8_t>(button_mask & ~bit);
+                }
+            } else if (int nc = std::sscanf(line.c_str(), "crash %31s %31s", a, b); nc >= 1) {
+                if (std::strcmp(a, "none") == 0) {
+                    system.crash_task[0] = '\0';
+                    system.crash_new = false;
+                } else {
+                    std::snprintf(system.crash_task, sizeof system.crash_task, "%s", a);
+                    system.crash_new = nc == 2 && std::strcmp(b, "new") == 0;
                 }
             } else if (std::sscanf(line.c_str(), "dev %31s %31s", a, b) == 2) {
                 for (const NamedDev& nd : kNamedDevs) {
