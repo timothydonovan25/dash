@@ -133,6 +133,7 @@ private:
         uint32_t ok_seen = 0;
         uint32_t err_seen = 0;
         uint32_t last_retry_ms = 0;
+        bool     limit_shown = false;       // state is Degraded for limited alone
     };
 
     Cell          cell_[state::kDevCount];

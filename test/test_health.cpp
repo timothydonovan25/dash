@@ -276,6 +276,33 @@ int main() {
         CHECK(!t.publish().working(Dev::Gnss));
     }
 
+    CASE("limited: one lost 1 Hz epoch is a Degraded step, not straight to Fault");
+    {
+        // Its Degraded is the overlay, not a first step of silence: going
+        // quiet past stale_ms must take the same two steps an Ok device
+        // takes, or a 1 Hz GPS that loses one epoch's sentences to noise
+        // faults and is re-initialised, blind for seconds.
+        Tracker t;
+        t.begin_init(Dev::Gnss, 0);
+        t.report_limited(Dev::Gnss, true);
+        t.report_ok(Dev::Gnss, 0);
+        t.tick(0, p);
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+        // Last report at 0, the epoch at 1000 lost, the next one 30 ms late.
+        // The keeper ticks at 20 Hz.
+        for (uint32_t ms = 50; ms <= p.stale_ms; ms += 50) t.tick(ms, p);
+        t.tick(p.stale_ms + 20, p);
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+        t.report_ok(Dev::Gnss, p.stale_ms + 30);
+        t.tick(p.stale_ms + 70, p);
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+        CHECK(t.publish().working(Dev::Gnss));
+        // Quiet on: Fault on the next tick, as for any device.
+        t.tick(2 * p.stale_ms + 100, p);
+        t.tick(2 * p.stale_ms + 150, p);
+        CHECK(t[Dev::Gnss].state == DevState::Fault);
+    }
+
     CASE("publish only on change, with a heartbeat for last_ok_ms");
     {
         Tracker t;

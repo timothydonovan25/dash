@@ -118,7 +118,7 @@ pattern-test all 32 MB every time (§11 for how to change it).
 
 **Boot time.** The order is built for it: the LED driver, tach and VIN
 come up and `ctrl` starts before the panel is touched, then the panel, IMU
-and pod, then the other tasks. The GPS (half a second of baud negotiation)
+and pod, then the other tasks. The GPS (up to a few seconds of baud negotiation)
 and the SD mount happen on `gnss` and `storage`, after the dash is already
 drawing. A power-on also skips the bootloader's hash of the image
 (`CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON`); a software restart still
@@ -345,7 +345,9 @@ The module boots at 9600 baud and 1 Hz every time (VBACKUP is VCC, so it
 keeps no setting), and the driver moves it to 57 600 and 10 Hz
 (`kGpsBootBaud`, `kGpsRunBaud`). It sends the baud command at both rates,
 then listens for a sentence that passes its checksum, at 57 600 and then
-9600, up to 1.5 s each; a receiver heard at neither is a fault. Then
+9600, up to 1.5 s each; a receiver heard at neither is a fault. Heard
+only at 9600, it is asked once more at 9600 (the first ask can go out
+before the receiver has booted) and listened for at 57 600 again. Then
 RMC+GGA only, SBAS off (the datasheet allows SBAS only at 5 Hz or slower)
 and 10 Hz, each confirmed by the receiver's `PMTK001` answer. **DIAG → Bus
 reading `UART1 gps  1 Hz`** means it works but stayed slow: still at 9600

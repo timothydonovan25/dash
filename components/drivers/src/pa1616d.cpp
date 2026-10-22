@@ -55,12 +55,24 @@ hal::Status Pa1616d::init() {
     // most of the time.
     set_baud(bsp::kGpsRunBaud);
     if (!hears_nmea(kListenMs)) {
-        // Talking at 9600 and would not move. It works, at 1 Hz: 10 Hz of
-        // RMC and GGA does not fit in 9600 baud. Degraded, not a fault.
         set_baud(bsp::kGpsBootBaud);
         if (!hears_nmea(kListenMs)) return hal::Status::NotPresent;
-        command(kOutputRmcGga, 314, kAckMs);
-        return hal::Status::Ok;
+        // Talking at 9600, so it is up and listening now. The first ask may
+        // have gone out before it was (it powers up with the P4, and only a
+        // Fault is retried, so a missed one is 1 Hz for the whole ride) or
+        // been garbled. Ask once more, at the rate it has just proved.
+        send_command("PMTK251,57600");
+        uart_wait_tx_done(kPort, pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(kSwitchMs));
+        set_baud(bsp::kGpsRunBaud);
+        if (!hears_nmea(kListenMs)) {
+            // Would not move. It works, at 1 Hz: 10 Hz of RMC and GGA does
+            // not fit in 9600 baud. Degraded, not a fault.
+            set_baud(bsp::kGpsBootBaud);
+            if (!hears_nmea(kListenMs)) return hal::Status::NotPresent;
+            command(kOutputRmcGga, 314, kAckMs);
+            return hal::Status::Ok;
+        }
     }
 
     // RMC and GGA only: everything else is bandwidth the parser throws away.

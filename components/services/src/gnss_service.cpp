@@ -38,7 +38,7 @@ void gnss_task(void* arg) {
     core::state::Gnss  fix;
 
     // The receiver is brought up here, not in wiring::build(): agreeing a
-    // baud rate takes half a second of waiting, and nothing else in the boot
+    // baud rate takes seconds of listening, and nothing else in the boot
     // needs the GPS. A missing receiver fails here and the keeper retries it.
     if (d.gnss) {
         d.health->begin_init(core::state::Dev::Gnss, d.clock->now_ms());

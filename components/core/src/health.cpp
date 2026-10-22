@@ -108,8 +108,14 @@ void Tracker::tick(uint32_t t_ms, const Policy& p) {
             c.fault_count.store(fc > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(fc), kRlx);
         }
 
-        DevState st = was;
-        if (st == DevState::Absent || c.init_pending.exchange(false, kAcq)) {
+        // A Degraded that is only the limited overlay is an Ok to the rules
+        // below: silence must take its two steps from there, or a 1 Hz GPS
+        // that loses one epoch goes straight to Fault and a re-init.
+        DevState st = (was == DevState::Degraded && c.limit_shown) ? DevState::Ok : was;
+        // Both, always: short-circuited, the first tick from Absent left
+        // init_pending set and the next one replayed the init.
+        const bool init = c.init_pending.exchange(false, kAcq);
+        if (st == DevState::Absent || init) {
             st = DevState::Init;
             c.last_retry_ms = c.init_t_ms.load(kRlx);
             c.ok_seen = c.ok_floor.load(kRlx);
@@ -140,7 +146,8 @@ void Tracker::tick(uint32_t t_ms, const Policy& p) {
         }
         // Last, and only over an Ok: a limited device that also errs or goes
         // quiet is judged on that.
-        if (st == DevState::Ok && c.limited.load(kAcq)) st = DevState::Degraded;
+        c.limit_shown = st == DevState::Ok && c.limited.load(kAcq);
+        if (c.limit_shown) st = DevState::Degraded;
         c.state.store(static_cast<uint8_t>(st), kRlx);
     }
 }
