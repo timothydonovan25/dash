@@ -30,6 +30,13 @@ struct Policy {
     // with default registers looks alive and answers nothing.
     uint32_t stale_ms = 2000;
 
+    // The same, for a device still in its init and with no error from it
+    // yet: an init may take seconds (the GPS listens for its baud rate for
+    // up to ~6), and aged on stale_ms it faulted mid-init and was retried
+    // the moment it finished. An init that reports an error is judged on
+    // stale_ms again.
+    uint32_t init_ms = 10000;
+
     // How often the keeper re-initialises a faulted device.
     uint32_t retry_every_ms = 5000;
 };

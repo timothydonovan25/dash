@@ -230,6 +230,42 @@ int main() {
         CHECK(t[Dev::Imu].state == DevState::Ok);
     }
 
+    CASE("an init still running is not silence; one that failed is");
+    {
+        // The GPS's bring-up listens for seconds (up to ~6 at 9600). Aged
+        // like a running device, it faulted mid-init, the keeper queued a
+        // retry at 5 s, and gnss ran the whole init again as soon as it
+        // finished: a receiver stuck at 9600 re-initialised for ever.
+        Tracker t;
+        t.begin_init(Dev::Gnss, 0);
+        bool claimed = false;
+        for (uint32_t ms = 0; ms < 6000; ms += 50) {
+            t.tick(ms, p);
+            CHECK(t[Dev::Gnss].state == DevState::Init);
+            claimed = claimed || t.claim_retry(Dev::Gnss, ms, p);
+        }
+        CHECK(!claimed);
+        t.report_limited(Dev::Gnss, true);
+        t.report_ok(Dev::Gnss, 6000);
+        t.tick(6000, p);
+        CHECK(t[Dev::Gnss].state == DevState::Degraded);
+
+        // An init that never ends still faults, later.
+        Tracker u;
+        u.begin_init(Dev::Gnss, 0);
+        for (uint32_t ms = 0; ms <= p.init_ms + 100; ms += 50) u.tick(ms, p);
+        CHECK(u[Dev::Gnss].state == DevState::Fault);
+
+        // An init that failed (nothing answered) faults on the stale window,
+        // as before, and is retried on the usual interval.
+        Tracker v;
+        v.begin_init(Dev::Gnss, 0);
+        v.report_error(Dev::Gnss, -1, 3100);
+        for (uint32_t ms = 0; ms <= 3200; ms += 50) v.tick(ms, p);
+        CHECK(v[Dev::Gnss].state == DevState::Fault);
+        CHECK(v.claim_retry(Dev::Gnss, 5000, p));
+    }
+
     CASE("a reporter clock ahead of the keeper's is not read as silence");
     {
         Tracker t;

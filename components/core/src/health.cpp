@@ -135,9 +135,10 @@ void Tracker::tick(uint32_t t_ms, const Policy& p) {
             if (quiet < 0) quiet = 0;
             const uint32_t q = static_cast<uint32_t>(quiet);
             const uint32_t n = c.streak.load(kRlx);
-            if (q > p.stale_ms) {
-                st = (st == DevState::Degraded || q > p.stale_ms * 4) ? DevState::Fault
-                                                                      : DevState::Degraded;
+            const uint32_t window = st == DevState::Init && n == 0 ? p.init_ms : p.stale_ms;
+            if (q > window) {
+                st = (st == DevState::Degraded || q > window * 4) ? DevState::Fault
+                                                                  : DevState::Degraded;
             } else if (n >= p.fault_after) {
                 st = DevState::Fault;
             } else if (n >= p.degrade_after) {
