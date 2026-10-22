@@ -306,6 +306,65 @@ int main() {
         CHECK(slots.lap.get().best_ms == 0);            // gapped: not a best
     }
 
+    CASE("a 1 Hz receiver: jitter is not silence, and one lost fix is not a gap");
+    {
+        // The GPS stuck at 1 Hz (health: limited). Its fixes are due every
+        // 1000 ms, a few ms either way. Told "no fix" after 1000 ms of
+        // quiet, the timer lost a segment whenever a tick fell between the
+        // due time and a late fix: crossings went missing and nearly every
+        // lap was gapped, so there was never a best, a reference or a
+        // sector best. One lost epoch (a 2 s gap) did the same.
+        for (const bool drop : {false, true}) {
+            core::state::Slots     slots;
+            core::config::Settings settings;
+            services::Deps         deps;
+            services::LogicState   state;
+            NoCommands             none;
+            deps.slots = &slots;
+            deps.settings = &settings;
+            core::state::Health h;
+            h[core::state::Dev::Gnss].state = core::state::DevState::Degraded;
+            h[core::state::Dev::Gnss].limited = true;
+            slots.health.publish(h);
+
+            const Track track;
+            state.lap.set_line(at_ft(0.0, -track.r_ft), 90.0);
+            constexpr uint32_t kBoot = 5000;
+            auto rx_of = [](uint32_t fix_t) {   // latency 40..48 ms, wandering
+                return kBoot + fix_t + 40 + (fix_t / 1000 * 7) % 9;
+            };
+            uint32_t next_fix = 0;
+            core::state::Gnss g;
+            for (uint32_t t = 0; t < 5 * 35000; t += 20) {
+                const uint32_t now = kBoot + t + 3;
+                while (rx_of(next_fix) <= now) {
+                    // Every 13th epoch lost, when dropping: a few a lap,
+                    // never two together.
+                    if (!(drop && next_fix / 1000 % 13 == 6)) {
+                        const core::geo::LatLon p = track.pos(next_fix);
+                        g.fix = true;
+                        g.lat = p.lat;
+                        g.lon = p.lon;
+                        g.speed_mph = static_cast<float>(track.mph);
+                        g.utc_ms = next_fix;
+                        g.rx_ms = rx_of(next_fix);
+                        slots.gnss.publish(g);
+                    }
+                    next_fix += 1000;
+                }
+                services::logic_tick(deps, state, none, now);
+            }
+            const core::state::Lap lap = slots.lap.get();
+            std::printf("       (drop %d: laps %u, best %u ms, expected %.1f ms)\n",
+                        drop ? 1 : 0, static_cast<unsigned>(lap.count),
+                        static_cast<unsigned>(lap.best_ms), track.period_ms());
+            CHECK(lap.count >= 3);
+            CHECK(lap.best_ms != 0);                     // a clean lap exists
+            // Chord against arc over 88 ft and the latency's wander.
+            CHECK(std::fabs(static_cast<double>(lap.best_ms) - track.period_ms()) <= 30.0);
+        }
+    }
+
     CASE("every fix makes a trace point, whatever the tick phase");
     {
         // Fixes 100 ms apart, stamped with the gnss task's 5 ms poll jitter

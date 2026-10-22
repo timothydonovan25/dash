@@ -6,10 +6,6 @@
 namespace services {
 namespace {
 
-// How long a receiver may go without a new fix before the lap timer is told
-// it has none: ten missed fixes at 10 Hz.
-constexpr int32_t kFixSilentMs = 1000;
-
 // Local feet from a reference fix, for the map traces, the lap delta and
 // saved references. Fine over a track; this is a breadcrumb, not a survey.
 // A degree of longitude is cos(latitude) of a degree of latitude, at the
@@ -467,6 +463,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         lc.min_speed_mph = lv.min_speed_mph;
         lc.min_lap_ms = lv.min_lap_ms;
     }
+    if (d.slots->health.get()[core::state::Dev::Gnss].limited) {
+        lc.max_fix_gap_ms = core::lap::kMaxFixGap1HzMs;
+    }
 
     // --- commands -------------------------------------------------------
     core::state::Command cmd;
@@ -851,10 +850,12 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // over a fifth of the real interval and landed up to ~80 ms off.
     //
     // A receiver that stops talking leaves `fix` set on its last sentence;
-    // a second of silence is told to the timer as no fix, so a lap across
-    // the dropout is marked rather than scored as if nothing happened.
+    // silence longer than the timer's own gap gate is told to it as no fix,
+    // so a lap across the dropout is marked rather than scored as if nothing
+    // happened. Not sooner: at 1 Hz a fix a few ms late was a broken segment.
     const bool new_fix = g.rx_ms != s.last_lap_rx_ms;
-    const bool silent = static_cast<int32_t>(now - g.rx_ms) > kFixSilentMs;
+    const bool silent = static_cast<int32_t>(now - g.rx_ms) >
+                        static_cast<int32_t>(lc.max_fix_gap_ms);
     core::lap::Fix lf;
     lf.pos = core::geo::LatLon{g.lat, g.lon};
     lf.speed_mph = g.speed_mph;      // Doppler, not differenced positions

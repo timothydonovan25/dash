@@ -50,6 +50,12 @@ struct Config {
     uint32_t max_fix_gap_ms = 1500;
 };
 
+// max_fix_gap_ms for a GPS stuck at 1 Hz (health: limited). 1.5 s there is
+// one fix, so one lost epoch broke the segment and the lap. This bridges
+// one (2 s) and not two; past it the fix is aged out anyway
+// (nmea::kFixMaxAgeMs).
+inline constexpr uint32_t kMaxFixGap1HzMs = 2500;
+
 // Whether a fix may set the finish line. The line's direction is the GPS
 // course at that moment, and `crosses_line` only counts crossings that way,
 // so a course read at a standstill -- held from before the bike turned
