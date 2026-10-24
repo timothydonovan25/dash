@@ -9,7 +9,10 @@ State step(State s, InputEvent e, const Layout& layout, uint8_t focus_count) {
     case Button::A:
         // Mode change always resets position. Long press is a panic exit
         // straight back to the main cruise screen — the one you want when
-        // something ahead of you needs attention.
+        // something ahead of you needs attention. Short A comes on the
+        // press and long A after it, on the same hold
+        // (core::input::Config::press_long_mask), so the escape lands
+        // wherever the short one went.
         if (e.press == Press::Long) {
             s.mode = Mode::Cruise;
         } else {
@@ -21,11 +24,14 @@ State step(State s, InputEvent e, const Layout& layout, uint8_t focus_count) {
         break;
 
     case Button::B: {
+        // Forward only, on the press (core::input::Config::on_press_mask).
+        // Held, it does nothing more: long B was "previous screen", and
+        // knowing whether a press would become one meant every screen flip
+        // waited for the thumb to come up.
+        if (e.press == Press::Long) break;
         const uint8_t n = layout.screens[static_cast<uint8_t>(s.mode)];
         if (n == 0) break;
-        s.screen = (e.press == Press::Long)
-                 ? static_cast<uint8_t>((s.screen + n - 1) % n)
-                 : static_cast<uint8_t>((s.screen + 1) % n);
+        s.screen = static_cast<uint8_t>((s.screen + 1) % n);
         s.focus = 0;
         break;
     }

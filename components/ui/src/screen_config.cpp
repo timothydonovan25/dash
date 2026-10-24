@@ -123,9 +123,9 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
     const cfg::ConfigItem& it = *cfg::group_item(group_, focus_);
 
     // B leaves: the edit first if there is one, then the submenu, with the
-    // cursor back on the submenu it came from. Long B, which nav would
-    // otherwise take, does the same while editing.
-    if (e.button == Button::B && (e.press == Press::Short || editing_)) {
+    // cursor back on the submenu it came from. On the press: B has no long
+    // meaning (core::input::Config::on_press_mask).
+    if (e.button == Button::B) {
         if (editing_) {
             editing_ = false;
             has_pending_ = false;

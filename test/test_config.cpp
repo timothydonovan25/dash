@@ -13,7 +13,7 @@ bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
 // this list is fine. Changing a number in it is not.
 const uint16_t kShippedKeys[] = {
     0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107,
-    0x0201, 0x0202, 0x0203, 0x0204,
+    0x0201, 0x0202, 0x0203, 0x0204, 0x0205,
     0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308, 0x0309,
     0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406,
     0x0501, 0x0502, 0x0503,
@@ -213,12 +213,12 @@ int main() {
         CHECK(total == item_count());
     }
 
-    CASE("Startup holds the sweep (on, 2 s) and the splash (on)");
+    CASE("Startup holds the sweep (on, 1 s) and the splash (on)");
     {
         Settings s;
         CHECK(s.gauge_sweep);
         CHECK(s.splash);
-        CHECK(s.sweep_ms == 2000);
+        CHECK(s.sweep_ms == 1000);
         size_t g = 0;
         while (g < group_count() && !eq(group_name(g), "Startup")) ++g;
         CHECK(g < group_count());
@@ -226,7 +226,7 @@ int main() {
         CHECK(group_item(g, 0)->key == 0x0B01);
         CHECK(group_item(g, 2)->key == 0x0B03);
         char buf[32];
-        format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "2000 ms"));
+        format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "1000 ms"));
     }
 
     CASE("the modules that keep their own config read it from here");

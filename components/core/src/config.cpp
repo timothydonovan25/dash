@@ -74,6 +74,7 @@ const ConfigItem kItems[] = {
     num(0x0202, "Rear circ.",   "Wheels", Kind::Int, 1000, 3000, 5, "mm", FIELD(rear_circumference_mm)),
     num(0x0203, "Front pulses", "Wheels", Kind::Int,    1,   32, 1, "/rev", FIELD(front_pulses_per_rev)),
     num(0x0204, "Rear pulses",  "Wheels", Kind::Int,    1,   32, 1, "/rev", FIELD(rear_pulses_per_rev)),
+    num(0x0205, "Smoothing",    "Wheels", Kind::Int,    0,  100, 5, "ms", FIELD(wheel_smooth_ms)),
 
     // Shift lights
     num(0x0301, "First lamp",  "Shift", Kind::Int, 2000, 12000, 100, "rpm", FIELD(shift_base_rpm)),

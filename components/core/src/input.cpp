@@ -39,8 +39,14 @@ size_t Decoder::update(uint8_t raw_mask, uint32_t t_ms, const Config& c,
             if (raw) {
                 s.down_ms = t_ms;
                 s.release_silent = false;
+                s.long_due = false;
                 s.repeat_ms = t_ms + c.repeat_delay_ms;
-                if ((c.on_press_mask >> i) & 1u) {
+                if ((c.press_long_mask >> i) & 1u) {
+                    // Acts now too, and is still listened to for a hold.
+                    s.release_silent = true;
+                    s.long_due = true;
+                    if (n < max) out[n++] = InputEvent{static_cast<Button>(i), Press::Short};
+                } else if ((c.on_press_mask >> i) & 1u) {
                     // Acts now, so the release has nothing left to say, and
                     // a button with no long meaning never makes one.
                     s.release_silent = true;
@@ -58,8 +64,9 @@ size_t Decoder::update(uint8_t raw_mask, uint32_t t_ms, const Config& c,
 
         const uint32_t down_for = t_ms - s.down_ms;
 
-        if (!s.release_silent && down_for >= c.long_press_ms) {
+        if ((!s.release_silent || s.long_due) && down_for >= c.long_press_ms) {
             s.release_silent = true;
+            s.long_due = false;
             if (n < max) out[n++] = InputEvent{static_cast<Button>(i), Press::Long};
             continue;
         }

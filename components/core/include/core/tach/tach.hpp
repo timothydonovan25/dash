@@ -79,8 +79,10 @@ struct WheelConfig {
     uint32_t stall_ms         = 1500;   // a wheel can legitimately be slow
     // Smoothing as a time constant, not a fraction per pulse. Per pulse, the
     // lag grew as the wheel slowed: ~1.5 pulse intervals, 240 ms at 5 mph
-    // and 20 ms at 60. In time, it is about this long at any speed.
-    uint32_t tau_ms           = 50;
+    // and 20 ms at 60. In time, it is about this long at any speed. 20 ms,
+    // was 50: 90% of a change in ~50 ms rather than ~115, a little noisier
+    // from uneven magnet spacing. Settings::wheel_smooth_ms.
+    uint32_t tau_ms           = 20;
 };
 
 // One conversion, exposed because it is the thing worth testing on its own.

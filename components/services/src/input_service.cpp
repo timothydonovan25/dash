@@ -1,4 +1,4 @@
-// `input` — core 0, priority 9, 100 Hz.
+// `input` — core 0, priority 9, 200 Hz (bsp::kPodPollHz).
 //
 // The pod has no interrupt line, so it is polled. Debounce and press
 // decoding are in core/input, host-tested, because "does a 700 ms press give
@@ -20,7 +20,12 @@ namespace services {
 namespace {
 
 constexpr uint32_t kRefreshEveryMs = 5000;
-constexpr int      kNacksBeforeRecover = 20;
+// A run of failed reads this long, in time rather than in reads, before the
+// bus is recovered: the poll rate is a board fact, and a pod unplugged
+// should not be recovered twice as often because the rate went up.
+constexpr uint32_t kRecoverAfterMs = 200;
+constexpr int      kNacksBeforeRecover =
+    static_cast<int>(kRecoverAfterMs * bsp::kPodPollHz / 1000);
 
 void input_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
@@ -78,7 +83,7 @@ void input_task(void* arg) {
         //
         // Paced from a fixed schedule, not "10 ms after this pass": the
         // debounce counts on reads being one period apart.
-        // After an overrun (a dead pod is 10 ms of timeout per read) start
+        // After an overrun (a dead pod is 10 ms of timeout per read, two periods) start
         // again from now rather than catching up with a burst of reads.
         constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
         vTaskDelayUntil(&next, kPeriod);

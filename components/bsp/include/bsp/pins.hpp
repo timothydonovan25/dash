@@ -112,7 +112,10 @@ inline constexpr int kI2cSda         = 4;    // U16-8
 inline constexpr int kI2cScl         = 5;    // U16-9
 inline constexpr int kI2cHz          = 100'000;
 inline constexpr uint8_t kPodAddr    = 0x20;
-inline constexpr int kPodPollHz      = 100;
+// 200 Hz: a press is seen 5-10 ms after it lands (two matching reads, see
+// core::input::Config::debounce_ms), not 10-20. Each read is ~0.45 ms of a
+// bus nothing else is on.
+inline constexpr int kPodPollHz      = 200;
 
 // ── LED driver: PCA9955B on I2C1 ─────────────────────────────────────
 // Its own bus at 1 MHz (Fm+, 2.2k pull-ups), never the pod's: a crushed pod

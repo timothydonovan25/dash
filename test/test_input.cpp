@@ -8,10 +8,12 @@ using core::nav::Press;
 
 namespace {
 constexpr uint8_t kA = 1u << 0;
+constexpr uint8_t kB = 1u << 1;
 constexpr uint8_t kC = 1u << 2;
 constexpr uint8_t kE = 1u << 4;
 
-// The pod is polled at 100 Hz because that connector has no interrupt line.
+// The pod is polled at 200 Hz (bsp::kPodPollHz) because that connector has
+// no interrupt line.
 struct Pod {
     Decoder  d;
     Config   c;
@@ -20,8 +22,8 @@ struct Pod {
     int      longs[kButtonCount] = {};
 
     void poll(uint8_t mask, uint32_t ms) {
-        for (uint32_t i = 0; i < ms; i += 10) {
-            t_ms += 10;
+        for (uint32_t i = 0; i < ms; i += 5) {
+            t_ms += 5;
             InputEvent ev[kButtonCount];
             const size_t n = d.update(mask, t_ms, c, ev, kButtonCount);
             for (size_t k = 0; k < n; ++k) {
@@ -54,15 +56,15 @@ int main() {
         CHECK(pod_pins_to_buttons(0x07) == 0);
     }
 
-    CASE("a clean tap is one short press, on release");
+    CASE("a clean tap of a key with a long meaning is one short press, on release");
     {
         Pod p;
         p.poll(0, 200);
-        p.poll(kA, 100);
+        p.poll(kE, 100);
         CHECK(p.total_events() == 0);          // nothing yet: still held
         p.poll(0, 100);
-        CHECK(p.shorts[0] == 1);
-        CHECK(p.longs[0] == 0);
+        CHECK(p.shorts[4] == 1);
+        CHECK(p.longs[4] == 0);
     }
 
     CASE("contact bounce is one press, not five");
@@ -71,9 +73,9 @@ int main() {
         // way in and on the way out.
         Pod p;
         p.poll(0, 200);
-        for (int i = 0; i < 5; ++i) { p.poll(kE, 10); p.poll(0, 10); }
+        for (int i = 0; i < 5; ++i) { p.poll(kE, 5); p.poll(0, 5); }
         p.poll(kE, 200);
-        for (int i = 0; i < 5; ++i) { p.poll(0, 10); p.poll(kE, 10); }
+        for (int i = 0; i < 5; ++i) { p.poll(0, 5); p.poll(kE, 5); }
         p.poll(0, 200);
         CHECK(p.shorts[4] == 1);
         CHECK(p.longs[4] == 0);
@@ -107,8 +109,9 @@ int main() {
         Pod q;
         q.poll(0, 100);
         q.poll(kA, 2000);
-        CHECK(q.shorts[0] == 0);               // a repeating "next mode" would
-        CHECK(q.longs[0] == 1);                //   make the dash unusable
+        CHECK(q.shorts[0] == 1);               // the press itself, and no more:
+        CHECK(q.longs[0] == 1);                //   a repeating "next mode" would
+                                               //   make the dash unusable
     }
 
     CASE("two buttons at once are two independent presses");
@@ -121,25 +124,30 @@ int main() {
         CHECK(p.shorts[4] == 1);
     }
 
-    CASE("a press settles on its second read, 10 ms after the edge");
+    CASE("a press settles on its second read, 5 ms after the edge");
     {
         Decoder d;
         Config c;
         core::nav::InputEvent ev[core::input::kButtonCount];
-        CHECK(d.update(0x01, 1000, c, ev, core::input::kButtonCount) == 0);
-        CHECK(!d.held(core::nav::Button::A));
-        d.update(0x01, 1010, c, ev, core::input::kButtonCount);
-        CHECK(d.held(core::nav::Button::A));
+        CHECK(d.update(kE, 1000, c, ev, core::input::kButtonCount) == 0);
+        CHECK(!d.held(core::nav::Button::E));
+        d.update(kE, 1005, c, ev, core::input::kButtonCount);
+        CHECK(d.held(core::nav::Button::E));
         // And the release the same way: a short press out on its second read.
         CHECK(d.update(0x00, 1100, c, ev, core::input::kButtonCount) == 0);
-        CHECK(d.update(0x00, 1110, c, ev, core::input::kButtonCount) == 1);
+        CHECK(d.update(0x00, 1105, c, ev, core::input::kButtonCount) == 1);
+        // A poll that lands a millisecond early still settles it.
+        Decoder e;
+        CHECK(e.update(kE, 2000, c, ev, core::input::kButtonCount) == 0);
+        e.update(kE, 2004, c, ev, core::input::kButtonCount);
+        CHECK(e.held(core::nav::Button::E));
     }
 
     CASE("a spike shorter than the debounce window is not a press");
     {
         Pod p;
         p.poll(0, 200);
-        p.poll(kA, 10);                        // one poll only
+        p.poll(kE, 5);                         // one poll only
         p.poll(0, 300);
         CHECK(p.total_events() == 0);
     }
@@ -150,7 +158,7 @@ int main() {
         // press is reported the moment it settles, not when the thumb lifts.
         Pod p;
         p.poll(0, 200);
-        p.poll(kC, 20);                        // settled on its second read
+        p.poll(kC, 10);                        // settled on its second read
         CHECK(p.shorts[2] == 1);
         p.poll(kC, 150);                       // a gloved tap, still held
         CHECK(p.shorts[2] == 1);
@@ -163,12 +171,12 @@ int main() {
     {
         Pod p;
         p.poll(0, 200);
-        p.poll(kC, 10);                        // one read only: a spike
+        p.poll(kC, 5);                         // one read only: a spike
         p.poll(0, 300);
         CHECK(p.total_events() == 0);
-        for (int i = 0; i < 5; ++i) { p.poll(kC, 10); p.poll(0, 10); }
+        for (int i = 0; i < 5; ++i) { p.poll(kC, 5); p.poll(0, 5); }
         p.poll(kC, 200);
-        for (int i = 0; i < 5; ++i) { p.poll(0, 10); p.poll(kC, 10); }
+        for (int i = 0; i < 5; ++i) { p.poll(0, 5); p.poll(kC, 5); }
         p.poll(0, 200);
         CHECK(p.shorts[2] == 1);
     }
@@ -190,6 +198,44 @@ int main() {
         CHECK(q.shorts[2] == 0);
         q.poll(0, 100);
         CHECK(q.shorts[2] == 1);
+    }
+
+    CASE("B acts on the press and says nothing more, however long it is held");
+    {
+        // The screen flip: the most-used button does not wait for the thumb.
+        Pod p;
+        p.poll(0, 200);
+        p.poll(kB, 10);
+        CHECK(p.shorts[1] == 1);
+        p.poll(kB, 2000);                      // no long, no repeat
+        p.poll(0, 200);
+        CHECK(p.shorts[1] == 1);
+        CHECK(p.longs[1] == 0);
+    }
+
+    CASE("A acts on the press, and a hold is still a long press after it");
+    {
+        // Short A on the press; long A, the escape to CRUISE, follows on the
+        // same hold, and the release says nothing.
+        Pod p;
+        p.poll(0, 200);
+        p.poll(kA, 10);
+        CHECK(p.shorts[0] == 1);
+        CHECK(p.longs[0] == 0);
+        p.poll(kA, 500);
+        CHECK(p.longs[0] == 0);                // not yet 600 ms
+        p.poll(kA, 200);
+        CHECK(p.longs[0] == 1);
+        p.poll(0, 200);
+        CHECK(p.shorts[0] == 1);
+        CHECK(p.longs[0] == 1);
+        // A tap is one short, on the press, and nothing on the release.
+        Pod q;
+        q.poll(0, 200);
+        q.poll(kA, 100);
+        q.poll(0, 200);
+        CHECK(q.shorts[0] == 1);
+        CHECK(q.longs[0] == 0);
     }
 
     CASE("held() and held_ms() track the settled state");
@@ -214,7 +260,7 @@ int main() {
         uint32_t t = near_wrap;
         size_t total = 0;
         for (int i = 0; i < 20; ++i) { t += 10; total += d.update(0, t, c, ev, 5); }
-        for (int i = 0; i < 10; ++i) { t += 10; total += d.update(kA, t, c, ev, 5); }
+        for (int i = 0; i < 10; ++i) { t += 10; total += d.update(kE, t, c, ev, 5); }
         // ~100 ms of hold across the wrap: not long enough to be a long press.
         CHECK(total == 0);
         for (int i = 0; i < 10; ++i) { t += 10; total += d.update(0, t, c, ev, 5); }

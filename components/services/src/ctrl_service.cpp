@@ -187,9 +187,11 @@ void ctrl_task(void* arg) {
         core::tach::WheelConfig fc;
         fc.circumference_mm = d.settings->front_circumference_mm;
         fc.pulses_per_rev   = d.settings->front_pulses_per_rev;
+        fc.tau_ms           = d.settings->wheel_smooth_ms;
         core::tach::WheelConfig rc;
         rc.circumference_mm = d.settings->rear_circumference_mm;
         rc.pulses_per_rev   = d.settings->rear_pulses_per_rev;
+        rc.tau_ms           = d.settings->wheel_smooth_ms;
 
         tach.update(c.tach_pulses, c.tach_edge_us, c.t_us, tach_config());
         front.update(c.front_pulses, c.front_edge_us, c.t_us, fc);

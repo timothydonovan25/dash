@@ -50,7 +50,7 @@ struct Settings {
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.
     bool     gauge_sweep    = true;
-    uint16_t sweep_ms       = 2000;
+    uint16_t sweep_ms       = 1000;   // was 2000: key-on to live gauges
     // The name card before the sweep: CRF250F, the firmware, a bar.
     bool     splash         = true;
 
@@ -65,6 +65,12 @@ struct Settings {
     uint16_t rear_circumference_mm  = 2050;
     uint8_t  front_pulses_per_rev   = 6;
     uint8_t  rear_pulses_per_rev    = 4;
+    // Both wheels' smoothing, a time constant (core::tach::WheelConfig::
+    // tau_ms). The speedo, the odometer, the gear and fusion's wheel inputs
+    // all read it. 50 was calm and ~115 ms to 90% of a change; 20 is quick
+    // and a little noisier. If fusion starts calling the wheels split
+    // (DIAG -> FUSION) on a steady road, raise it.
+    uint16_t wheel_smooth_ms        = 20;
 
     // Gearing — rpm per mph in each gear. These depend on the sprockets and
     // the rolling radius, so they are calibration rather than constants:

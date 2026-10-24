@@ -323,7 +323,7 @@ core 0 is yours.
 | `imu` | 0 | 15 | 200 Hz, INT1 | ICM-42688-P FIFO, attitude filter, jumps |
 | `gnss` | 0 | 12 | on UART data | NMEA parse, position |
 | `logic` | 0 | 10 | 50 Hz + on demand | lap timer, trip, fuel, command drain; woken by a new fix or a command |
-| `input` | 0 | 9 | 100 Hz | I2C pod poll, debounce, event queue, pod bus recovery |
+| `input` | 0 | 9 | 200 Hz | I2C pod poll, debounce, event queue, pod bus recovery |
 | `render` | 1 | 6 | 120 Hz | frame snapshot, widgets, 8080 panel bus |
 | `logger` | 1 | 2 | drain | ring buffer to SD (below the rest: IDF's SD driver spins through card busy time) |
 | `storage` | 1 | 3 | — | NVS, card mount, the USB-MSC ownership seam |
@@ -438,11 +438,18 @@ struct ModeDef { const char* name; Screen* const* screens; uint8_t n; };
 
 | Button | Short press | Long press |
 |---|---|---|
-| A (top) | Next mode | Jump to Cruise, screen 0 |
-| B | Next screen in mode | Previous screen |
-| C | Up / previous | Repeat while held |
-| D | Down / next | Repeat while held |
-| E | Accept / select | Context action for the screen |
+| A (top) | Next mode, on the press | Jump to Cruise, screen 0 (after the short) |
+| B | Next screen in mode, on the press | — |
+| C | Up / previous, on the press | Repeat while held |
+| D | Down / next, on the press | Repeat while held |
+| E | Accept / select, on release | Context action for the screen |
+
+A button acts the moment its press settles unless it has a long meaning
+that cannot follow the short one: waiting for the release cost the length
+of the press, 80–150 ms with a gloved thumb, on every screen flip. So B
+gave up "previous screen", and long A comes on top of short A, which is
+harmless because it goes to Cruise wherever short A went. Only E still
+waits, as its short and long are different acts (`core::input::Config`).
 
 The navigation state machine lives in `core/nav/`. It takes an
 `InputEvent` and the current `(mode, screen, focus)`, and returns the new
@@ -1371,7 +1378,7 @@ Notes that change firmware:
 - **Neutral reads LOW.** The PC817B pulls GPIO12 down through R64 when
   the bike's neutral switch closes.
 - **The pod has no interrupt line.** CN1 is SDA, SCL, VCC, GND only, so
-  buttons must be polled. The 100 Hz `input` task is required, not a
+  buttons must be polled. The 200 Hz `input` task is required, not a
   choice.
 - **Run the pod I2C at 100 kHz.** With 4.7 k pull-ups over 0.5 m of cable
   the rise time is roughly 470 ns. Fast mode allows 300 ns; standard mode

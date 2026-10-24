@@ -36,7 +36,7 @@ int main() {
         Config c;
         c.peak_rpm = 9000.0f;
         c.gears = 5;
-        CHECK(apply(f, 1000, c));
+        CHECK(apply(f, c.duration_ms / 2, c));
         CHECK_NEAR(f.engine.rpm, 9000.0, 1e-3);
         CHECK_NEAR(f.motion.best_mph, kPeakMph, 1e-3);
         CHECK_NEAR(f.motion.front_mph, kPeakMph, 1e-3);
@@ -58,16 +58,16 @@ int main() {
         Config c;
         Frame f;
         f.engine.rpm = 1500.0f;
-        CHECK(!apply(f, 2000, c));
+        CHECK(!apply(f, c.duration_ms, c));
         CHECK_NEAR(f.engine.rpm, 1500.0, 1e-6);
 
         c.enabled = false;
-        CHECK(!apply(f, 1000, c));
+        CHECK(!apply(f, c.duration_ms / 2, c));
         CHECK_NEAR(f.engine.rpm, 1500.0, 1e-6);
 
         c.enabled = true;
         f.motion.best_mph = 12.0f;
-        CHECK(!apply(f, 1000, c));
+        CHECK(!apply(f, c.duration_ms / 2, c));
         CHECK_NEAR(f.motion.best_mph, 12.0, 1e-6);
     }
 
@@ -90,9 +90,9 @@ int main() {
             CHECK_NEAR(lamp_rpm(t, 0.0f, c), f.engine.rpm, 1e-3);
         }
         CHECK(lamp_rpm(c.duration_ms, 0.0f, c) < 0.0f);
-        CHECK(lamp_rpm(1000, 5.0f, c) < 0.0f);          // moving
+        CHECK(lamp_rpm(c.duration_ms / 2, 5.0f, c) < 0.0f);   // moving
         c.enabled = false;
-        CHECK(lamp_rpm(1000, 0.0f, c) < 0.0f);
+        CHECK(lamp_rpm(c.duration_ms / 2, 0.0f, c) < 0.0f);
     }
 
     return check::report("sweep");

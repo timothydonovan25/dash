@@ -4,7 +4,7 @@
 // `input_service` — the whole point of rule 3 is that "does a 700 ms press
 // produce one long event or four short ones" is a test, not a ride.
 //
-// The pod is polled at 100 Hz because that connector has no interrupt line.
+// The pod is polled at 200 Hz because that connector has no interrupt line.
 // Every window below is in milliseconds rather than in polls, so the rate
 // can change without silently changing the feel of the buttons.
 #pragma once
@@ -34,19 +34,20 @@ struct Config {
     // A press must read the same for this long before it counts. Bar-mounted
     // switches on a vibrating dirt bike bounce for a few milliseconds.
     //
-    // Two polls at 100 Hz. It stays a stability window rather than becoming
-    // a leading-edge lockout, which would be about 20 ms quicker: this is
-    // half a metre of unshielded I2C running past an ignition coil, and a
-    // pin pulled low by noise at the instant of a read is a real failure
-    // here, not a theoretical one. Requiring the reading twice costs one
-    // poll and removes that whole class.
+    // Two polls at 200 Hz (bsp::kPodPollHz). It stays a stability window
+    // rather than becoming a leading-edge lockout: this is half a metre of
+    // unshielded I2C running past an ignition coil, and a pin pulled low by
+    // noise at the instant of a read is a real failure here, not a
+    // theoretical one. Requiring the reading twice costs one poll and
+    // removes that whole class.
     //
-    // 25 ms was simply more conservative than a switch needs, and 12 was
-    // three reads, not two: the edge at t, t+10 still short of 12, t+20.
-    // 8 makes the second read, 10 ms after the edge, the one that settles
-    // it, with room for a poll that lands a millisecond early. A spike seen
-    // by one read alone is still never a press.
-    uint16_t debounce_ms = 8;
+    // The window has to be shorter than one poll period, or it is three
+    // reads, not two: at 100 Hz 12 ms was t, t+10 still short, t+20. 4 makes
+    // the second read, 5 ms after the edge, the one that settles it, with
+    // room for a poll that lands a millisecond early. A spike seen by one
+    // read alone is still never a press. Was 8 at 100 Hz: a press is now
+    // seen 5-10 ms after it lands rather than 10-20.
+    uint16_t debounce_ms = 4;
 
     // Held for this long is a long press, and it fires there rather than on
     // release: a rider holding E to set the finish line wants to know it
@@ -62,10 +63,19 @@ struct Config {
     // A button with a long-press meaning has to wait for the release to
     // know which press it was; one without has nothing to wait for, and
     // waiting cost the length of the press itself -- 80 to 150 ms with a
-    // gloved thumb -- on every cursor move. C and D have no long meaning
-    // anywhere (nav, and every screen's handle()); a button given one must
-    // come out of this mask.
-    uint8_t  on_press_mask   = (1u << 2) | (1u << 3);   // C and D
+    // gloved thumb -- on every cursor move, and on every screen flip. B, C
+    // and D have no long meaning anywhere (nav, and every screen's
+    // handle()): B used to step back a screen when held, and gave that up
+    // so the most-used button would not lag. A button given a long meaning
+    // must come out of this mask.
+    uint8_t  on_press_mask   = (1u << 1) | (1u << 2) | (1u << 3);   // B, C, D
+    // Buttons that act on the press and, held on to long_press_ms, say Long
+    // as well, after it. Only for a button whose long meaning is fine to
+    // arrive on top of the short one having already happened: long A goes
+    // to CRUISE wherever short A took the rider, so the next mode shows for
+    // the hold and the escape still lands. Not E: its short and long are
+    // different acts (arm a lap or set the line), and doing both is wrong.
+    uint8_t  press_long_mask = (1u << 0);                            // A
 };
 
 class Decoder {
@@ -90,6 +100,9 @@ private:
         // The release reports nothing: a long press, a repeat, or an
         // on-press button has already said what this press was.
         bool     release_silent = false;
+        // Acted on the press, and a Long is still due if it is held
+        // (Config::press_long_mask).
+        bool     long_due = false;
         uint32_t edge_ms   = 0;       // when raw last changed
         uint32_t down_ms   = 0;       // when stable went down
         uint32_t repeat_ms = 0;       // when the next repeat is due

@@ -251,7 +251,7 @@ comment. 4.7 k pull-ups (R35/R36) over half a metre give ~470 ns of rise
 time; fast mode allows 300 ns. At 400 kHz this works on the bench and
 fails in the rain, which is the worst possible failure mode.
 
-**There is no interrupt line on CN1.** The pod is polled at 100 Hz. Do not
+**There is no interrupt line on CN1.** The pod is polled at 200 Hz. Do not
 go looking for an INT pin. CN1 is 1 SDA, 2 SCL, 3 3.3 V (through R31 and
 the F2 polyfuse), 4 GND — check the pod's harness against that.
 

@@ -170,7 +170,7 @@ Things that will bite you:
   does not reset it, so `init()` must rewrite its registers.
 - **Neutral reads LOW.** Opto-isolated (U6), pulled up by R64, on GPIO12.
 - **The handlebar button pod has no interrupt line.** It must be polled.
-  100 Hz.
+  200 Hz (`bsp::kPodPollHz`): a press is seen 5–10 ms after it lands.
 - **Pod I2C runs at 100 kHz, not 400 kHz.** 4.7k pull-ups over 0.5 m of
   cable give ~470 ns rise time. Fast mode allows 300 ns. It is I2C0 and
   never shares with the PCA9955B.

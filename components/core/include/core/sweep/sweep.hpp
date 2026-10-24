@@ -23,7 +23,7 @@ inline constexpr float kAbortMph = 1.0f;
 
 struct Config {
     bool     enabled     = true;
-    uint32_t duration_ms = 2000;
+    uint32_t duration_ms = 1000;
     float    peak_rpm    = 8800.0f;
     uint8_t  gears       = 5;
 };

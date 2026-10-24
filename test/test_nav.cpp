@@ -42,13 +42,12 @@ int main() {
     CHECK(s.screen == 0);
     CHECK(s.mode == Mode::Diag);                 // B never changes mode
 
-    CASE("long B walks screens backward and wraps");
-    // Backwards from the first screen is the last one, whatever the layout
-    // says that is today — adding a screen to a mode must not need an edit
-    // here.
-    s = State{Mode::Cruise, 0, 0, false};
-    s = press(s, Button::B, Press::Long, l);
-    CHECK(s.screen == l.screens[static_cast<uint8_t>(Mode::Cruise)] - 1);
+    CASE("long B does nothing: B acts on the press, forward only");
+    s = State{Mode::Cruise, 2, 1, false};
+    s = press(s, Button::B, Press::Long, l, 4);
+    CHECK(s.screen == 2);
+    CHECK(s.focus == 1);
+    CHECK(s.mode == Mode::Cruise);
 
     CASE("config mode has one screen, so B is a no-op");
     s = State{Mode::Config, 0, 0, false};
