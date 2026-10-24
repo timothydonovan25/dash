@@ -36,10 +36,13 @@ struct Config {
     // at 300 rpm takes 200 ms, so 500 ms is comfortably below any idle.
     uint32_t stall_ms = 500;
 
-    // Exponential smoothing on the output, 0..1. Higher follows faster. The
-    // shift lights read the unsmoothed value; this is for the display, where
-    // a needle that twitches is just noise.
-    float    smoothing = 0.35f;
+    // Smoothing on the displayed rpm, as a time constant (as WheelConfig's
+    // tau_ms). It was 0.35 per pulse, and per pulse the lag grew as the
+    // engine slowed: 90% of a step took ~105 ms at 3000 rpm and ~32 ms at
+    // 10000. In time it is the same at any rpm. 0 shows the raw reading,
+    // every revolution's jitter and all. The shift lights read the raw value
+    // whatever this is. Settings::tach_smooth_ms.
+    uint16_t tau_ms = 5;
     // How far back rpm_rate() looks. Long enough to average out a
     // revolution's jitter, short enough to follow a gear's pull.
     uint16_t rate_window_ms = 100;

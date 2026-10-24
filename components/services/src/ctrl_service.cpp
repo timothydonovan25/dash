@@ -109,6 +109,7 @@ void ctrl_task(void* arg) {
         core::tach::Config tc;
         tc.pulses_per_rev = 1;
         tc.revs_per_pulse = d.settings->tach_revs_per_pulse;
+        tc.tau_ms = d.settings->tach_smooth_ms;
         return tc;
     };
 

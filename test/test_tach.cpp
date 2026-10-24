@@ -85,6 +85,55 @@ int main() {
         CHECK_NEAR(x.m.rpm(), 1400.0, 80.0);
     }
 
+    CASE("display smoothing lags by about tau at any rpm, not by pulses");
+    {
+        // A step of 2000 rpm, read 30 ms later. Per pulse (0.35) that was
+        // ~1 1/2 pulses at 3000 rpm and still ~1/3 of the step short; at the
+        // default 5 ms the step is all but there at either end of the range.
+        Ctrl lo;
+        lo.run(3000.0f, 1000);
+        lo.run(5000.0f, 30);
+        CHECK(lo.m.rpm() > 4800.0f);
+        Ctrl hi;
+        hi.run(8000.0f, 1000);
+        hi.run(10000.0f, 30);
+        CHECK(hi.m.rpm() > 9800.0f);
+        // It still smooths: one pulse after the step is not the whole step.
+        // 8000 rpm is 7.5 ms a pulse; then one at 10000, 6 ms after.
+        Meter one;
+        Config oc;
+        uint32_t total = 0;
+        uint64_t edge = 1000000;
+        one.update(total, edge, edge, oc);
+        for (int i = 0; i < 100; ++i) {
+            ++total;
+            edge += 7500;
+            one.update(total, edge, edge + 100, oc);
+        }
+        ++total;
+        edge += 6000;
+        one.update(total, edge, edge + 100, oc);
+        CHECK_NEAR(one.raw_rpm(), 10000.0f, 1.0f);
+        CHECK(one.rpm() < 9500.0f);   // 6 / (6 + 5) of the step: ~9090
+        CHECK(one.rpm() > 8800.0f);
+        // A long constant is calm and late, as the setting promises.
+        Ctrl slow;
+        slow.c.tau_ms = 50;
+        slow.run(3000.0f, 1000);
+        slow.run(5000.0f, 30);
+        CHECK(slow.m.rpm() < 4600.0f);
+    }
+
+    CASE("smoothing 0 is the raw reading");
+    {
+        Ctrl x;
+        x.c.tau_ms = 0;
+        x.run(6000.0f, 500);
+        x.run(9000.0f, 20);
+        CHECK_NEAR(x.m.rpm(), x.m.raw_rpm(), 0.01);
+        CHECK_NEAR(x.m.rpm(), 9000.0, 1.0);
+    }
+
     CASE("a wrapped pulse counter does not spike the tach");
     {
         // uint32 of pulses at 6000 rpm wraps in about eight days of running.
@@ -187,7 +236,7 @@ int main() {
         // -- and the next good read must still say 6000, not 3000.
         Meter m;
         Config c;
-        c.smoothing = 1.0f;
+        c.tau_ms = 0;
         uint32_t total = 0;
         uint64_t edge = 1000000;
         m.update(total, edge, edge, c);

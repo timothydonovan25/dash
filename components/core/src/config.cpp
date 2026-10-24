@@ -84,6 +84,7 @@ const ConfigItem kItems[] = {
     num(0x0306, "Revs/spark",  "Shift", Kind::Int,    1,     2,   1, "",    FIELD(tach_revs_per_pulse)),
     num(0x0307, "Lead time",   "Shift", Kind::Int,    0,   300,  10, "ms",  FIELD(shift_lead_ms)),
     num(0x0308, "Peak hold",   "Shift", Kind::Int,    0,  5000, 250, "ms",  FIELD(shift_peak_hold_ms)),
+    num(0x0309, "Tach smooth", "Shift", Kind::Int,    0,    50,   1, "ms",  FIELD(tach_smooth_ms)),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),

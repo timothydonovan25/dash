@@ -100,6 +100,11 @@ struct Settings {
     // How long the rpm before a shift stays marked on the tachs and on one
     // shift lamp (core::shift::PeakHold). 0 turns the mark off.
     uint16_t shift_peak_hold_ms = 500;
+    // How much the screens' rpm is smoothed, a time constant
+    // (core::tach::Config::tau_ms). Short on purpose: quick and a little
+    // noisy rather than calm and late. 0 is the raw reading. The lamps
+    // never see it.
+    uint16_t tach_smooth_ms = 5;
 
     // What VIN reads under the battery: the input diode's drop, 0.3-0.4 V at
     // the dash's current, and whatever the ADC is off by. Added to VIN for

@@ -47,7 +47,9 @@ void Meter::update(uint32_t total, uint64_t edge_us, uint64_t now_us,
         raw_rpm_ = rpm_from_pulses(dp, static_cast<uint32_t>(dt), c.pulses_per_rev) *
                    static_cast<float>(c.revs_per_pulse ? c.revs_per_pulse : 1);
         running_ = true;
-        rpm_ += (raw_rpm_ - rpm_) * c.smoothing;
+        // dt / (dt + tau), as WheelMeter: 1 when tau is 0, so raw.
+        const float dt_ms = static_cast<float>(dt) / 1000.0f;
+        rpm_ += (raw_rpm_ - rpm_) * (dt_ms / (dt_ms + static_cast<float>(c.tau_ms)));
         rate_.add(edge_us, raw_rpm_, static_cast<uint32_t>(c.rate_window_ms) * 1000u);
         return;
     }
