@@ -663,7 +663,26 @@ void RadioScreen::update(const Frame& f) {
     table_.set_row(7, "TPMS front", f.tpms.front.valid ? "seen" : "--");
     table_.set_row(8, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
     table_.set_row(9, "Media", f.media.updated_ms ? f.media.title : "--");
-    table_.set_row_count(10);
+
+    // The watch (core/hr): where the link is, and once live, what it is and
+    // how well it is heard.
+    char watch[40] = "off";
+    using H = core::state::Heart;
+    switch (f.heart.link) {
+        case H::Searching:  std::snprintf(watch, sizeof watch, "searching"); break;
+        case H::Connecting: std::snprintf(watch, sizeof watch, "connecting %s", f.heart.name); break;
+        case H::Live:
+            if (f.heart.rssi_dbm != 0) {
+                std::snprintf(watch, sizeof watch, "%s %d dBm",
+                              f.heart.name[0] ? f.heart.name : "live", f.heart.rssi_dbm);
+            } else {
+                std::snprintf(watch, sizeof watch, "%s", f.heart.name[0] ? f.heart.name : "live");
+            }
+            break;
+        default: break;
+    }
+    table_.set_row(10, "Watch HR", watch);
+    table_.set_row_count(11);
 }
 
 WidgetList RadioScreen::widgets() { return WidgetList{list_, 2}; }

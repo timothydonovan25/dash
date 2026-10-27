@@ -247,6 +247,7 @@ enum class Ev : uint8_t {
     FusionReset,  // i: resets so far
     Suspect,      // a: core::fusion::Source bits now suspect
     Drop,         // a: Stream; i: rows dropped so far
+    Heart,        // a: core::state::Heart::Link; b: bpm then (0 none)
 };
 
 struct EventRow {
@@ -309,6 +310,8 @@ struct Watched {
     uint16_t fusion_resets = 0;
     uint8_t  suspect = 0;
     uint32_t dropped[kStreamCount] = {};
+    uint8_t  hr_link = 0;          // core::state::Heart::Link
+    uint16_t hr_bpm = 0;
 };
 
 // Turns one pass's Watched into the events since the last. The first call

@@ -1,6 +1,8 @@
-// STAT -> PERF and STUNT, and CRUISE -> PHONE: the performance timers, the
-// wheelie score, and the phone's last call or message.
+// STAT -> PERF, STUNT and HEART, and CRUISE -> PHONE: the performance
+// timers, the wheelie score, the rider's heart rate, and the phone's last
+// call or message.
 #include "ui/screens.hpp"
+#include "core/hr/hr.hpp"
 #include "core/stunt/stunt.hpp"
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
@@ -275,6 +277,135 @@ bool StuntScreen::handle(const core::nav::InputEvent& e) {
     if (e.button != core::nav::Button::E || e.press != core::nav::Press::Short) return false;
     return post(core::state::Command(core::state::CommandId::StuntReset));
 }
+
+// --- HeartScreen --------------------------------------------------------
+namespace {
+constexpr Rect kHrBpm{14, 38, 360, 140};
+constexpr Rect kHrZone{380, 104, 86, 42};
+constexpr Rect kHrBar{14, 190, 452, 14};
+constexpr Rect kHrStatus{14, 300, 452, 10};
+constexpr int16_t kHrTileY = 226;
+constexpr int16_t kHrTileX[4] = {14, 128, 242, 356};
+constexpr int16_t kHrTileW = 110, kHrTileH = 58;
+constexpr const char* kHrCaption[4] = {"AVERAGE", "HIGHEST", "LOWEST", "% OF MAX"};
+Rect hr_tile(int i) { return Rect{kHrTileX[i], kHrTileY, kHrTileW, kHrTileH}; }
+
+Color zone_color(uint8_t z) {
+    switch (z) {
+        case 1:  return theme::secondary;
+        case 2:  return color::kAccent;
+        case 3:  return color::kGood;
+        case 4:  return color::kWarn;
+        case 5:  return color::kAlarm;
+        default: return theme::primary;
+    }
+}
+}  // namespace
+
+void HeartScreen::enter(Canvas&) {
+    bpm_.set_bounds(kHrBpm);
+    bpm_.configure("--", color::kDim, 20, Align::Right);
+    zone_.set_bounds(kHrZone);
+    zone_.configure("", color::kDim, 6, Align::Center);
+    bar_.set_bounds(kHrBar);
+    bar_.configure(color::kGood, color::kAlarm, 0.9f);
+    status_.set_bounds(kHrStatus);
+    status_.configure("", theme::secondary, 1, Align::Left);
+    list_[0] = &bpm_;
+    list_[1] = &zone_;
+    list_[2] = &bar_;
+    list_[3] = &status_;
+    for (int i = 0; i < kTiles; ++i) {
+        const Rect t = hr_tile(i);
+        value_[i].set_bounds(Rect{static_cast<int16_t>(t.x + 4), static_cast<int16_t>(t.y + 26),
+                                  static_cast<int16_t>(t.w - 8), 21});
+        value_[i].configure("--", color::kDim, 3, Align::Center);
+        list_[4 + i] = &value_[i];
+    }
+}
+
+void HeartScreen::update(const Frame& f) {
+    using H = core::state::Heart;
+    const H& h = f.heart;
+    const bool live = core::hr::fresh(h, f.t_ms);
+    const uint16_t max = h.zone_max_bpm;
+    char buf[48];
+
+    const uint8_t z = live ? core::hr::zone(h.bpm, max) : 0;
+    if (live) {
+        std::snprintf(buf, sizeof buf, "%u", static_cast<unsigned>(h.bpm));
+        bpm_.configure(buf, zone_color(z), 20, Align::Right);
+    } else {
+        bpm_.configure("--", color::kDim, 20, Align::Right);
+    }
+    if (z > 0) {
+        std::snprintf(buf, sizeof buf, "Z%u", static_cast<unsigned>(z));
+        zone_.configure(buf, zone_color(z), 6, Align::Center);
+    } else {
+        zone_.configure("", color::kDim, 6, Align::Center);
+    }
+    // Half the max to the max: the zones' own range.
+    float frac = 0.0f;
+    if (live && max > 0) frac = (static_cast<float>(h.bpm) / max - 0.5f) * 2.0f;
+    bar_.set(frac < 0.0f ? 0.0f : frac > 1.0f ? 1.0f : frac, live && max > 0);
+
+    switch (h.link) {
+        case H::Off:
+            status_.configure("Off.  CONFIG -> Heart rate -> Watch HR", theme::secondary, 1, Align::Left);
+            break;
+        case H::Searching:
+            // 47 characters at most: a Label's buffer.
+            status_.configure("Looking for the watch (Garmin: Broadcast HR)",
+                              theme::secondary, 1, Align::Left);
+            break;
+        case H::Connecting:
+            std::snprintf(buf, sizeof buf, "Connecting to %s", h.name[0] ? h.name : "the watch");
+            status_.configure(buf, theme::secondary, 1, Align::Left);
+            break;
+        default:
+            if (h.contact_known && !h.contact && live) {
+                std::snprintf(buf, sizeof buf, "%s: no skin contact", h.name[0] ? h.name : "Watch");
+                status_.configure(buf, color::kWarn, 1, Align::Left);
+            } else if (!live) {
+                std::snprintf(buf, sizeof buf, "%s: no reading", h.name[0] ? h.name : "Watch");
+                status_.configure(buf, color::kWarn, 1, Align::Left);
+            } else {
+                std::snprintf(buf, sizeof buf, "%s", h.name[0] ? h.name : "Watch connected");
+                status_.configure(buf, theme::secondary, 1, Align::Left);
+            }
+            break;
+    }
+
+    const auto tile = [&](int i, uint16_t v, bool valid) {
+        if (!valid || v == 0) {
+            value_[i].configure("--", color::kDim, 3, Align::Center);
+            return;
+        }
+        std::snprintf(buf, sizeof buf, "%u", static_cast<unsigned>(v));
+        value_[i].configure(buf, theme::primary, 3, Align::Center);
+    };
+    tile(0, h.avg_bpm, h.readings > 0);
+    tile(1, h.max_bpm, h.readings > 0);
+    tile(2, h.min_bpm, h.readings > 0);
+    tile(3, max > 0 ? static_cast<uint16_t>(h.bpm * 100u / max) : 0, live);
+}
+
+void HeartScreen::draw_background(Canvas& c) {
+    c.draw_text(static_cast<int16_t>(kHrZone.x + kHrZone.w / 2), 70, "BPM",
+                theme::secondary, 3, Align::Center);
+    for (int i = 0; i < kTiles; ++i) {
+        const Rect t = hr_tile(i);
+        c.draw_round_rect(t, chrome::kRadius, theme::rule);
+        c.draw_text(static_cast<int16_t>(t.x + 8), static_cast<int16_t>(t.y + 8), kHrCaption[i],
+                    theme::secondary, 1, Align::Left);
+    }
+    c.draw_text(kHrBar.x, static_cast<int16_t>(kHrBar.bottom() + 6), "50%",
+                theme::secondary, 1, Align::Left);
+    c.draw_text(static_cast<int16_t>(kHrBar.right()), static_cast<int16_t>(kHrBar.bottom() + 6),
+                "MAX", theme::secondary, 1, Align::Right);
+}
+
+WidgetList HeartScreen::widgets() { return WidgetList{list_, 4 + kTiles}; }
 
 // --- PhoneScreen --------------------------------------------------------
 namespace {

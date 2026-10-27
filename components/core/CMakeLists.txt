@@ -38,4 +38,5 @@ idf_component_register(
          "src/session.cpp"
          "src/perf.cpp"
          "src/stunt.cpp"
+         "src/hr.cpp"
     INCLUDE_DIRS "include")

@@ -909,17 +909,35 @@ pressures before you commit.
 
 ### 11.3 Radio topology
 
-The dash needs two BLE roles at once:
+The dash needs these BLE roles at once:
 
 - **Peripheral** — advertises the Dash Media service; the phone connects
   in and writes to it.
 - **Observer** — passive scan for TPMS advertisements.
+- **Central and GATT client** (1.48) — the rider's watch. With CONFIG →
+  Heart rate → Watch HR on, `ble` scans for the standard Heart Rate Service
+  (0x180D), connects to the strongest advertiser above -85 dBm (then only
+  to that one, by address or name, for the power-on), and subscribes to
+  Heart Rate Measurement (0x2A37). A Garmin does this with Broadcast Heart
+  Rate on. `core/hr` is the decision side and is host-tested. The watch is
+  the second of `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2`; its connection has its
+  own GAP callback, so the phone's pairing policy never sees it, and its bond
+  is never stored (the store is the phones', §11.3 below). The reading goes
+  to the `heart` slot, STAT → HEART, DIAG → Radio, the blackbox's `HR`
+  column and a `heart` event in the detail log.
 
-**Not Central, and not a GATT client.** Both were only there for AMS
-(§11.1), and dropping them is worth real flash: NimBLE and the controller
-together add about 268 kB of image and 33 kB of internal RAM as configured
-today, measured by linking them in. Both are now off in `sdkconfig.defaults`, and so is the observer role
-until the TPMS scan exists.
+Central and the GATT client were off before 1.48 (they had been for AMS,
+§11.1) to save flash. Turning them on, with the watch code, cost 31 kB of
+image and under 0.5 kB of internal `.bss`. The observer role came with
+them; the TPMS scan will use it.
+
+**IDF v6.0.2 bug this exposed.** With `CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`,
+NimBLE's FreeRTOS callouts never learn their event queue, so every NimBLE
+timer ran on FreeRTOS's timer task, not the host task. With the central
+role on, the host timer fires during the controller sync and asserts
+(`ble_hs_timer_exp`, ble_hs.c:570), a boot loop. `ble_service.cpp` mends it
+by wrapping `npl_freertos_funcs_init` at link time (`-Wl,--wrap`, in
+`components/services` and `demo_p4/main`).
 
 NimBLE supports this. The cost is radio time. Scanning and an active
 connection compete for the same antenna, so duty-cycle the scan:

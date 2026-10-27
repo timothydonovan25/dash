@@ -23,7 +23,7 @@ struct InputEvent {
 struct Layout {
     // DIAG's are its menu and eight pages, reached from the menu rather than
     // walked with B (ui::App).
-    uint8_t screens[kModeCount] = {7, 5, 5, 9, 1};
+    uint8_t screens[kModeCount] = {7, 5, 6, 9, 1};
 };
 
 struct State {

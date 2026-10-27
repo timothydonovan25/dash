@@ -28,6 +28,7 @@ const uint16_t kShippedKeys[] = {
     0x0C01,
     0x0D01,
     0x0E01,
+    0x0F01, 0x0F02,
 };
 }  // namespace
 

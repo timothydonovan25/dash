@@ -76,6 +76,11 @@ set_source_files_properties(touch_buttons.cpp
     ../../components/services/src/ble_service.cpp PROPERTIES
     COMPILE_OPTIONS "-Wno-missing-field-initializers")
 
+# ble_service.cpp mends NimBLE's FreeRTOS callouts by wrapping the porting
+# table's setup (see __wrap_npl_freertos_funcs_init there); the bike sets the
+# same flag in components/services.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=npl_freertos_funcs_init")
+
 # A dev image that aborts at boot, for the rollback test: idf.py -B
 # build-crash -DDASH_CRASH_TEST=1 build. Off in any normal build.
 if(DASH_CRASH_TEST)

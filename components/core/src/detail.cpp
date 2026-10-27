@@ -206,6 +206,7 @@ const char* ev_name(Ev e) {
         case Ev::FusionReset: return "fusion_reset";
         case Ev::Suspect:     return "suspect";
         case Ev::Drop:        return "drop";
+        case Ev::Heart:       return "heart";
     }
     return "?";
 }
@@ -597,6 +598,12 @@ size_t format_event(char* buf, size_t n, const EventRow& e) {
             o.s(e.a == kMain ? "main" : stream_suffix(static_cast<Stream>(e.a)));
             o.kv("dropped"); o.i(e.i);
             break;
+        case Ev::Heart:
+            o.kv("link"); o.s(e.a == state::Heart::Live ? "live"
+                             : e.a == state::Heart::Connecting ? "connecting"
+                             : e.a == state::Heart::Searching ? "searching" : "off");
+            o.kv("bpm"); o.u(e.b);
+            break;
         case Ev::None:
             break;
     }
@@ -730,6 +737,13 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
                 e->a = s;
                 e->i = static_cast<int32_t>(w.dropped[s]);
             }
+        }
+    }
+
+    if (w.hr_link != p.hr_link) {
+        if (EventRow* e = emit(Ev::Heart)) {
+            e->a = w.hr_link;
+            e->b = w.hr_bpm;
         }
     }
 

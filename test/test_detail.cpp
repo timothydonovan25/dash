@@ -294,6 +294,18 @@ int main() {
         format_event(b, sizeof b, out[0]);
         CHECK(contains(b, "stream=imu dropped=40"));
 
+        // The watch's link, once per change, with the reading at that moment.
+        w.hr_link = core::state::Heart::Live; w.hr_bpm = 0;
+        n = ew.watch(w, 110, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::Heart && out[0].a == core::state::Heart::Live);
+        format_event(b, sizeof b, out[0]);
+        CHECK(contains(b, "heart") && contains(b, "link=live bpm=0"));
+        w.hr_bpm = 131;
+        CHECK(ew.watch(w, 115, out, EventWatcher::kMaxPerPass) == 0);   // a reading is not an event
+        w.hr_link = core::state::Heart::Searching;
+        n = ew.watch(w, 118, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::Heart && out[0].b == 131);
+
         w.stunt_seq = 1; w.stunt_kind = 1; w.stunt_grade = 2; w.stunt_ms = 2300;
         w.stunt_peak_deg = 34.0f; w.stunt_points = 410;
         n = ew.watch(w, 120, out, EventWatcher::kMaxPerPass);

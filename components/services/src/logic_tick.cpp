@@ -1,5 +1,6 @@
 #include "services/logic_tick.hpp"
 #include "core/units/units.hpp"
+#include "core/hr/hr.hpp"
 #include "core/log/log.hpp"
 #include <cmath>
 
@@ -312,6 +313,11 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
         w.gearcal_phase = static_cast<uint8_t>(s.guide.phase());
         w.fusion_resets = fo.resets;
         w.suspect = fo.suspect;
+        {
+            const core::state::Heart h = d.slots->heart.get();
+            w.hr_link = h.link;
+            w.hr_bpm = core::hr::fresh(h, now) ? h.bpm : 0;
+        }
         w.dropped[core::log::kMain] = d.blackbox ? d.blackbox->dropped() : 0;
         w.dropped[core::log::kImu] = d.imu_log ? d.imu_log->dropped() : 0;
         w.dropped[core::log::kTach] = d.tach_log ? d.tach_log->dropped() : 0;
@@ -394,6 +400,10 @@ void blackbox_row(Deps& d, LogicState& s, uint32_t now,
     rec.fused_mph = fo.mph;
     rec.fused_sigma = fo.sigma_mph;
     rec.alt_ft = g.alt_m * 3.28084f;
+    {
+        const core::state::Heart h = d.slots->heart.get();
+        rec.hr_bpm = core::hr::fresh(h, now) ? h.bpm : 0;
+    }
     rec.t_ms = now;
     rec.speed_mph = m.best_mph;
     rec.rpm = e.rpm;

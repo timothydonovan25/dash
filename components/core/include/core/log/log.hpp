@@ -63,6 +63,10 @@ struct Record {
     // receiver's own figure: good to a few tens of feet, noisy between
     // fixes, and meaningless without kFlagFix.
     float    alt_ft     = 0.0f;
+
+    // The rider's heart rate from the watch (core/hr), bpm. 0 when there is
+    // no current reading: the setting off, no watch, or the last one stale.
+    uint16_t hr_bpm     = 0;
 };
 
 enum Flags : uint16_t {

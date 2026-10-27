@@ -278,7 +278,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 49 host tests, all passing.
+the media half of step 9 is written. 50 host tests, all passing.
 
 **`core/`** — all host-tested:
 
@@ -451,6 +451,19 @@ the media half of step 9 is written. 49 host tests, all passing.
   within 4 s chain into a combo, +0.5x each to 4x; grades POP … LEGENDARY.
   Every threshold is a guess that has never seen a real wheelie. Session
   only, nothing saved. STAT → STUNT (E: new session) and the toast
+- `hr/` (1.48) heart rate from the rider's watch over the standard Heart
+  Rate Service, as a Garmin sends it with Broadcast Heart Rate on: the
+  0x2A37 parser, the advert parser, `Picker` (the strongest advertiser above
+  -85 dBm once a scan has heard them all, then only that one, by address or
+  name, for the power-on; turning the setting off and on forgets it),
+  `Session` (average, highest, lowest) and zones by percent of CONFIG's Max
+  HR. `ble` is the central (DIAG → Radio shows the link); CONFIG → Heart
+  rate → Watch HR, off by default. STAT → HEART shows it; the blackbox's
+  last column is `HR` (0 for no current reading) and the detail log's
+  `_evt` has a `heart` event per link change. **Never run against a watch**:
+  the D2 Air X10's spec sheet says its broadcast is ANT+, which this dash
+  cannot hear; Venu 2-family firmware added Bluetooth, so check the watch
+  lists the dash as a sensor or DIAG → Radio leaves `searching`
 - the toast (1.32): `ui::Toast`, a strip along the bottom of every screen,
   under the alert. A ringing call, then a notification (8 s), then a trick
   under way (live), then a finished trick (3.5 s) or a new perf best (4 s).
@@ -592,6 +605,12 @@ priority 23 with no core affinity and no Kconfig for either, so `ble`
 lowers them to 8 by name. **If esp_hosted is upgraded, check the boot log
 still says it found them.** It also pushes `demo_p4/c6_cp`'s firmware to the C6
 from `slave_fw` when the C6 is older than 2.12; build that project first.
+**NimBLE's timers are mended at link time** (1.48): IDF v6.0.2's FreeRTOS
+callouts (`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`) never stored their event queue,
+so every NimBLE timer ran on the FreeRTOS timer task; with the central role
+on, that asserted in `ble_hs_timer_exp` during sync and boot-looped the demo.
+`ble_service.cpp` wraps `npl_freertos_funcs_init` (`-Wl,--wrap`, set in
+`components/services` and `demo_p4/main`). Keep both flags.
 
 **Phone notifications** (§11.1 tag `N`, 1.32): calls, missed calls and
 messages, forwarded by the phone app's `NotifListener` (its `NotifyFilter`
@@ -618,7 +637,8 @@ pins, touch zones and decoded presses for 30 s.
 ### What is deliberately not here
 
 - **TPMS** (`core/tpms/`, the observer scan) — waits on a sensor to
-  capture (§11.2, §18); the observer role is off in sdkconfig until then.
+  capture (§11.2, §18); the observer role is on (it came with the watch's central role, 1.48)
+  but nothing scans for TPMS.
   The *phone* half is written, in its own repo at
   `~/phone` — along with `tools/dash_media_peripheral.py`, which stayed
   here: a laptop peripheral speaking §11.1 so the app has a working

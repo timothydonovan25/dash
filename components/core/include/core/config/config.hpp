@@ -46,6 +46,12 @@ struct Settings {
     // message itself shows while moving, or only the sender until stopped.
     bool    notify_on      = true;
     bool    notify_text_moving = false;
+    // Heart rate from the rider's watch over Bluetooth (core/hr): a Garmin
+    // with Broadcast Heart Rate on, or any strap with the standard service.
+    // Off until asked for: it keeps the radio scanning while no watch is
+    // there. The maximum sets STAT -> HEART's zones.
+    bool     hr_on      = false;
+    uint16_t hr_max_bpm = 185;
 
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.

@@ -146,6 +146,11 @@ const ConfigItem kItems[] = {
     boolean(0x0A03,"Notifications", "Phone", FIELD(notify_on)),
     boolean(0x0A04,"Text moving",   "Phone", FIELD(notify_text_moving)),
 
+    // Heart rate (core/hr): the watch's own broadcast, shown on STAT ->
+    // HEART and logged. Turning it off and on forgets which watch it was.
+    boolean(0x0F01,"Watch HR",  "Heart rate", FIELD(hr_on)),
+    num   (0x0F02, "Max HR",    "Heart rate", Kind::Int, 120, 230, 1, "bpm", FIELD(hr_max_bpm)),
+
     // SD card. Eject flushes the log and unmounts, so the card can come out
     // without a write in flight. Nothing remounts it until it has been
     // pulled and put back.

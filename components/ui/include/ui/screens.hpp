@@ -355,6 +355,26 @@ private:
     Widget* list_[6 + kTiles] = {};
 };
 
+// The rider's heart rate from the watch (core/hr): the reading, its zone
+// against CONFIG's max, and this power-on's average, highest and lowest.
+class HeartScreen final : public Screen {
+public:
+    const char* name() const override { return "HEART"; }
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    WidgetList widgets() override;
+
+private:
+    static constexpr int kTiles = 4;
+    Label   bpm_;       // the reading, huge
+    Label   zone_;      // Z1..Z5
+    Bar     bar_;       // bpm against the max
+    Label   status_;    // the link, the watch's name
+    Label   value_[kTiles];
+    Widget* list_[4 + kTiles] = {};
+};
+
 class AllDataScreen final : public Screen {
 public:
     const char* name() const override { return "ALL"; }

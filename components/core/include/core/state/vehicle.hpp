@@ -271,6 +271,34 @@ struct Notify {
     uint16_t seq = 0;           // moves once per notification, 0 until one
 };
 
+// Heart rate from the rider's watch (core/hr), over the standard Heart Rate
+// Service. Written by `ble`. `bpm` is the last reading and `at_ms` when it
+// came; core::hr::fresh says whether it is still worth showing.
+struct Heart {
+    enum Link : uint8_t {
+        Off = 0,      // CONFIG -> Heart rate -> Watch HR is off
+        Searching,    // scanning, or waiting to scan again
+        Connecting,   // connecting, finding the service, subscribing
+        Live,         // subscribed: readings arrive
+    };
+    uint8_t  link = Off;
+    uint16_t bpm = 0;
+    uint32_t at_ms = 0;          // dash clock of the last reading; 0 none yet
+    bool     contact_known = false;
+    bool     contact = false;
+    int8_t   rssi_dbm = 0;       // 0 before one was read
+    char     name[20] = {};      // the sensor's advertised name, if any
+    // This power-on, from every reading.
+    uint16_t avg_bpm = 0;
+    uint16_t max_bpm = 0;
+    uint16_t min_bpm = 0;
+    uint32_t readings = 0;
+    uint16_t seq = 0;            // moves once per reading
+    // CONFIG -> Heart rate -> Max HR, carried here so STAT -> HEART can draw
+    // zones from the Frame alone.
+    uint16_t zone_max_bpm = 0;
+};
+
 // One lap's peaks, for LAPS (core::lap::Peaks, as kept per lap by logic).
 struct LapPeak {
     float mph = 0.0f;

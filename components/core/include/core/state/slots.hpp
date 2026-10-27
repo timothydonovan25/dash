@@ -31,6 +31,7 @@ struct Slots {
     Published<Perf>     perf;       // logic
     Published<Stunt>    stunt;      // logic
     Published<Notify>   notify;     // ble
+    Published<Heart>    heart;      // ble
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
@@ -69,6 +70,7 @@ struct Frame {
     Perf     perf;
     Stunt    stunt;
     Notify   notify;
+    Heart    heart;
     uint32_t t_ms = 0;
 };
 

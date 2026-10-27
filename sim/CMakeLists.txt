@@ -30,7 +30,7 @@ add_library(core STATIC
     ${CORE}/src/fixtime.cpp
     ${CORE}/src/sweep.cpp ${CORE}/src/battery.cpp ${CORE}/src/slip.cpp ${CORE}/src/waypoint.cpp ${CORE}/src/flash.cpp
     ${CORE}/src/track.cpp ${CORE}/src/session.cpp
-    ${CORE}/src/perf.cpp ${CORE}/src/stunt.cpp)
+    ${CORE}/src/perf.cpp ${CORE}/src/stunt.cpp ${CORE}/src/hr.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 add_library(ui STATIC

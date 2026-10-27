@@ -145,6 +145,9 @@ SLIDERS = [
     ("sats",    "Satellites",     0,   16,    1,   11),
     # Inside the dash: DIAG -> System's chip and IMU temperature rows.
     ("temp",    "Dash temp  C",   0,   90,    1,   38),
+    # The rider's watch (CONFIG -> Heart rate -> Watch HR on): STAT -> HEART,
+    # DIAG -> Radio, the HR column of the log. 0 is no watch in range.
+    ("hr",      "Watch heart rate  bpm",  0, 210, 1, 0),
     # Moves the GPS clock and date off the host's, to reach night (CONFIG ->
     # Display -> Dim at night) or another day (the START waypoint moves).
     ("shift",   "Clock shift  h", -12, 12,    1,    0),

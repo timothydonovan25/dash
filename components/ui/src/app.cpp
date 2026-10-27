@@ -79,7 +79,8 @@ ScreenId App::screen_for(Mode m, uint8_t index) const {
                 case 1: return ScreenId::Engine;
                 case 2: return ScreenId::Attitude;
                 case 3: return ScreenId::Perf;
-                default: return ScreenId::Stunt;
+                case 4: return ScreenId::Stunt;
+                default: return ScreenId::Heart;
             }
         case Mode::Diag:
             switch (index) {
@@ -156,6 +157,7 @@ void App::build(ScreenId id) {
         case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
         case ScreenId::Perf:       s = make<PerfScreen>(slot_); break;
         case ScreenId::Stunt:      s = make<StuntScreen>(slot_); break;
+        case ScreenId::Heart:      s = make<HeartScreen>(slot_); break;
         case ScreenId::DiagMenu:   s = make<DiagMenuScreen>(slot_); break;
         case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
         case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;

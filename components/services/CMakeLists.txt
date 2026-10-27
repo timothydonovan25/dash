@@ -30,3 +30,8 @@ idf_component_register(
 # which is normal C and not fully specified enough for this warning in C++.
 set_source_files_properties(src/ble_service.cpp PROPERTIES
     COMPILE_OPTIONS "-Wno-missing-field-initializers")
+
+# NimBLE's FreeRTOS callouts never learn their event queue in IDF v6.0.2
+# without esp_timer; ble_service.cpp wraps the porting table's setup to mend
+# it (see __wrap_npl_freertos_funcs_init there).
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=npl_freertos_funcs_init")
