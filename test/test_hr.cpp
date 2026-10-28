@@ -163,6 +163,8 @@ int main() {
         CHECK(fresh(h, 10000));
         CHECK(fresh(h, 14999));
         CHECK(!fresh(h, 15000));
+        // The frame's clock was read just before the reading arrived.
+        CHECK(fresh(h, 9996));
         h.link = core::state::Heart::Searching;
         CHECK(!fresh(h, 10001));
     }

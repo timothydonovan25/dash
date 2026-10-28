@@ -468,7 +468,7 @@ void PhoneScreen::update(const Frame& f) {
         age_.set_text("");
         return;
     }
-    const bool ringing = n.kind == 'C' && n.ringing && f.t_ms - n.at_ms < 45000;
+    const bool ringing = n.kind == 'C' && n.ringing && static_cast<int32_t>(f.t_ms - n.at_ms) < 45000;  // signed: may be just ahead of t_ms
     const char* kind = n.kind == 'C' ? (ringing ? "INCOMING CALL" : "CALL")
                      : n.kind == 'X' ? "MISSED CALL"
                      : n.kind == 'M' ? "MESSAGE" : "NOTIFICATION";

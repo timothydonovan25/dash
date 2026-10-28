@@ -148,8 +148,13 @@ uint16_t Session::avg_bpm() const {
 }
 
 bool fresh(const state::Heart& h, uint32_t now_ms) {
+    // Signed: a frame's clock is read before its slots, so a reading that
+    // lands in between is a few ms *ahead* of `now_ms`. Unsigned, that was
+    // four billion ms old, and STAT -> HEART blinked to "--" for a frame on
+    // every reading.
+    const int32_t age = static_cast<int32_t>(now_ms - h.at_ms);
     return h.link == state::Heart::Live && h.bpm != 0 && h.at_ms != 0 &&
-           now_ms - h.at_ms < kStaleMs;
+           age < static_cast<int32_t>(kStaleMs);
 }
 
 uint8_t zone(uint16_t bpm, uint16_t max_bpm) {

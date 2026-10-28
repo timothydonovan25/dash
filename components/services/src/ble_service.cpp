@@ -179,6 +179,11 @@ struct Ctx {
     uint8_t  own_addr_type = 0;
     uint16_t ctrl_val_handle = 0;     // filled in by NimBLE at registration
     std::atomic<uint32_t> dropped{0}; // events lost to a full queue
+    // Phone links up, counted on the host task by the phone's GAP callback
+    // as they connect and drop. The `ble` task's own `conn` lags the host by
+    // a queue hop; this does not, so re-arming advertising on it can never
+    // let a second phone in behind the first.
+    std::atomic<int> phone_links{0};
     // Written by the `ble` task, read by store_status() on the host task:
     // whether a new bond may push the oldest out of a full store.
     std::atomic<bool> may_evict{true};
@@ -303,7 +308,9 @@ void start_advertising() {
     p.disc_mode = BLE_GAP_DISC_MODE_GEN;
     const int rc = ble_gap_adv_start(g_ctx.own_addr_type, nullptr, BLE_HS_FOREVER,
                                      &p, gap_event, nullptr);
-    if (rc != 0) ESP_LOGE(kTag, "advertising failed: %d", rc);
+    // Already on is fine (the loop and a callback can both ask). Anything
+    // else is retried by the loop within a second (keep_advertising).
+    if (rc != 0 && rc != BLE_HS_EALREADY) ESP_LOGW(kTag, "advertising failed: %d", rc);
 }
 
 int gap_event(ble_gap_event* ev, void*) {
@@ -314,6 +321,7 @@ int gap_event(ble_gap_event* ev, void*) {
                 start_advertising();
                 return 0;
             }
+            ++g_ctx.phone_links;
             e.kind = Event::Connect;
             e.conn = ev->connect.conn_handle;
             post(e);
@@ -335,6 +343,7 @@ int gap_event(ble_gap_event* ev, void*) {
             }
             return 0;
         case BLE_GAP_EVENT_DISCONNECT:
+            if (g_ctx.phone_links.load() > 0) --g_ctx.phone_links;
             e.kind = Event::Disconnect;
             e.code = ev->disconnect.reason;
             post(e);
@@ -586,6 +595,7 @@ int gated_store_delete(int type, const ble_store_key* key) {
 }
 
 void on_reset(int reason) {
+    g_ctx.phone_links.store(0);   // every link went with the controller
     Event e{};
     e.kind = Event::Reset;
     e.code = reason;
@@ -1364,6 +1374,14 @@ void ble_task(void* arg) {
             last_diag_ms = now;
             demote_radio_tasks(false);
             hr.sample_rssi();
+            // No phone, so the dash must be findable. The callbacks restart
+            // advertising when a phone drops, but a start can fail (GAP
+            // preempted, the controller busy with the watch's connect), and
+            // until 1.49 nothing tried again: the dash went invisible and
+            // the phone waited on it forever.
+            if (synced && g_ctx.phone_links.load() == 0 && !ble_gap_adv_active()) {
+                start_advertising();
+            }
             if (conn != BLE_HS_CONN_HANDLE_NONE) {
                 int8_t rssi = 0;
                 if (ble_gap_conn_rssi(conn, &rssi) == 0) {

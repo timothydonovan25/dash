@@ -232,8 +232,8 @@ void SpeedScreen::update(const Frame& f) {
     namespace st = core::stunt;
     const core::state::Stunt& s = f.stunt;
     const bool tricks = imu_ok && (!has_ctx() || !ctx().settings || ctx().settings->popups);
-    const bool landed = imu_ok && f.att.land_ms != 0 && f.t_ms - f.att.land_ms < kJumpShowMs;
-    const bool scored = tricks && s.seq != 0 && s.done_ms != 0 && f.t_ms - s.done_ms < kTrickShowMs;
+    const bool landed = imu_ok && f.att.land_ms != 0 && static_cast<int32_t>(f.t_ms - f.att.land_ms) < static_cast<int32_t>(kJumpShowMs);
+    const bool scored = tricks && s.seq != 0 && s.done_ms != 0 && static_cast<int32_t>(f.t_ms - s.done_ms) < static_cast<int32_t>(kTrickShowMs);
     Face face = Face::Lean;
     if (imu_ok && f.att.airborne) {
         face = Face::Air;
