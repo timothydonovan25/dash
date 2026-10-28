@@ -90,7 +90,7 @@ public:
     void clear_damage();
 
     // The name card at key-on, before the sweep. Whole milliseconds.
-    static constexpr uint32_t kSplashMs = 500;
+    static constexpr uint32_t kSplashMs = 300;
     bool splashing() const { return splash_on_; }
     void clear_full_repaint() {
         needs_full_ = false;

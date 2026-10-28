@@ -6,6 +6,7 @@
 #include "services/services.hpp"
 
 #include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -85,6 +86,9 @@ void start_serial_buttons(StateRequest& req) {
         ESP_LOGW(kTag, "no USB serial driver; serial buttons off");
         return;
     }
+    // The console is this port too: send it through the driver now, not
+    // straight at the FIFO under the driver's feet.
+    usb_serial_jtag_vfs_use_driver();
     dump_crypto_regs();
     xTaskCreatePinnedToCore(serial_task, "serial_btn", 3072, &req, 3, nullptr, 1);
 }

@@ -130,3 +130,11 @@ CONFIG_ESP_COREDUMP_CHECK_BOOT=n
 
 # Per-task stack high-water marks for DIAG -> System (services::watch_stacks).
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+# The console on USB only, as the bike has it. It was UART0 at 115200 with
+# USB second, and the boot waited on every character of the UART copy: about
+# 5 ms a line, 0.3-0.4 s before the first frame. Nothing reads UART0 here.
+# The bootloader says only what went wrong; the ROM's few lines stay, for a
+# board that will not boot.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

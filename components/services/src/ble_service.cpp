@@ -209,6 +209,9 @@ struct Ctx {
     std::atomic<bool>     hr_peer_valid{false};
     std::atomic<uint16_t> hr_conn{BLE_HS_CONN_HANDLE_NONE};
     std::atomic<uint16_t> hr_val{0};
+    // Every advertising report a watch scan received, anyone's: proof the
+    // scan is alive when no heart-rate advertiser is among them.
+    std::atomic<uint32_t> scan_reports{0};
     // Advertisers heard with the Heart Rate Service this scan, so each is
     // passed on once, and once more with its name (usually in the scan
     // response), and nobody else is. The controller's duplicate filter is
@@ -417,6 +420,7 @@ int hr_disc_event(ble_gap_event* ev, void*) {
         return 0;
     }
     if (ev->type != BLE_GAP_EVENT_DISC) return 0;
+    g_ctx.scan_reports.fetch_add(1, std::memory_order_relaxed);
     const ble_gap_disc_desc& dd = ev->disc;
     const core::hr::Advert a = core::hr::parse_advert(dd.data, dd.length_data);
     int at = -1;
@@ -780,6 +784,8 @@ public:
             }
             case Event::HrScanDone:
                 if (step_ != Step::Scanning) break;
+                ++scans_done_;
+                if (e.code != 0) ESP_LOGW(kTag, "watch scan ended: %" PRId32, e.code);
                 // Once per change, not every scan: enough to tell "the watch
                 // is not broadcasting" from "the dash is not listening".
                 if (heard_ != heard_logged_) {
@@ -965,6 +971,16 @@ public:
                     break;
             }
         }
+        // While searching, every 30 s: whether the scans run and hear anyone.
+        if (on && step_ != Step::Live && step_ != Step::Off &&
+            static_cast<int32_t>(now - search_log_ms_) >= 30000) {
+            search_log_ms_ = now;
+            const uint32_t reports = g_ctx.scan_reports.exchange(0, std::memory_order_relaxed);
+            ESP_LOGI(kTag, "watch search: %u scans started, %u finished, %" PRIu32
+                     " adverts from anyone, %u heart-rate last scan",
+                     scans_started_, scans_done_, reports, heard_);
+            scans_started_ = scans_done_ = 0;
+        }
         if (dirty_) {
             dirty_ = false;
             d_.slots->heart.publish(heart_);
@@ -1018,6 +1034,7 @@ private:
     void scan(uint32_t now) {
         picker_.begin_scan();
         heard_ = 0;
+        ++scans_started_;
         g_ctx.hr_seen_n = 0;   // the host task reads it only during a scan
         ble_gap_disc_params p{};
         p.passive = 0;             // active: the name is often in the scan response
@@ -1114,6 +1131,9 @@ private:
     bool     was_on_ = false;
     bool     was_logged_on_ = false;
     unsigned heard_ = 0;            // HrAdv this scan
+    unsigned scans_started_ = 0;    // since the last search log
+    unsigned scans_done_ = 0;
+    uint32_t search_log_ms_ = 0;
     unsigned heard_logged_ = ~0u;   // what the log last said
     bool     dirty_ = false;
 };

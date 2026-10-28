@@ -214,12 +214,12 @@ int main() {
         CHECK(total == item_count());
     }
 
-    CASE("Startup holds the sweep (on, 1 s) and the splash (on)");
+    CASE("Startup holds the sweep (on, 0.6 s) and the splash (on)");
     {
         Settings s;
         CHECK(s.gauge_sweep);
         CHECK(s.splash);
-        CHECK(s.sweep_ms == 1000);
+        CHECK(s.sweep_ms == 600);
         size_t g = 0;
         while (g < group_count() && !eq(group_name(g), "Startup")) ++g;
         CHECK(g < group_count());
@@ -227,7 +227,7 @@ int main() {
         CHECK(group_item(g, 0)->key == 0x0B01);
         CHECK(group_item(g, 2)->key == 0x0B03);
         char buf[32];
-        format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "1000 ms"));
+        format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "600 ms"));
     }
 
     CASE("the modules that keep their own config read it from here");

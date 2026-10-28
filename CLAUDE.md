@@ -589,7 +589,7 @@ It also shows a core dump left in flash (`keeper` reads it at boot): the
 task that crashed, labelled CRASHED when this boot was the crash, and the
 DIAG menu flags it. Read the dump over USB with `idf.py coredump-info`;
 the sim's `crash <task|none> [new]` stands in for one.
-**Startup** shows a 0.5 s splash before the gauge sweep (CONFIG → Startup).
+**Startup** shows a 0.3 s splash before the gauge sweep, 0.6 s by default (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
 shows "safe to pull" until the card comes out. One lock in
