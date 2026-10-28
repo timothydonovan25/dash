@@ -116,6 +116,11 @@ target_include_directories(test_logic_waypoint PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(test_logic_waypoint PRIVATE core ui hal)
 add_test(NAME logic_waypoint COMMAND test_logic_waypoint)
 
+add_executable(test_logic_hr test_logic_hr.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
+target_include_directories(test_logic_hr PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_hr PRIVATE core ui hal)
+add_test(NAME logic_hr COMMAND test_logic_hr)
+
 # `logic`'s half of saved tracks, served by the real track_store against a
 # card in RAM.
 add_executable(test_logic_track test_logic_track.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)

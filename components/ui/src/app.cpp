@@ -27,6 +27,7 @@ constexpr Rect kSlipBar{0, 0, kScreenW, 30};
 constexpr Rect kToastBox{0, 266, kScreenW, 54};
 // How long a finished event stays up.
 constexpr uint32_t kPerfToastMs = 4000;
+constexpr uint32_t kRecoveryToastMs = 6000;   // parked: time to read it
 constexpr uint32_t kStuntToastMs = 3500;
 constexpr uint32_t kNotifyToastMs = 8000;
 // A text message waits longer, for E: a minute, or until it is cleared.
@@ -398,6 +399,7 @@ void App::update_toast(const core::state::Frame& f) {
     if (!toast_seen_init_) {
         toast_seen_init_ = true;
         seen_perf_ = f.perf.seq;
+        seen_hrr_ = f.hr_recovery.seq;
         seen_stunt_ = f.stunt.seq;
         seen_notify_ = f.notify.seq;
         seen_line_refused_ = f.lap.line_refused_seq;
@@ -407,6 +409,25 @@ void App::update_toast(const core::state::Frame& f) {
     const bool metric = cfg && cfg->unit_system ==
                                    static_cast<uint8_t>(core::units::System::Metric);
     const char* dunit = metric ? "km/h" : "mph";
+
+    // Heart-rate recovery, parked after a ride: the minute's fall, and the
+    // second minute's if it stayed parked. HEART shows it itself.
+    if (f.hr_recovery.seq != seen_hrr_) {
+        seen_hrr_ = f.hr_recovery.seq;
+        const core::state::HrRecovery& r = f.hr_recovery;
+        if (r.has_drop2) {
+            std::snprintf(big, sizeof big, "HR RECOVERY %+d", -static_cast<int>(r.drop2));
+            std::snprintf(small, sizeof small, "bpm in 2 min, from %u", static_cast<unsigned>(r.from_bpm));
+        } else {
+            std::snprintf(big, sizeof big, "HR RECOVERY %+d", -static_cast<int>(r.drop1));
+            std::snprintf(small, sizeof small, "bpm in 1 min, from %u%s",
+                          static_cast<unsigned>(r.from_bpm),
+                          r.count > 1 && r.drop1 >= r.best_drop1 ? "   BEST TODAY" : "");
+        }
+        if (popups && r.seq != 0 && active_id_ != ScreenId::Heart) {
+            game_event_.set(big, small, color::kGood, now + kRecoveryToastMs);
+        }
+    }
 
     if (f.perf.seq != seen_perf_) {
         seen_perf_ = f.perf.seq;

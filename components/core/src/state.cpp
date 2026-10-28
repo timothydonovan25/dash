@@ -40,6 +40,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.stunt  = s.stunt.get();
     f.notify = s.notify.get();
     f.heart  = s.heart.get();
+    f.hr_recovery = s.hr_recovery.get();
     f.t_ms   = t_ms;
     return f;
 }

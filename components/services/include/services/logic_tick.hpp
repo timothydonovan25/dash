@@ -16,6 +16,7 @@
 #include "core/lap/lap.hpp"
 #include "core/lap/sectors.hpp"
 #include "core/fixtime/fixtime.hpp"
+#include "core/hr/hr.hpp"
 #include "core/perf/perf.hpp"
 #include "core/session/session.hpp"
 #include "core/stunt/stunt.hpp"
@@ -117,6 +118,8 @@ struct LogicState {
     // scored (STAT -> PERF and STUNT, and the toast).
     core::perf::Timer   perf;
     core::stunt::Scorer stunt;
+    // Heart-rate recovery when parked after a ride (STAT -> HEART).
+    core::hr::Recovery  hr_recovery;
 
     // Gear calibration: the guided run, and the learner that runs the rest
     // of the time (core/gearcal). `logic` is the one writer of both and of

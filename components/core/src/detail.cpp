@@ -207,6 +207,7 @@ const char* ev_name(Ev e) {
         case Ev::Suspect:     return "suspect";
         case Ev::Drop:        return "drop";
         case Ev::Heart:       return "heart";
+        case Ev::HrRecovery:  return "hr_recovery";
     }
     return "?";
 }
@@ -605,6 +606,11 @@ size_t format_event(char* buf, size_t n, const EventRow& e) {
             o.kv("bpm"); o.u(e.b);
             if (e.i) { o.kv("pulse"); o.s("none"); }
             break;
+        case Ev::HrRecovery:
+            o.kv("from"); o.u(e.b);
+            o.kv("drop_1min"); o.i(e.i);
+            if (e.a) { o.kv("drop_2min"); o.i(static_cast<int32_t>(e.x)); }
+            break;
         case Ev::None:
             break;
     }
@@ -741,6 +747,14 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
         }
     }
 
+    if (w.hrr_seq != p.hrr_seq) {
+        if (EventRow* e = emit(Ev::HrRecovery)) {
+            e->a = w.hrr_has2 ? 1 : 0;
+            e->b = w.hrr_from_bpm;
+            e->i = w.hrr_drop1;
+            e->x = static_cast<float>(w.hrr_drop2);
+        }
+    }
     if (w.hr_link != p.hr_link || w.hr_no_pulse != p.hr_no_pulse) {
         if (EventRow* e = emit(Ev::Heart)) {
             e->a = w.hr_link;

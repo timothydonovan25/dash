@@ -318,6 +318,12 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
             w.hr_link = h.link;
             w.hr_bpm = core::hr::fresh(h, now) ? h.bpm : 0;
             w.hr_no_pulse = core::hr::no_pulse(h, now);
+            const core::state::HrRecovery r = d.slots->hr_recovery.get();
+            w.hrr_seq = r.seq;
+            w.hrr_from_bpm = r.from_bpm;
+            w.hrr_drop1 = r.drop1;
+            w.hrr_drop2 = r.has_drop2 ? r.drop2 : 0;
+            w.hrr_has2 = r.has_drop2;
         }
         w.dropped[core::log::kMain] = d.blackbox ? d.blackbox->dropped() : 0;
         w.dropped[core::log::kImu] = d.imu_log ? d.imu_log->dropped() : 0;
@@ -824,6 +830,23 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         pin.valid = fo.valid;
         s.perf.update(pin, core::perf::for_units(metric));
         d.slots->perf.publish(s.perf.publish(metric));
+    }
+
+    // --- heart-rate recovery ---------------------------------------------
+    // Every pass, off the same fused speed as the timers: parked after a
+    // ride, the pulse at the stop against a minute later.
+    {
+        const core::state::Heart h = d.slots->heart.get();
+        const core::state::Engine eng = d.slots->engine.get();
+        core::hr::RecoveryInput ri;
+        ri.t_ms = now;
+        ri.mph = fo.mph;
+        ri.speed_ok = fo.valid;
+        ri.neutral = eng.neutral;
+        ri.engine_running = eng.rpm > 0.0f;
+        ri.bpm = core::hr::fresh(h, now) ? h.bpm : 0;
+        s.hr_recovery.update(ri);
+        d.slots->hr_recovery.publish(s.hr_recovery.publish());
     }
 
     // --- wheelies and stoppies -------------------------------------------

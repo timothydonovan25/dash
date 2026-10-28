@@ -319,6 +319,18 @@ int main() {
         format_event(b, sizeof b, out[0]);
         CHECK(!contains(b, "pulse=none"));
 
+        // Heart-rate recovery: the minute, then the second.
+        w.hrr_seq = 1; w.hrr_from_bpm = 158; w.hrr_drop1 = 31;
+        n = ew.watch(w, 119, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::HrRecovery);
+        format_event(b, sizeof b, out[0]);
+        CHECK(contains(b, "hr_recovery") && contains(b, "from=158 drop_1min=31"));
+        CHECK(!contains(b, "drop_2min"));
+        w.hrr_seq = 2; w.hrr_has2 = true; w.hrr_drop2 = 52;
+        n = ew.watch(w, 119, out, EventWatcher::kMaxPerPass);
+        format_event(b, sizeof b, out[0]);
+        CHECK(n == 1 && contains(b, "drop_1min=31 drop_2min=52"));
+
         w.stunt_seq = 1; w.stunt_kind = 1; w.stunt_grade = 2; w.stunt_ms = 2300;
         w.stunt_peak_deg = 34.0f; w.stunt_points = 410;
         n = ew.watch(w, 120, out, EventWatcher::kMaxPerPass);

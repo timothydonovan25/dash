@@ -300,6 +300,24 @@ struct Heart {
     uint16_t zone_max_bpm = 0;
 };
 
+// Heart-rate recovery (core::hr::Recovery), written by `logic`: how far the
+// pulse falls in the first minute (and second) of being parked after a ride.
+struct HrRecovery {
+    bool     measuring = false;   // parked, the minute running
+    uint32_t start_ms = 0;        // when the bike stopped
+    uint16_t start_bpm = 0;       // the pulse then
+    int16_t  live_drop = 0;       // start_bpm less the pulse now, while measuring
+    // The last finished measurement: the fall at one minute, and at two if
+    // the bike stayed parked that long (has_drop2).
+    int16_t  drop1 = 0;
+    int16_t  drop2 = 0;
+    uint16_t from_bpm = 0;        // its start_bpm
+    bool     has_drop2 = false;
+    int16_t  best_drop1 = 0;      // this power-on
+    uint16_t count = 0;           // one-minute results this power-on
+    uint16_t seq = 0;             // moves with each result (one minute or two)
+};
+
 // One lap's peaks, for LAPS (core::lap::Peaks, as kept per lap by logic).
 struct LapPeak {
     float mph = 0.0f;

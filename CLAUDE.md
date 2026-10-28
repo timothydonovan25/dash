@@ -269,6 +269,27 @@ lost its memory without a write failing. Render, the demo, the sim and
   task's high-water mark on DIAG → System and logs every task's at 10 s.
 - Physical units in the name: `_ms`, `_ft`, `_mph`, `_deg`, `_g`.
 
+## Logging is for RaceRender
+
+**Most of the logging exists so RaceRender can put the ride's data over the
+GoPro video afterwards.** The blackbox (`logs/*.csv`) is RaceRender's input:
+its first line is `# RaceRender Data`, then named columns and lap tags, and
+RaceRender lines it up with the video by time, so `Time` and `GpsUtc` matter
+more than any one channel. Keep that in mind with every new measurement:
+
+- If it belongs on the video (anything that changes while riding), it is a
+  blackbox column: one value per row at the log rate, named with its unit
+  (`_mph`, `_ft`... or the header's existing style), **appended at the end**.
+  RaceRender's overlay templates map by column name, so a name never changes
+  and a column never moves.
+- A missing reading is written so a gauge visibly drops (0, as `HR` does for
+  no pulse), never as the last value held: a frozen number on the video is a
+  lie that looks like data.
+- Per-event results (a perf run, a trick, heart-rate recovery) go to the
+  detail log's `_evt`; give one a column too only if it is worth showing on
+  the video while it happens.
+- The `detail/` files are for tuning the firmware, not for RaceRender.
+
 ## Testing
 
 Every change to `components/core/` needs a test. The host loop is fast —
@@ -278,7 +299,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 50 host tests, all passing.
+the media half of step 9 is written. 51 host tests, all passing.
 
 **`core/`** — all host-tested:
 
@@ -472,6 +493,12 @@ the media half of step 9 is written. 50 host tests, all passing.
   `core::hr::History`, a sample every 2 s, gaps for no pulse, owned by the
   wiring in PSRAM (`Deps::hr_history`) and fed by `ui::App` every Frame, so it
   fills whatever screen is up; `ui::HrGraph` draws it in zone colours.
+  **Recovery** (1.58, `core::hr::Recovery`, run by `logic`): the pulse at the
+  stop less the pulse a minute later (and two), **parked only**: within 15 s
+  of stopping the bike must be in neutral or the engine off, and stay
+  stopped and that way, after 2 min of riding above 5 mph since the last
+  one. Tight technical riding (stops in gear, feet down) never counts.
+  HEART's RECOVERY tile (live while it runs), a toast, `hr_recovery` in `_evt`.
   **Run against the rider's D2 Air X10 on the demo** (its
   spec sheet says ANT+, but its firmware broadcasts over Bluetooth too).
   The watch's Broadcast ends when it restarts: a dash that hears no

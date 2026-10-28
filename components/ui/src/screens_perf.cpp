@@ -289,7 +289,7 @@ constexpr Rect kHrStatus{14, 300, 452, 10};
 constexpr int16_t kHrTileY = 226;
 constexpr int16_t kHrTileX[4] = {14, 128, 242, 356};
 constexpr int16_t kHrTileW = 110, kHrTileH = 58;
-constexpr const char* kHrCaption[4] = {"AVERAGE", "HIGHEST", "LOWEST", "% OF MAX"};
+constexpr const char* kHrCaption[4] = {"AVERAGE", "HIGHEST", "LOWEST", "RECOVERY"};
 Rect hr_tile(int i) { return Rect{kHrTileX[i], kHrTileY, kHrTileW, kHrTileH}; }
 
 Color zone_color(uint8_t z) { return chrome::hr_zone_color(z); }
@@ -361,6 +361,13 @@ void HeartScreen::update(const Frame& f) {
             } else if (!live) {
                 std::snprintf(buf, sizeof buf, "%s: no reading", h.name[0] ? h.name : "Watch");
                 status_.configure(buf, color::kWarn, 1, Align::Left);
+            } else if (f.hr_recovery.measuring) {
+                // Parked after a ride: the minute running.
+                const uint32_t s = (f.t_ms - f.hr_recovery.start_ms) / 1000u;
+                std::snprintf(buf, sizeof buf, "Parked: recovery from %u bpm, %u:%02u",
+                              static_cast<unsigned>(f.hr_recovery.start_bpm),
+                              static_cast<unsigned>(s / 60u), static_cast<unsigned>(s % 60u));
+                status_.configure(buf, color::kAccent, 1, Align::Left);
             } else {
                 std::snprintf(buf, sizeof buf, "%s", h.name[0] ? h.name : "Watch connected");
                 status_.configure(buf, theme::secondary, 1, Align::Left);
@@ -379,7 +386,18 @@ void HeartScreen::update(const Frame& f) {
     tile(0, h.avg_bpm, h.readings > 0);
     tile(1, h.max_bpm, h.readings > 0);
     tile(2, h.min_bpm, h.readings > 0);
-    tile(3, max > 0 ? static_cast<uint16_t>(h.bpm * 100u / max) : 0, live);
+    // Recovery: the fall in the first minute parked, live while it runs,
+    // then the last result. Shown as a fall, so bigger is fitter.
+    const core::state::HrRecovery& r = f.hr_recovery;
+    if (r.measuring) {
+        std::snprintf(buf, sizeof buf, "%+d", -static_cast<int>(r.live_drop));
+        value_[3].configure(buf, color::kAccent, 3, Align::Center);
+    } else if (r.count > 0) {
+        std::snprintf(buf, sizeof buf, "%+d", -static_cast<int>(r.drop1));
+        value_[3].configure(buf, theme::primary, 3, Align::Center);
+    } else {
+        value_[3].configure("--", color::kDim, 3, Align::Center);
+    }
 }
 
 void HeartScreen::draw_background(Canvas& c) {

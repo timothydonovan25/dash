@@ -3448,5 +3448,51 @@ int main() {
         CHECK(graph_damaged());
     }
 
+    CASE("parked recovery: HEART's tile counts it live, and the result toasts elsewhere");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Stat, 5);
+        Frame f = busy_frame();
+        f.heart.link = core::state::Heart::Live;
+        f.heart.bpm = 140;
+        f.heart.at_ms = f.t_ms;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const Rect tile{356 + 4, 226 + 26, 102, 21};
+        const auto ink = [&]() {
+            size_t n = 0;
+            for (int16_t y = tile.y; y < tile.bottom(); ++y)
+                for (int16_t x = tile.x; x < tile.right(); ++x) {
+                    const Color c = s.px[static_cast<size_t>(y) * kScreenW + x];
+                    if (c != color::kBg && c != 0) ++n;
+                }
+            return n;
+        };
+        const size_t none = ink();               // "--"
+
+        f.hr_recovery.measuring = true;
+        f.hr_recovery.start_ms = f.t_ms - 42000;
+        f.hr_recovery.start_bpm = 158;
+        f.hr_recovery.live_drop = 18;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(ink() > none);                     // "-18"
+
+        // The result, seen from SPEED: a toast.
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        f.hr_recovery.measuring = false;
+        f.hr_recovery.drop1 = 31;
+        f.hr_recovery.from_bpm = 158;
+        f.hr_recovery.count = 1;
+        f.hr_recovery.seq = 1;
+        fx.app.update(f);
+        CHECK(fx.app.toast().active());
+    }
+
     return check::report("ui");
 }

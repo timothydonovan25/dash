@@ -248,6 +248,7 @@ enum class Ev : uint8_t {
     Suspect,      // a: core::fusion::Source bits now suspect
     Drop,         // a: Stream; i: rows dropped so far
     Heart,        // a: core::state::Heart::Link; b: bpm then (0 none)
+    HrRecovery,   // a: 1 with the two-minute fall; b: bpm at the stop; i: fall at 1 min; x: at 2
 };
 
 struct EventRow {
@@ -313,6 +314,11 @@ struct Watched {
     uint8_t  hr_link = 0;          // core::state::Heart::Link
     uint16_t hr_bpm = 0;
     bool     hr_no_pulse = false;  // core::hr::no_pulse
+    uint16_t hrr_seq = 0;          // core::state::HrRecovery
+    uint16_t hrr_from_bpm = 0;
+    int16_t  hrr_drop1 = 0;
+    int16_t  hrr_drop2 = 0;
+    bool     hrr_has2 = false;
 };
 
 // Turns one pass's Watched into the events since the last. The first call

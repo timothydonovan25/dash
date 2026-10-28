@@ -8,6 +8,22 @@
 using namespace core::hr;
 
 namespace {
+// A pass every 20 ms from `from` for `ms`, with `set` shaping each input.
+// The heart rate falls 0.5 bpm a second from 160 once the bike stops.
+template <class F>
+bool drive(Recovery& r, uint32_t from, uint32_t ms, F set) {
+    bool any = false;
+    for (uint32_t t = from; t < from + ms; t += 20) {
+        RecoveryInput in;
+        in.t_ms = t;
+        in.speed_ok = true;
+        in.engine_running = true;
+        set(in);
+        any = r.update(in) || any;
+    }
+    return any;
+}
+void riding(RecoveryInput& in) { in.mph = 25.0f; in.bpm = 160; }
 Addr addr(uint8_t last, uint8_t type = 0) {
     Addr a;
     a.type = type;
@@ -254,6 +270,90 @@ int main() {
         hist.update(h, t);
         CHECK(hist.range(lo, hi) && lo == 130 && hi == 130);
         CHECK(hist.at(0) == 0);
+    }
+
+    CASE("recovery: a ride, then parked in neutral: the fall at one minute and two");
+    {
+        Recovery r;
+        drive(r, 0, 180000, riding);                       // three minutes
+        const uint32_t stop = 180000;
+        auto parked = [&](RecoveryInput& in) {
+            in.mph = 0.0f;
+            in.neutral = in.t_ms >= stop + 4000;           // a few seconds to find neutral
+            in.bpm = static_cast<uint16_t>(160 - (in.t_ms - stop) / 2000);
+        };
+        CHECK(!drive(r, stop, 30000, parked));
+        CHECK(r.publish().measuring);
+        CHECK(r.publish().start_bpm == 160);
+        CHECK(r.publish().live_drop >= 14 && r.publish().live_drop <= 15);
+        CHECK(drive(r, stop + 30000, 31000, parked));      // the minute
+        CHECK(r.publish().drop1 == 30);
+        CHECK(r.publish().count == 1 && r.publish().best_drop1 == 30);
+        CHECK(!r.publish().has_drop2);
+        CHECK(drive(r, stop + 61000, 60000, parked));      // and the second
+        CHECK(r.publish().has_drop2 && r.publish().drop2 == 60);
+        CHECK(!r.publish().measuring);
+        CHECK(r.publish().seq == 2);
+    }
+
+    CASE("recovery: an engine switched off counts as parked, in gear or not");
+    {
+        Recovery r;
+        drive(r, 0, 150000, riding);
+        CHECK(drive(r, 150000, 61000, [](RecoveryInput& in) {
+            in.mph = 0.0f; in.engine_running = false; in.bpm = 140;
+        }));
+        CHECK(r.publish().drop1 == 0 && r.publish().count == 1);
+    }
+
+    CASE("recovery: tight technical riding never counts");
+    {
+        Recovery r;
+        drive(r, 0, 150000, riding);
+        // Stop and go at walking pace, feet down, in gear with it running:
+        // stops of up to 40 s, never parked.
+        uint32_t t = 150000;
+        for (int i = 0; i < 10; ++i) {
+            CHECK(!drive(r, t, 8000, [](RecoveryInput& in) { in.mph = 3.0f; in.bpm = 150; }));
+            t += 8000;
+            CHECK(!drive(r, t, 40000, [](RecoveryInput& in) { in.mph = 0.0f; in.bpm = 150; }));
+            t += 40000;
+        }
+        CHECK(r.publish().count == 0 && !r.publish().measuring);
+        // A stall in a section: engine off for a moment, then off again in gear.
+        CHECK(!drive(r, t, 3000, [](RecoveryInput& in) { in.mph = 0.0f; in.engine_running = false; in.bpm = 150; }));
+        t += 3000;
+        CHECK(!drive(r, t, 60000, [](RecoveryInput& in) { in.mph = 2.0f; in.bpm = 150; }));
+        CHECK(r.publish().count == 0);
+    }
+
+    CASE("recovery: moving off, no ride first, or no pulse at the minute: no result");
+    {
+        auto park = [](RecoveryInput& in) { in.mph = 0.0f; in.neutral = true; in.bpm = 150; };
+        Recovery a;
+        drive(a, 0, 150000, riding);
+        CHECK(!drive(a, 150000, 30000, park));
+        CHECK(!drive(a, 180000, 5000, riding));            // rode off at 30 s
+        CHECK(a.publish().count == 0 && !a.publish().measuring);
+
+        Recovery b;
+        drive(b, 0, 60000, riding);                        // a minute is not a ride
+        CHECK(!drive(b, 60000, 70000, park));
+        CHECK(b.publish().count == 0);
+
+        Recovery c;
+        drive(c, 0, 150000, riding);
+        CHECK(!drive(c, 150000, 59000, park));
+        CHECK(!drive(c, 209000, 3000, [](RecoveryInput& in) { in.mph = 0.0f; in.neutral = true; }));
+        CHECK(c.publish().count == 0);
+
+        // After a result, the next needs another ride.
+        Recovery d;
+        drive(d, 0, 150000, riding);
+        CHECK(drive(d, 150000, 61000, park));
+        drive(d, 211000, 30000, riding);
+        CHECK(!drive(d, 241000, 70000, park));
+        CHECK(d.publish().count == 1);
     }
 
     CASE("zones by percent of max");

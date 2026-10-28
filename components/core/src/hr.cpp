@@ -200,6 +200,82 @@ bool History::range(uint8_t& lo, uint8_t& hi) const {
     return any;
 }
 
+void Recovery::end() {
+    phase_ = Phase::Idle;
+    out_.measuring = false;
+    out_.live_drop = 0;
+}
+
+bool Recovery::update(const RecoveryInput& in) {
+    // Riding time, a pass at a time; a gap (a stalled task) counts for at
+    // most a second.
+    if (have_t_) {
+        uint32_t dt = in.t_ms - last_t_;
+        if (dt > 1000) dt = 1000;
+        if (in.speed_ok && in.mph >= kRideMph) ride_ms_ += dt;
+    }
+    have_t_ = true;
+    last_t_ = in.t_ms;
+
+    const bool stopped = in.speed_ok && in.mph < kStopMph;
+    const bool parked = stopped && (in.neutral || !in.engine_running);
+    const bool moving = in.speed_ok && !stopped;
+    const uint32_t since = in.t_ms - out_.start_ms;
+    bool result = false;
+
+    switch (phase_) {
+        case Phase::Idle:
+            // The moment it stops, after a ride, with a pulse to start from.
+            if (stopped && was_moving_ && ride_ms_ >= kRideMinMs && in.bpm != 0) {
+                phase_ = Phase::Stopped;
+                out_.start_ms = in.t_ms;
+                out_.start_bpm = in.bpm;
+            }
+            break;
+        case Phase::Stopped:
+            if (!stopped || since > kParkGraceMs) {
+                end();                     // rode on, or stayed in gear: not parked
+            } else if (parked) {
+                phase_ = Phase::Measuring;
+                out_.measuring = true;
+                have1_ = false;
+                ride_ms_ = 0;              // the next one needs a ride of its own
+            }
+            break;
+        case Phase::Measuring:
+            if (!parked) {
+                end();                     // moving off, or in gear with it running
+                break;
+            }
+            if (in.bpm != 0) out_.live_drop = static_cast<int16_t>(out_.start_bpm - in.bpm);
+            if (!have1_ && since >= kRecoveryMs) {
+                if (in.bpm == 0) {         // the watch has no pulse: no result
+                    end();
+                    break;
+                }
+                have1_ = true;
+                out_.drop1 = static_cast<int16_t>(out_.start_bpm - in.bpm);
+                out_.from_bpm = out_.start_bpm;
+                out_.has_drop2 = false;
+                if (out_.count == 0 || out_.drop1 > out_.best_drop1) out_.best_drop1 = out_.drop1;
+                ++out_.count;
+                ++out_.seq;
+                result = true;
+            } else if (have1_ && since >= 2 * kRecoveryMs) {
+                if (in.bpm != 0) {
+                    out_.drop2 = static_cast<int16_t>(out_.start_bpm - in.bpm);
+                    out_.has_drop2 = true;
+                    ++out_.seq;
+                    result = true;
+                }
+                end();
+            }
+            break;
+    }
+    was_moving_ = moving;
+    return result;
+}
+
 uint8_t zone(uint16_t bpm, uint16_t max_bpm) {
     if (max_bpm == 0 || bpm == 0) return 0;
     const uint32_t pct = bpm * 100u / max_bpm;

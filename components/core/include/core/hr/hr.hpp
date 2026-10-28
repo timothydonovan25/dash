@@ -159,6 +159,49 @@ private:
     uint32_t seq_ = 0;
 };
 
+// Heart-rate recovery: the pulse when the bike stopped, less the pulse a
+// minute later (and two, if it stays parked), the usual fitness measure.
+//
+// Parked only. Tight technical riding stops all the time, feet down and in
+// gear, and its pauses are not rest: a stop counts only if within
+// kParkGraceMs the bike is in neutral or the engine is off, and it stays
+// stopped and that way for the minute. It must follow kRideMinMs of riding
+// (above kRideMph) since the last parked minute, so pushing the bike across
+// the pits is not a ride. A missing pulse at either end, or moving off,
+// gives no result.
+inline constexpr float    kStopMph     = 1.0f;
+inline constexpr float    kRideMph     = 5.0f;
+inline constexpr uint32_t kRideMinMs   = 120000;
+inline constexpr uint32_t kParkGraceMs = 15000;
+inline constexpr uint32_t kRecoveryMs  = 60000;
+
+struct RecoveryInput {
+    uint32_t t_ms = 0;
+    float    mph = 0.0f;
+    bool     speed_ok = false;    // no speed, no telling it is parked
+    bool     neutral = false;
+    bool     engine_running = false;
+    uint16_t bpm = 0;             // a fresh reading with a pulse, else 0
+};
+
+class Recovery {
+public:
+    // Every logic pass. True when a result lands (one minute or two).
+    bool update(const RecoveryInput& in);
+    const state::HrRecovery& publish() const { return out_; }
+
+private:
+    enum class Phase : uint8_t { Idle, Stopped, Measuring };
+    void end();
+    Phase    phase_ = Phase::Idle;
+    bool     was_moving_ = false;
+    bool     have_t_ = false;
+    uint32_t last_t_ = 0;
+    uint32_t ride_ms_ = 0;
+    bool     have1_ = false;
+    state::HrRecovery out_{};
+};
+
 // Heart-rate zone 1-5 by percent of the rider's maximum (50-60 % is zone 1,
 // 90 % and over zone 5), 0 below zone 1 or with no maximum.
 uint8_t zone(uint16_t bpm, uint16_t max_bpm);
