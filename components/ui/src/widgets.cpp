@@ -1,5 +1,6 @@
 #include "ui/widgets.hpp"
 #include "core/units/units.hpp"
+#include "ui/chrome.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include <cmath>
@@ -495,6 +496,88 @@ void Sparkline::render(Canvas& c) {
         if (i > 0) c.draw_line(prev_x, prev_y, x, y, color_);
         prev_x = x;
         prev_y = y;
+    }
+}
+
+// --- HrGraph -------------------------------------------------------------
+
+void HrGraph::set(uint16_t zone_max_bpm) {
+    const bool a = assign_t(max_, zone_max_bpm);
+    const bool b = src_ && assign_t(seq_, src_->seq());
+    if (a || b) touch();
+}
+
+void HrGraph::render(Canvas& c) {
+    using core::hr::History;
+    c.fill_rect(bounds, color::kPanel);
+    // A margin for the scale on the left and the time under the line.
+    constexpr int16_t kLeft = 26, kBottom = 12, kTop = 4;
+    const Rect plot{static_cast<int16_t>(bounds.x + kLeft), static_cast<int16_t>(bounds.y + kTop),
+                    static_cast<int16_t>(bounds.w - kLeft - 4),
+                    static_cast<int16_t>(bounds.h - kTop - kBottom)};
+    const int16_t label_y = static_cast<int16_t>(plot.bottom() + 3);
+    c.draw_text(plot.x, label_y, "10 min", color::kDim, 1, Align::Left);
+    c.draw_text(plot.right(), label_y, "now", color::kDim, 1, Align::Right);
+    // A tick every two minutes.
+    for (int m = 1; m < 5; ++m) {
+        const int16_t x = static_cast<int16_t>(plot.x + plot.w * m / 5);
+        c.draw_vline(x, plot.bottom(), 3, color::kGrid);
+    }
+
+    uint8_t lo8 = 0, hi8 = 0;
+    if (!src_ || !src_->range(lo8, hi8)) {
+        c.draw_text(plot.cx(), static_cast<int16_t>(plot.cy() - 3), "no readings yet",
+                    color::kDim, 1, Align::Center);
+        return;
+    }
+    // Ten bpm either side, on tens, and never under 40 tall: a steady
+    // 100 is a flat line in the middle, not a jagged one filling the box.
+    int lo = (lo8 - 10) / 10 * 10;
+    int hi = (hi8 + 19) / 10 * 10;
+    if (hi - lo < 40) {
+        const int mid = (hi + lo) / 2;
+        lo = mid - 20;
+        hi = mid + 20;
+    }
+    if (lo < 0) { hi -= lo; lo = 0; }
+    const auto y_of = [&](int v) {
+        return static_cast<int16_t>(plot.bottom() - 1 - (v - lo) * (plot.h - 1) / (hi - lo));
+    };
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "%d", hi);
+    c.draw_text(static_cast<int16_t>(bounds.x + 2), plot.y, buf, color::kDim, 1, Align::Left);
+    std::snprintf(buf, sizeof buf, "%d", lo);
+    c.draw_text(static_cast<int16_t>(bounds.x + 2), static_cast<int16_t>(plot.bottom() - 7), buf,
+                color::kDim, 1, Align::Left);
+
+    // The zone edges that fall inside the scale, dotted.
+    if (max_ > 0) {
+        for (int pct = 50; pct <= 90; pct += 10) {
+            const int v = max_ * pct / 100;
+            if (v <= lo || v >= hi) continue;
+            const int16_t y = y_of(v);
+            for (int16_t x = plot.x; x < plot.right(); x += 4) c.draw_hline(x, y, 2, color::kGrid);
+        }
+    }
+
+    int16_t px = 0, py = 0;
+    bool have = false;
+    for (size_t i = 0; i < History::kSamples; ++i) {
+        const uint8_t v = src_->at(i);
+        if (v == 0) { have = false; continue; }
+        const int16_t x = static_cast<int16_t>(plot.x + (plot.w - 1) * static_cast<int>(i) /
+                                                         static_cast<int>(History::kSamples - 1));
+        const int16_t y = y_of(v);
+        const Color col = chrome::hr_zone_color(core::hr::zone(v, max_));
+        if (have) {
+            c.draw_line(px, py, x, y, col);
+            c.draw_line(px, static_cast<int16_t>(py + 1), x, static_cast<int16_t>(y + 1), col);
+        } else {
+            c.fill_rect(Rect{x, y, 2, 2}, col);   // a lone sample still shows
+        }
+        px = x;
+        py = y;
+        have = true;
     }
 }
 

@@ -4,6 +4,7 @@
 // belong to. `nav` decides where the rider is, the App decides what that
 // means, and the render task calls `update()` then `render()` once a frame.
 #pragma once
+#include "core/hr/hr.hpp"
 #include <algorithm>
 #include <cstddef>
 #include "ui/screens.hpp"
@@ -115,6 +116,8 @@ public:
 
     // Wiring for the things a screen reads but does not own. The App keeps
     // it and hands it to the screen each time that screen is built.
+    // The heart-rate history STAT -> HEART graphs; the App writes it.
+    void set_hr_history(core::hr::History* h) { hr_history_ = h; }
     void set_trip_source(const IPointSource* s);
     void set_track_source(const IPointSource* s);
     // `peaks`, when given, runs parallel to `laps`: each lap's top speed,
@@ -154,6 +157,10 @@ private:
     size_t                  lap_count_ = 0;
     uint32_t                best_lap_ = 0;
     const core::state::LapPeak* lap_peaks_ = nullptr;
+    // STAT -> HEART's graph: the last ten minutes, fed every Frame. Owned by
+    // the wiring (PSRAM), not by the App: the App is on render's stack and
+    // must stay within 1 kB of its screen slot.
+    core::hr::History*      hr_history_ = nullptr;
     core::config::Settings* settings_ = nullptr;
     // CONFIG's submenu and cursor, kept while the gear calibration page has
     // its place, and given back when CONFIG is built again.

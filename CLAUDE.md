@@ -468,7 +468,11 @@ the media half of step 9 is written. 50 host tests, all passing.
   contact is published as bpm 0 (`Measurement::pulse()`), and `no_pulse()`
   (live, a pulse seen on this link, readings arriving, none with a pulse)
   for 10 s raises NO PULSE, first of all the alerts; `_evt` logs
-  `pulse=none`. **Run against the rider's D2 Air X10 on the demo** (its
+  `pulse=none`. STAT → HEART graphs the last ten minutes (1.57):
+  `core::hr::History`, a sample every 2 s, gaps for no pulse, owned by the
+  wiring in PSRAM (`Deps::hr_history`) and fed by `ui::App` every Frame, so it
+  fills whatever screen is up; `ui::HrGraph` draws it in zone colours.
+  **Run against the rider's D2 Air X10 on the demo** (its
   spec sheet says ANT+, but its firmware broadcasts over Bluetooth too).
   The watch's Broadcast ends when it restarts: a dash that hears no
   heart-rate adverts (the log's 30 s `watch search` line) is a watch that
@@ -481,7 +485,7 @@ the media half of step 9 is written. 50 host tests, all passing.
 
 **`dash_hal/`** — the abstract interfaces, including `NullEngine`.
 
-**`ui/`** — canvas, 22 widgets, every screen, the render loop, laid out
+**`ui/`** — canvas, 23 widgets, every screen, the render loop, laid out
 for a **landscape 480x320** panel. Builds and renders on the host; `test_ui`
 draws every screen against a fake Frame. `ui/chrome.hpp` holds the shared
 furniture — titles, rules, framed tiles — so fifteen screens do not each

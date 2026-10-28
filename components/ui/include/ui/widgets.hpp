@@ -6,6 +6,7 @@
 // a dashboard, because one of them means stop riding.
 #pragma once
 #include <cstdint>
+#include "core/hr/hr.hpp"
 #include "core/slip/slip.hpp"
 #include "ui/widget.hpp"
 #include "ui/album_art.hpp"
@@ -621,6 +622,23 @@ public:
 private:
     core::slip::Kind kind_ = core::slip::Kind::None;
     uint8_t          pct_  = 0;
+};
+
+// STAT -> HEART's last ten minutes: the line in the colour of each stretch's
+// zone, broken where there was no pulse, faint lines at the zone edges, and
+// a scale fitted to the range ridden. Reads a core::hr::History it does not
+// own (ui::App keeps it, so it outlives the screen) and redraws when a
+// sample lands, every 2 s, or the max HR changes.
+class HrGraph : public Widget {
+public:
+    void set_source(const core::hr::History* h) { if (h != src_) { src_ = h; touch(); } }
+    void set(uint16_t zone_max_bpm);
+    void render(Canvas& c) override;
+
+private:
+    const core::hr::History* src_ = nullptr;
+    uint32_t seq_ = 0;
+    uint16_t max_ = 0;
 };
 
 class DevTag : public Widget {

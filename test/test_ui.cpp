@@ -286,6 +286,7 @@ struct Fixture {
     RecordingSink          sink;
     SystemInfo             sys;
     Context                ctx;
+    core::hr::History      hr_history;
     App                    app;
     size_t                 applied = 0;     // posted commands apply_posted() has seen
 
@@ -300,6 +301,7 @@ struct Fixture {
         // the screen each case is trying to look at.
         settings.splash = false;
         app.bind_settings(&settings);
+        app.set_hr_history(&hr_history);
     }
 };
 
@@ -3378,6 +3380,72 @@ int main() {
             f.t_ms += core::hr::kStaleMs;                          // gone quiet
             CHECK(ink_at(f, nullptr) == dashes);
         }
+    }
+
+    CASE("HEART graphs the last ten minutes, and repaints it only when a sample lands");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Stat, 5);
+        CHECK(std::strcmp(fx.app.current().name(), "HEART") == 0);
+        const Rect graph{14, 112, 452, 104};
+        const auto ink = [&]() {
+            size_t n = 0;
+            for (int16_t y = graph.y; y < graph.bottom(); ++y) {
+                for (int16_t x = graph.x; x < graph.right(); ++x) {
+                    const Color c = s.px[static_cast<size_t>(y) * kScreenW + x];
+                    if (c != color::kPanel && c != color::kBg && c != 0) ++n;
+                }
+            }
+            return n;
+        };
+        Frame f = busy_frame();
+        f.t_ms = 1000000;                       // on a 2 s step
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const size_t empty = ink();             // the labels and "no readings yet"
+
+        // Five minutes at 110-150, ridden on another screen.
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        f.heart.link = core::state::Heart::Live;
+        f.heart.worn = true;
+        f.heart.zone_max_bpm = 185;
+        for (int i = 0; i < 600; ++i) {
+            f.t_ms += 500;
+            f.heart.bpm = static_cast<uint16_t>(130 + 20 * std::sin(i / 30.0f));
+            f.heart.at_ms = f.t_ms;
+            fx.app.update(f);
+        }
+        go_to(fx.app, s.canvas, Mode::Stat, 5);
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(ink() > empty + 300);             // the line is there, kept off-screen
+        fx.app.clear_full_repaint();
+        send_damage(fx.app, s.px);
+
+        // Within the step, a reading that changes only the number: the graph
+        // is not resent. Across it, the graph is.
+        const auto graph_damaged = [&]() {
+            App::Damage d[App::kMaxDamage];
+            const size_t n = fx.app.damage(d, App::kMaxDamage);
+            bool hit = false;
+            for (size_t k = 0; k < n; ++k) hit = hit || d[k].r.intersects(Rect{14, 140, 452, 50});
+            send_damage(fx.app, s.px);
+            return hit;
+        };
+        f.t_ms += 100;
+        f.heart.bpm = 141;
+        f.heart.at_ms = f.t_ms;
+        fx.app.update(f);
+        CHECK(!graph_damaged());
+        f.t_ms += 2000;
+        f.heart.at_ms = f.t_ms;
+        fx.app.update(f);
+        CHECK(graph_damaged());
     }
 
     return check::report("ui");

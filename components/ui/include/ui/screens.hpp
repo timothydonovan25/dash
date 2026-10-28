@@ -363,6 +363,8 @@ private:
 class HeartScreen final : public Screen {
 public:
     const char* name() const override { return "HEART"; }
+    // ui::App's ten minutes, which outlive this screen.
+    void set_history(const core::hr::History* h) { graph_.set_source(h); }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
     void draw_background(Canvas& c) override;
@@ -370,9 +372,9 @@ public:
 
 private:
     static constexpr int kTiles = 4;
-    Label   bpm_;       // the reading, huge
+    Label   bpm_;       // the reading, big
     Label   zone_;      // Z1..Z5
-    Bar     bar_;       // bpm against the max
+    HrGraph graph_;     // the last ten minutes, from the App's History
     Label   status_;    // the link, the watch's name
     Label   value_[kTiles];
     Widget* list_[4 + kTiles] = {};

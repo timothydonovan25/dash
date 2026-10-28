@@ -66,6 +66,7 @@ services::LapHistory   g_lap_history;
 EXT_RAM_BSS_ATTR core::delta::Tracker g_delta;
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
+EXT_RAM_BSS_ATTR core::hr::History g_hr_history;
 
 drivers::EspClock g_clock;
 demo::P4Panel     g_panel;
@@ -190,6 +191,7 @@ extern "C" void app_main(void) {
     g_deps.delta       = &g_delta;
     g_deps.trip_trace  = &g_trip_trace;
     g_deps.lap_trace   = &g_lap_trace;
+    g_deps.hr_history  = &g_hr_history;
     g_deps.commands    = &g_commands;
 
     // demo_render keeps the table from here on; this demo has no keeper.

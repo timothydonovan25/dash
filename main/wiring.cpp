@@ -36,6 +36,7 @@ ui::SystemInfo         g_system;
 // Internal RAM is better spent on the panel's DMA buffer and the stacks.
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_trip_trace;
 EXT_RAM_BSS_ATTR core::state::TrackBuffer<core::state::TrackPoint, 4096> g_lap_trace;
+EXT_RAM_BSS_ATTR core::hr::History                                     g_hr_history;
 EXT_RAM_BSS_ATTR core::log::Ring<core::log::Record, 512>                 g_blackbox;
 // The detail log's rings (core/log/detail.hpp), ~230 kB together.
 EXT_RAM_BSS_ATTR core::log::ImuRing                                      g_imu_log;
@@ -142,6 +143,7 @@ services::Deps& build() {
     g_deps.system     = &g_system;
     g_deps.trip_trace = &g_trip_trace;
     g_deps.lap_trace  = &g_lap_trace;
+    g_deps.hr_history = &g_hr_history;
     g_deps.blackbox   = &g_blackbox;
     g_deps.imu_log    = &g_imu_log;
     g_deps.tach_log   = &g_tach_log;

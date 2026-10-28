@@ -78,6 +78,7 @@ void render_task_impl(void* arg) {
 
     ui::App app(ctx);
     app.bind_settings(d.settings);
+    app.set_hr_history(d.hr_history);
 
     TraceSource trip_src(d.trip_trace);
     TraceSource lap_src(d.lap_trace);

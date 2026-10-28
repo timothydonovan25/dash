@@ -631,6 +631,8 @@ int main() {
     static TraceSource trip_src(&trip_trace);
     static TraceSource lap_src(&lap_trace);
     app.set_trip_source(&trip_src);
+    static core::hr::History hr_history;
+    app.set_hr_history(&hr_history);
     app.set_track_source(&lap_src);
 
     std::vector<ui::Color> px(static_cast<size_t>(ui::kScreenW) * ui::kScreenH, 0);

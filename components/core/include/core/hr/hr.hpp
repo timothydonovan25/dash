@@ -133,6 +133,32 @@ bool fresh(const state::Heart& h, uint32_t now_ms);
 // the rider. The alert waits kNoPulseMs of this.
 bool no_pulse(const state::Heart& h, uint32_t now_ms);
 
+// The last ten minutes, a sample every 2 s, for STAT -> HEART's graph. Fed
+// every Frame by ui::App, which outlives the screen; a sample is the reading
+// at its step if it is fresh and has a pulse, else 0 (a gap in the line).
+// Steps no Frame arrived for are gaps too.
+class History {
+public:
+    static constexpr size_t   kSamples = 300;
+    static constexpr uint32_t kStepMs  = 2000;
+
+    void update(const state::Heart& h, uint32_t now_ms);
+    // 0 the oldest, kSamples - 1 the newest; 0 for no reading.
+    uint8_t at(size_t i) const { return s_[(head_ + i) % kSamples]; }
+    // Moves with every sample: what a graph compares to know it must redraw.
+    uint32_t seq() const { return seq_; }
+    // Lowest and highest reading held; false for none.
+    bool range(uint8_t& lo, uint8_t& hi) const;
+
+private:
+    void push(uint8_t v);
+    uint8_t  s_[kSamples] = {};
+    size_t   head_ = 0;      // the oldest, and the next written
+    uint32_t step_ = 0;
+    bool     started_ = false;
+    uint32_t seq_ = 0;
+};
+
 // Heart-rate zone 1-5 by percent of the rider's maximum (50-60 % is zone 1,
 // 90 % and over zone 5), 0 below zone 1 or with no maximum.
 uint8_t zone(uint16_t bpm, uint16_t max_bpm);

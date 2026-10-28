@@ -280,9 +280,11 @@ bool StuntScreen::handle(const core::nav::InputEvent& e) {
 
 // --- HeartScreen --------------------------------------------------------
 namespace {
-constexpr Rect kHrBpm{14, 38, 360, 140};
-constexpr Rect kHrZone{380, 104, 86, 42};
-constexpr Rect kHrBar{14, 190, 452, 14};
+// The reading and its zone across the top, the last ten minutes under them,
+// the session's numbers in tiles, the link along the bottom.
+constexpr Rect kHrBpm{14, 30, 226, 74};      // scale 10: "199" is 178 px
+constexpr Rect kHrZone{346, 34, 120, 42};   // right-aligned to the edge
+constexpr Rect kHrGraph{14, 112, 452, 104};
 constexpr Rect kHrStatus{14, 300, 452, 10};
 constexpr int16_t kHrTileY = 226;
 constexpr int16_t kHrTileX[4] = {14, 128, 242, 356};
@@ -295,16 +297,15 @@ Color zone_color(uint8_t z) { return chrome::hr_zone_color(z); }
 
 void HeartScreen::enter(Canvas&) {
     bpm_.set_bounds(kHrBpm);
-    bpm_.configure("--", color::kDim, 20, Align::Right);
+    bpm_.configure("--", color::kDim, 10, Align::Right);
     zone_.set_bounds(kHrZone);
-    zone_.configure("", color::kDim, 6, Align::Center);
-    bar_.set_bounds(kHrBar);
-    bar_.configure(color::kGood, color::kAlarm, 0.9f);
+    zone_.configure("", color::kDim, 6, Align::Right);
+    graph_.set_bounds(kHrGraph);
     status_.set_bounds(kHrStatus);
     status_.configure("", theme::secondary, 1, Align::Left);
     list_[0] = &bpm_;
     list_[1] = &zone_;
-    list_[2] = &bar_;
+    list_[2] = &graph_;
     list_[3] = &status_;
     for (int i = 0; i < kTiles; ++i) {
         const Rect t = hr_tile(i);
@@ -325,20 +326,17 @@ void HeartScreen::update(const Frame& f) {
     const uint8_t z = live ? core::hr::zone(h.bpm, max) : 0;
     if (live) {
         std::snprintf(buf, sizeof buf, "%u", static_cast<unsigned>(h.bpm));
-        bpm_.configure(buf, zone_color(z), 20, Align::Right);
+        bpm_.configure(buf, zone_color(z), 10, Align::Right);
     } else {
-        bpm_.configure("--", color::kDim, 20, Align::Right);
+        bpm_.configure("--", color::kDim, 10, Align::Right);
     }
     if (z > 0) {
         std::snprintf(buf, sizeof buf, "Z%u", static_cast<unsigned>(z));
-        zone_.configure(buf, zone_color(z), 6, Align::Center);
+        zone_.configure(buf, zone_color(z), 6, Align::Right);
     } else {
-        zone_.configure("", color::kDim, 6, Align::Center);
+        zone_.configure("", color::kDim, 6, Align::Right);
     }
-    // Half the max to the max: the zones' own range.
-    float frac = 0.0f;
-    if (live && max > 0) frac = (static_cast<float>(h.bpm) / max - 0.5f) * 2.0f;
-    bar_.set(frac < 0.0f ? 0.0f : frac > 1.0f ? 1.0f : frac, live && max > 0);
+    graph_.set(max);
 
     switch (h.link) {
         case H::Off:
@@ -385,18 +383,16 @@ void HeartScreen::update(const Frame& f) {
 }
 
 void HeartScreen::draw_background(Canvas& c) {
-    c.draw_text(static_cast<int16_t>(kHrZone.x + kHrZone.w / 2), 70, "BPM",
-                theme::secondary, 3, Align::Center);
+    c.draw_text(static_cast<int16_t>(kHrBpm.right() + 6), static_cast<int16_t>(kHrBpm.bottom() - 18),
+                "BPM", theme::secondary, 2, Align::Left);
+    c.draw_text(static_cast<int16_t>(kHrZone.right()), static_cast<int16_t>(kHrZone.bottom() + 10),
+                "ZONE", theme::secondary, 2, Align::Right);
     for (int i = 0; i < kTiles; ++i) {
         const Rect t = hr_tile(i);
         c.draw_round_rect(t, chrome::kRadius, theme::rule);
         c.draw_text(static_cast<int16_t>(t.x + 8), static_cast<int16_t>(t.y + 8), kHrCaption[i],
                     theme::secondary, 1, Align::Left);
     }
-    c.draw_text(kHrBar.x, static_cast<int16_t>(kHrBar.bottom() + 6), "50%",
-                theme::secondary, 1, Align::Left);
-    c.draw_text(static_cast<int16_t>(kHrBar.right()), static_cast<int16_t>(kHrBar.bottom() + 6),
-                "MAX", theme::secondary, 1, Align::Right);
 }
 
 WidgetList HeartScreen::widgets() { return WidgetList{list_, 4 + kTiles}; }

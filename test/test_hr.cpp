@@ -204,6 +204,58 @@ int main() {
         CHECK(!no_pulse(h, 10500));
     }
 
+    CASE("ten minutes of history: a sample a step, gaps where there was no pulse");
+    {
+        core::state::Heart h;
+        h.link = core::state::Heart::Live;
+        History hist;
+        uint8_t lo = 0, hi = 0;
+        CHECK(!hist.range(lo, hi));
+
+        // 100 bpm for a minute, a frame every 20 ms.
+        uint32_t t = 1000;
+        for (; t < 61000; t += 20) {
+            h.bpm = 100;
+            h.at_ms = t;
+            hist.update(h, t);
+        }
+        CHECK(hist.at(History::kSamples - 1) == 100);
+        CHECK(hist.at(History::kSamples - 31) == 100);   // 1 s to 61 s: 31 steps
+        CHECK(hist.at(History::kSamples - 32) == 0);     // before it started
+        const uint32_t seq = hist.seq();
+        hist.update(h, t);                                // the same step: nothing
+        CHECK(hist.seq() == seq);
+
+        // Off the wrist for 10 s, then 130.
+        for (; t < 71000; t += 20) {
+            h.bpm = 0;
+            h.at_ms = t;
+            hist.update(h, t);
+        }
+        t = 72000;                                        // the next step
+        h.bpm = 130;
+        h.at_ms = t;
+        hist.update(h, t);
+        CHECK(hist.at(History::kSamples - 1) == 130);
+        CHECK(hist.at(History::kSamples - 2) == 0);
+        CHECK(hist.range(lo, hi) && lo == 100 && hi == 130);
+
+        // No frames for 20 s (render stalled): ten gaps, then the reading.
+        t += 20000;
+        h.at_ms = t;
+        hist.update(h, t);
+        CHECK(hist.at(History::kSamples - 1) == 130);
+        CHECK(hist.at(History::kSamples - 2) == 0 && hist.at(History::kSamples - 10) == 0);
+        CHECK(hist.at(History::kSamples - 11) == 130);
+
+        // An hour away: all gaps but the last.
+        t += 3600000;
+        h.at_ms = t;
+        hist.update(h, t);
+        CHECK(hist.range(lo, hi) && lo == 130 && hi == 130);
+        CHECK(hist.at(0) == 0);
+    }
+
     CASE("zones by percent of max");
     {
         CHECK(zone(90, 190) == 0);

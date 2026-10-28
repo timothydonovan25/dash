@@ -172,6 +172,7 @@ void render_task(void* arg) {
     // region IDF only adds then. Internal either way: every frame touches it.
     ui::App app(ctx);
     app.bind_settings(d.settings);
+    app.set_hr_history(d.hr_history);
 
     TraceSource trip_src(d.trip_trace);
     TraceSource lap_src(d.lap_trace);

@@ -157,7 +157,12 @@ void App::build(ScreenId id) {
         case ScreenId::Attitude:   s = make<AttitudeScreen>(slot_); break;
         case ScreenId::Perf:       s = make<PerfScreen>(slot_); break;
         case ScreenId::Stunt:      s = make<StuntScreen>(slot_); break;
-        case ScreenId::Heart:      s = make<HeartScreen>(slot_); break;
+        case ScreenId::Heart: {
+            auto* t = make<HeartScreen>(slot_);
+            t->set_history(hr_history_);
+            s = t;
+            break;
+        }
         case ScreenId::DiagMenu:   s = make<DiagMenuScreen>(slot_); break;
         case ScreenId::Sensors:    s = make<SensorsScreen>(slot_); break;
         case ScreenId::Gps:        s = make<GpsScreen>(slot_); break;
@@ -545,6 +550,8 @@ void App::update_toast(const core::state::Frame& f) {
 DASH_BIG_FRAME_BEGIN   // the sweep's Frame copy (1.1 kB); runs on render's 8 kB + App stack
 void App::update(const core::state::Frame& f) {
     if (!active_) return;
+    // STAT -> HEART's ten minutes, kept whatever screen is up.
+    if (hr_history_) hr_history_->update(f.heart, f.t_ms);
     update_alert(f);
     update_slip(f);
     update_toast(f);

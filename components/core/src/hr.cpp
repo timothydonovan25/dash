@@ -163,6 +163,43 @@ bool no_pulse(const state::Heart& h, uint32_t now_ms) {
            age < static_cast<int32_t>(kStaleMs);
 }
 
+void History::push(uint8_t v) {
+    s_[head_] = v;
+    head_ = (head_ + 1) % kSamples;
+    ++seq_;
+}
+
+void History::update(const state::Heart& h, uint32_t now_ms) {
+    const uint32_t step = now_ms / kStepMs;
+    const uint8_t v = fresh(h, now_ms) ? static_cast<uint8_t>(h.bpm > 255 ? 255 : h.bpm) : 0;
+    if (!started_) {
+        started_ = true;
+        step_ = step;
+        push(v);
+        return;
+    }
+    const int32_t ahead = static_cast<int32_t>(step - step_);
+    if (ahead <= 0) return;
+    // Steps nobody saw are gaps; more than the window is just a clear one.
+    const uint32_t gaps = static_cast<uint32_t>(ahead) - 1;
+    for (uint32_t i = 0; i < gaps && i < kSamples; ++i) push(0);
+    push(v);
+    step_ = step;
+}
+
+bool History::range(uint8_t& lo, uint8_t& hi) const {
+    bool any = false;
+    lo = 255;
+    hi = 0;
+    for (uint8_t v : s_) {
+        if (v == 0) continue;
+        any = true;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    return any;
+}
+
 uint8_t zone(uint16_t bpm, uint16_t max_bpm) {
     if (max_bpm == 0 || bpm == 0) return 0;
     const uint32_t pct = bpm * 100u / max_bpm;

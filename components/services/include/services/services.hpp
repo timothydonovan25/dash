@@ -37,6 +37,7 @@
 #include "core/log/log.hpp"
 #include "core/log/detail.hpp"
 #include "core/delta/delta.hpp"
+#include "core/hr/hr.hpp"
 #include "core/flash/flash.hpp"
 #include "services/track_store.hpp"
 #include "ui/screen.hpp"
@@ -80,6 +81,8 @@ struct Deps {
     // never in a slot (§4.4).
     core::state::TrackBuffer<core::state::TrackPoint, 4096>* trip_trace = nullptr;
     core::state::TrackBuffer<core::state::TrackPoint, 4096>* lap_trace  = nullptr;
+    // STAT -> HEART's ten minutes. render's App is its one writer.
+    core::hr::History* hr_history = nullptr;
 
     // The blackbox. Producers push and never wait; `logger` drains it to the
     // card. 512 records at 50 Hz is ten seconds of slack, which is longer
