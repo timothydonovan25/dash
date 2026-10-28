@@ -94,13 +94,16 @@ extern "C" void app_main() {
     // either core, so they come down below ctrl before ctrl exists.
     services::demote_radio_tasks(true);
     services::start_ctrl(deps);
-    wiring::finish();
+    // The first frame waits on the panel and nothing else: render starts the
+    // moment it is up, and the IMU and pod come up behind it.
+    wiring::finish_panel();
+    services::start_render(deps, commands);
+    wiring::finish_sensors();
     services::start_imu(deps);
     services::start_gnss(deps);
     services::start_logic(deps, commands);
     services::start_input(deps, commands);
 
-    services::start_render(deps, commands);
     services::start_logger(deps);
     services::start_storage(deps);
     services::start_keeper(deps);

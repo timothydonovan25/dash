@@ -170,24 +170,6 @@ extern "C" void app_main(void) {
     ESP_LOGI(kTag, "nvs: %s, %u saved settings", hal::status_name(nvs_status),
              static_cast<unsigned>(loaded));
 
-    // The microSD slot. After ESP-Hosted's constructor, which owns the SDMMC
-    // controller this adds a slot to (sdcard_sdmmc.cpp). Once, at boot:
-    // there is no `storage` task here to retry or eject.
-    g_health.begin_init(core::state::Dev::Sd, g_clock.now_ms());
-    const hal::Status card_status = g_card.init();
-    ESP_LOGI(kTag, "sd card: %s", hal::status_name(card_status));
-    if (hal::ok(card_status)) {
-        g_health.report_ok(core::state::Dev::Sd, g_clock.now_ms());
-    } else {
-        // Absent, not faulted: the card is optional here, and a fault would
-        // put the SD alert over the demo for want of one.
-        g_health.set_absent(core::state::Dev::Sd);
-    }
-
-    const hal::Status touch_status = g_touch.init();
-    ESP_LOGI(kTag, "touch: %s", hal::status_name(touch_status));
-    report_pod(g_pod.init(g_touch.bus()), g_clock.now_ms());   // logs its own status
-
     // No real sensors, no radio — every pointer left null is a
     // device every service already treats as "not fitted" rather than
     // faulted (see the null checks in render_service.cpp/input_service.cpp
@@ -215,8 +197,31 @@ extern "C" void app_main(void) {
     g_slots.health.publish(g_health.publish());
     g_commands.begin();
 
+    // The first frame waits on the panel and the settings, nothing else:
+    // render starts here and the card, touch and pod come up behind it
+    // (about 160 ms of them). demo_render ticks the health table, so what
+    // they report below still reaches the screen.
     demo::start_ctrl_probe(g_deps);
     demo::start_demo_render(g_deps, g_commands, g_state_request, &g_doom);
+
+    // The microSD slot. After ESP-Hosted's constructor, which owns the SDMMC
+    // controller this adds a slot to (sdcard_sdmmc.cpp). Once, at boot:
+    // there is no `storage` task here to retry or eject.
+    g_health.begin_init(core::state::Dev::Sd, g_clock.now_ms());
+    const hal::Status card_status = g_card.init();
+    ESP_LOGI(kTag, "sd card: %s", hal::status_name(card_status));
+    if (hal::ok(card_status)) {
+        g_health.report_ok(core::state::Dev::Sd, g_clock.now_ms());
+    } else {
+        // Absent, not faulted: the card is optional here, and a fault would
+        // put the SD alert over the demo for want of one.
+        g_health.set_absent(core::state::Dev::Sd);
+    }
+
+    const hal::Status touch_status = g_touch.init();
+    ESP_LOGI(kTag, "touch: %s", hal::status_name(touch_status));
+    report_pod(g_pod.init(g_touch.bus()), g_clock.now_ms());   // logs its own status
+
     demo::start_demo_bike(g_deps, g_commands);
     xTaskCreatePinnedToCore(touch_input_task, "touch", 3072, nullptr, 9,
                             nullptr, 1);

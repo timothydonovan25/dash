@@ -160,14 +160,20 @@ services::Deps& build() {
     return g_deps;
 }
 
-void finish() {
-    // 4. The panel, then the sensors render and input need. The panel's
-    //    reset is a plain GPIO on this board, and its backlight is three of
-    //    the LED driver's channels, which build() has already brought up.
+void finish_panel() {
+    // 4. The panel. Its reset is a plain GPIO on this board, and its
+    //    backlight is three of the LED driver's channels, which build() has
+    //    already brought up.
     bring_up(core::state::Dev::Display, g_deps.panel->init());
     g_deps.panel->set_backlight(20);
+    g_health.tick(g_clock.now_ms(), core::health::Policy{});
+    g_slots.health.publish(g_health.publish());
+}
 
-    // Any of these may be absent; none of them stop the boot.
+void finish_sensors() {
+    // 5. The sensors imu and input need, while render draws the first frame
+    //    (the IMU alone waits 50 ms for its gyro). Any of these may be
+    //    absent; none of them stop the boot.
     bring_up(core::state::Dev::Imu, g_imu.init());
     bring_up(core::state::Dev::McpPod, g_pod.init());
     g_health.tick(g_clock.now_ms(), core::health::Policy{});

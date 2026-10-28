@@ -14,10 +14,13 @@ namespace wiring {
 // panel is awake. Returns the dependency set the tasks take. Call once.
 services::Deps& build();
 
-// The rest of the boot-critical hardware: the panel, the IMU and the pod.
-// Call once, after build(), before starting render, imu or input. The GPS
-// and the card are brought up later by their own tasks.
-void finish();
+// The panel. Call once, after build(), before starting render.
+void finish_panel();
+
+// The IMU and the pod. Call once, after finish_panel(), before starting imu
+// or input. After render has started, so the first frame does not wait on
+// them. The GPS and the card are brought up later by their own tasks.
+void finish_sensors();
 
 services::CommandQueue& commands();
 

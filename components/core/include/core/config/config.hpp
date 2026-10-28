@@ -56,7 +56,7 @@ struct Settings {
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.
     bool     gauge_sweep    = true;
-    uint16_t sweep_ms       = 600;    // was 1000, and 2000 before: key-on to live gauges
+    uint16_t sweep_ms       = 1000;   // was 2000: key-on to live gauges
     // The name card before the sweep: CRF250F, the firmware, a bar.
     bool     splash         = true;
 
