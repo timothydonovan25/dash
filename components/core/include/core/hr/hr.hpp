@@ -23,8 +23,9 @@ inline constexpr uint16_t kServiceUuid = 0x180D;
 inline constexpr uint16_t kMeasurementUuid = 0x2A37;
 inline constexpr uint16_t kCccdUuid = 0x2902;
 
-// How long a scan listens before choosing, and the wait before the next scan
-// when nothing was heard.
+// How long a scan listens before choosing. With nobody heard the next scan
+// starts at once (the search is continuous while Watch HR is on); after a
+// scan, connect or subscribe that failed, it waits kRescanMs.
 inline constexpr uint32_t kScanMs = 3000;
 inline constexpr uint32_t kRescanMs = 5000;
 // Below this a sensor is someone else's. A wrist at arm's length reads

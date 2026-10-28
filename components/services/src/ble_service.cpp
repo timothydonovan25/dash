@@ -209,11 +209,14 @@ struct Ctx {
     std::atomic<bool>     hr_peer_valid{false};
     std::atomic<uint16_t> hr_conn{BLE_HS_CONN_HANDLE_NONE};
     std::atomic<uint16_t> hr_val{0};
-    // Advertisers heard with the Heart Rate Service this scan, so their scan
-    // responses (the name) are passed on and nobody else's. Host task only,
-    // cleared by the `ble` task before it starts a scan.
+    // Advertisers heard with the Heart Rate Service this scan, so each is
+    // passed on once, and once more with its name (usually in the scan
+    // response), and nobody else is. The controller's duplicate filter is
+    // off (see `scan`), so this is the only one. Host task only, cleared by
+    // the `ble` task before it starts a scan.
     static constexpr int kHrSeen = 8;
     ble_addr_t hr_seen[kHrSeen] = {};
+    bool       hr_named[kHrSeen] = {};
     int        hr_seen_n = 0;
 };
 Ctx g_ctx;
@@ -416,17 +419,23 @@ int hr_disc_event(ble_gap_event* ev, void*) {
     if (ev->type != BLE_GAP_EVENT_DISC) return 0;
     const ble_gap_disc_desc& dd = ev->disc;
     const core::hr::Advert a = core::hr::parse_advert(dd.data, dd.length_data);
-    bool pass = a.hrs;
-    if (a.hrs) {
-        bool known = false;
-        for (int i = 0; i < g_ctx.hr_seen_n; ++i) {
-            known = known || ble_addr_cmp(&g_ctx.hr_seen[i], &dd.addr) == 0;
-        }
-        if (!known && g_ctx.hr_seen_n < Ctx::kHrSeen) g_ctx.hr_seen[g_ctx.hr_seen_n++] = dd.addr;
-    } else if (dd.event_type == BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP && a.name[0]) {
-        for (int i = 0; i < g_ctx.hr_seen_n; ++i) {
-            pass = pass || ble_addr_cmp(&g_ctx.hr_seen[i], &dd.addr) == 0;
-        }
+    int at = -1;
+    for (int i = 0; i < g_ctx.hr_seen_n && at < 0; ++i) {
+        if (ble_addr_cmp(&g_ctx.hr_seen[i], &dd.addr) == 0) at = i;
+    }
+    bool pass = false;
+    if (at < 0) {
+        // New this scan: only a Heart Rate advertiser, and only while there
+        // is room to remember it, or every advert it sends would pass.
+        if (!a.hrs || g_ctx.hr_seen_n >= Ctx::kHrSeen) return 0;
+        at = g_ctx.hr_seen_n++;
+        g_ctx.hr_seen[at] = dd.addr;
+        g_ctx.hr_named[at] = a.name[0] != '\0';
+        pass = true;
+    } else if (a.name[0] && !g_ctx.hr_named[at]) {
+        // Known, and now its name (the scan response, as a rule).
+        g_ctx.hr_named[at] = true;
+        pass = true;
     }
     if (!pass) return 0;
     Event e{};
@@ -943,6 +952,9 @@ public:
                     }
                     break;
                 case Step::Connecting:
+                    // The host's own connect timeout ends it; this catches a lost one.
+                    if (now - step_ms_ > kHrConnectMs + 2000) give_up("connect timed out", now);
+                    break;
                 case Step::Discovering:
                     if (now - step_ms_ > kHrStepMs) give_up("timed out", now);
                     break;
@@ -972,8 +984,11 @@ public:
 private:
     enum class Step : uint8_t { Off, Waiting, Scanning, Connecting, Discovering, Live };
 
-    // A connect, the discovery or the subscribe that has not answered.
+    // The discovery or the subscribe that has not answered.
     static constexpr uint32_t kHrStepMs = 12000;
+    // A connect: an advertising watch answers in well under a second. One
+    // started as the phone reconnected sat out the whole 10 s it was given.
+    static constexpr uint32_t kHrConnectMs = 4000;
     // After a dropped link or a failed connect: a moment, then look again.
     static constexpr uint32_t kRetryMs = 1000;
 
@@ -1006,7 +1021,15 @@ private:
         g_ctx.hr_seen_n = 0;   // the host task reads it only during a scan
         ble_gap_disc_params p{};
         p.passive = 0;             // active: the name is often in the scan response
-        p.filter_duplicates = 1;   // each advertiser once a scan, not a flood
+        // The C6's controller filters duplicates by address and never forgets
+        // one (CONFIG_BT_LE_SCAN_DUPL_CACHE_REFRESH_PERIOD=0 in its image): a
+        // watch heard advertising for its phone before Broadcast HR was
+        // turned on was never heard again. hr_disc_event dedupes per scan.
+        p.filter_duplicates = 0;
+        // Half the time listening, 50 of every 100 ms: back-to-back scans
+        // leave the phone link and the advertising their share of the radio.
+        p.itvl = 160;              // 0.625 ms units
+        p.window = 80;
         const int rc = ble_gap_disc(g_ctx.own_addr_type, static_cast<int32_t>(core::hr::kScanMs),
                                     &p, hr_disc_event, nullptr);
         if (rc != 0) {
@@ -1020,7 +1043,9 @@ private:
     void connect_to_choice(uint32_t now) {
         core::hr::Addr a;
         if (!picker_.choice(a)) {
-            wait(now, core::hr::kRescanMs);
+            // Nobody: listen again at once, so a watch whose broadcast is
+            // turned on later is found within a scan of it.
+            wait(now, 0);
             return;
         }
         target_ = a;
@@ -1034,7 +1059,7 @@ private:
         g_ctx.hr_peer = peer;
         g_ctx.hr_peer_valid.store(true);
         const int rc = ble_gap_connect(g_ctx.own_addr_type, &peer,
-                                       static_cast<int32_t>(kHrStepMs - 2000), nullptr,
+                                       static_cast<int32_t>(kHrConnectMs), nullptr,
                                        hr_conn_event, nullptr);
         if (rc != 0) {
             ESP_LOGW(kTag, "watch connect would not start: %d", rc);

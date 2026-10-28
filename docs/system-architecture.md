@@ -926,6 +926,15 @@ The dash needs these BLE roles at once:
   to the `heart` slot, STAT → HEART, DIAG → Radio, the blackbox's `HR`
   column and a `heart` event in the detail log.
 
+  The search is continuous while the setting is on and no watch is linked
+  (1.52): 3 s scans back to back, each listening 50 ms in 100, so a
+  broadcast turned on after power-on is found within a scan or two. The scan
+  asks the controller **not** to filter duplicates: the C6 image's filter is
+  by address and never refreshed (`CONFIG_BT_LE_SCAN_DUPL_CACHE_REFRESH_PERIOD=0`),
+  so a watch heard advertising for its phone before Broadcast HR was on was
+  never reported again. `hr_disc_event` passes each Heart Rate advertiser on
+  once a scan, and once more with its name. A connect gets 4 s.
+
 Central and the GATT client were off before 1.48 (they had been for AMS,
 §11.1) to save flash. Turning them on, with the watch code, cost 31 kB of
 image and under 0.5 kB of internal `.bss`. The observer role came with
