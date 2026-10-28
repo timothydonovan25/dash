@@ -115,8 +115,10 @@ void LapScreen::update(const Frame& f) {
     // one moment worth a glance away from the track.
     char line[24];
     u::fmt_duration(line, sizeof line, f.lap.last_ms, f.lap.count > 0);
-    const uint32_t since_lap = f.t_ms - f.lap.last_done_ms;
-    const bool flash = f.lap.last_was_best && f.lap.last_done_ms != 0 && since_lap < kShowMs;
+    // Signed: the lap slot can be newer than the frame's clock.
+    const int32_t since_lap = static_cast<int32_t>(f.t_ms - f.lap.last_done_ms);
+    const bool flash = f.lap.last_was_best && f.lap.last_done_ms != 0 &&
+                       since_lap < static_cast<int32_t>(kShowMs);
     const bool lit = !flash || (since_lap / 250) % 2 == 0;
     last_.configure(line, flash ? (lit ? color::kGood : color::kBg) : color::kText, 2,
                     Align::Left);
@@ -145,9 +147,9 @@ void LapScreen::update(const Frame& f) {
     // The last split, for five seconds after it: that sector against its
     // best, green for quicker. Otherwise which sector this is, or that the
     // splits are still to be placed (the first clean lap does it).
-    const uint32_t since_split = f.t_ms - f.lap.split_at_ms;
+    const int32_t since_split = static_cast<int32_t>(f.t_ms - f.lap.split_at_ms);   // signed, as above
     char title[16];
-    if (f.lap.split_ms != 0 && since_split < kShowMs) {
+    if (f.lap.split_ms != 0 && since_split < static_cast<int32_t>(kShowMs)) {
         std::snprintf(title, sizeof title, "SECTOR %u", f.lap.split_sector + 1u);
         split_title_.configure(title, theme::secondary, 1, Align::Left);
         if (f.lap.split_delta_valid) {
@@ -441,8 +443,9 @@ void RaceScreen::update(const Frame& f) {
 
     // A new best flashes, as on LAP.
     u::fmt_duration(buf, sizeof buf, f.lap.last_ms, f.lap.count > 0);
-    const uint32_t since = f.t_ms - f.lap.last_done_ms;
-    const bool flash = f.lap.last_was_best && f.lap.last_done_ms != 0 && since < kShowMs;
+    const int32_t since = static_cast<int32_t>(f.t_ms - f.lap.last_done_ms);   // signed, as on LAP
+    const bool flash = f.lap.last_was_best && f.lap.last_done_ms != 0 &&
+                       since < static_cast<int32_t>(kShowMs);
     const bool lit = !flash || (since / 250) % 2 == 0;
     last_.configure(buf, flash ? (lit ? color::kGood : color::kBg) : color::kText, 3,
                     Align::Center);

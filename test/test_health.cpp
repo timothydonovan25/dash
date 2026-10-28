@@ -83,6 +83,19 @@ int main() {
         CHECK(t[Dev::McpPod].state == DevState::Fault);
     }
 
+    CASE("an init stamped just after keeper's clock is not five seconds old");
+    {
+        // The driver's core read the clock after keeper did; unsigned, the
+        // retry came at once instead of five seconds on.
+        Tracker t;
+        t.begin_init(Dev::Sd, 20003);
+        for (int i = 0; i < 10; ++i) t.report_error(Dev::Sd, -1, 20003);
+        t.tick(20000, p);
+        CHECK(t[Dev::Sd].state == DevState::Fault);
+        CHECK(!t.claim_retry(Dev::Sd, 20000, p));
+        CHECK(t.claim_retry(Dev::Sd, 25003, p));
+    }
+
     CASE("the keeper retries a faulted device once every five seconds");
     {
         Tracker t;

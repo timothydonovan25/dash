@@ -192,6 +192,7 @@ int main() {
         CHECK(n.kind == 'C' && n.ringing && n.text[0] == '\0');
         CHECK(core::media::ringing(n, 1000 + 30000));
         CHECK(!core::media::ringing(n, 1000 + core::media::kRingTimeoutMs));
+        CHECK(core::media::ringing(n, 997));   // the frame's clock read just before it landed
         CHECK(put("NE", 5000));
         CHECK(!n.ringing);
         CHECK(std::strcmp(n.who, "Mum") == 0);   // still says who it was

@@ -143,7 +143,9 @@ bool apply_notify(state::Notify& n, const uint8_t* data, size_t len, uint32_t no
 }
 
 bool ringing(const state::Notify& n, uint32_t now_ms) {
-    return n.ringing && now_ms - n.at_ms < kRingTimeoutMs;
+    // Signed: the call can land after the frame's clock was read, a few ms
+    // ahead of `now_ms`; unsigned, the toast dropped for that frame.
+    return n.ringing && static_cast<int32_t>(now_ms - n.at_ms) < static_cast<int32_t>(kRingTimeoutMs);
 }
 
 size_t ctrl_line(uint8_t cmd, uint8_t out[3]) {

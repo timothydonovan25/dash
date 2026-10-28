@@ -28,6 +28,9 @@ int main() {
         CHECK(!should_stop(t0 + 1, t0, kMovingMph));    // walking it about
         // A counter that wrapped since the last use is a short gap.
         CHECK(!should_stop(5, 0xFFFFFF00u, 0.0f));
+        // A page request on the other core stamped its use just after the
+        // wifi task read the clock: in use, not 49 days idle.
+        CHECK(!should_stop(t0, t0 + 2, 0.0f));
     }
 
     CASE("the countdown rounds up and stops at zero");
@@ -36,6 +39,7 @@ int main() {
         CHECK(off_in_s(kIdleOffMs - 1, 0) == 1);
         CHECK(off_in_s(kIdleOffMs, 0) == 0);
         CHECK(off_in_s(kIdleOffMs + 5000, 0) == 0);
+        CHECK(off_in_s(100, 102) == kIdleOffMs / 1000u);   // used just after `now`
     }
 
     CASE("only plain .csv names in logs/ can be downloaded");

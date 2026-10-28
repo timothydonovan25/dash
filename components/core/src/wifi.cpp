@@ -15,12 +15,15 @@ void make_password(uint32_t r0, uint32_t r1, char* out) {
 
 bool should_stop(uint32_t now_ms, uint32_t last_use_ms, float speed_mph) {
     if (speed_mph > kMovingMph) return true;
-    // Unsigned, so a wrapped counter reads as a short gap, not 49 days.
-    return now_ms - last_use_ms >= kIdleOffMs;
+    // Signed: a page request on the other core can stamp `last_use_ms` after
+    // `now_ms` was read, and unsigned that read as 49 days idle and shut the
+    // hotspot mid-upload. Signed still takes the counter's wrap.
+    return static_cast<int32_t>(now_ms - last_use_ms) >= static_cast<int32_t>(kIdleOffMs);
 }
 
 uint32_t off_in_s(uint32_t now_ms, uint32_t last_use_ms) {
-    const uint32_t used = now_ms - last_use_ms;
+    const int32_t ago = static_cast<int32_t>(now_ms - last_use_ms);
+    const uint32_t used = ago > 0 ? static_cast<uint32_t>(ago) : 0;
     if (used >= kIdleOffMs) return 0;
     return (kIdleOffMs - used + 999u) / 1000u;
 }

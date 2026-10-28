@@ -156,7 +156,9 @@ void Tracker::tick(uint32_t t_ms, const Policy& p) {
 bool Tracker::claim_retry(Dev d, uint32_t t_ms, const Policy& p) {
     Cell& c = cell_[ix(d)];
     if (static_cast<DevState>(c.state.load(kRlx)) != DevState::Fault) return false;
-    if (t_ms - c.last_retry_ms < p.retry_every_ms) return false;
+    // Signed: last_retry_ms can be a driver's init time, stamped on its own
+    // core a moment after keeper read `t_ms`.
+    if (static_cast<int32_t>(t_ms - c.last_retry_ms) < static_cast<int32_t>(p.retry_every_ms)) return false;
     c.last_retry_ms = t_ms;
     c.streak.store(0, kRlx);
     // The grace begin_init gives: without it the next tick finds the

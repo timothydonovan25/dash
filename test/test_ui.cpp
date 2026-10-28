@@ -3273,5 +3273,62 @@ int main() {
         }
     }
 
+    CASE("a reading stamped just ahead of the frame's clock repaints nothing");
+    {
+        // The frame's clock is read before its slots, so a reading that lands
+        // in between is a few ms *ahead* of t_ms. An unsigned age made that
+        // four billion ms old, and STAT -> HEART blinked to "--" on every
+        // reading with the same bpm.
+        const core::nav::Layout counts;
+        for (uint8_t m = 0; m < core::nav::kModeCount; ++m) {
+            for (uint8_t n = 0; n < counts.screens[m]; ++n) {
+                Fixture fx;
+                fx.settings.gauge_sweep = false;
+                fx.settings.hr_on = true;
+                Screen320x480 s;
+                fx.app.begin(s.canvas);
+                go_to(fx.app, s.canvas, static_cast<Mode>(m), n);
+                Frame f = busy_frame();
+                f.heart.link = core::state::Heart::Live;
+                f.heart.bpm = 132; f.heart.at_ms = f.t_ms; f.heart.seq = 5;
+                f.heart.avg_bpm = 120; f.heart.max_bpm = 150; f.heart.min_bpm = 90;
+                f.heart.readings = 300; f.heart.zone_max_bpm = 185;
+                f.heart.contact_known = true; f.heart.contact = true; f.heart.rssi_dbm = -60;
+                std::snprintf(f.heart.name, sizeof f.heart.name, "D2 Air X10");
+                f.lap.last_done_ms = f.t_ms - 60000; f.lap.split_at_ms = f.t_ms - 60000;
+                f.lap.split_ms = 29880; f.lap.last_was_best = true;
+                std::snprintf(f.media.title, sizeof f.media.title, "Song");
+                std::snprintf(f.media.artist, sizeof f.media.artist, "Band");
+                f.media.state = 2; f.media.updated_ms = f.t_ms - 1000;
+                f.media.position_ms = 30000; f.media.position_at_ms = f.t_ms; f.media.duration_ms = 200000;
+                fx.app.update(f);
+                fx.app.render(s.canvas, true);
+                fx.app.clear_full_repaint();
+                send_damage(fx.app, s.px);
+                for (int i = 0; i < 60; ++i) {
+                    f.t_ms += 17;
+                    if (i % 10 == 3) {          // the same bpm and track again, a few ms ahead
+                        f.heart.at_ms = f.t_ms + 3; ++f.heart.seq;
+                        f.media.position_at_ms = f.t_ms + 3;
+                        f.media.updated_ms = f.t_ms + 3;
+                    }
+                    fx.app.update(f);
+                    App::Damage d[App::kMaxDamage];
+                    const size_t k = fx.app.damage(d, App::kMaxDamage);
+                    size_t px = 0;
+                    for (size_t j = 0; j < k; ++j) px += static_cast<size_t>(d[j].r.w) * d[j].r.h;
+                    // ENGINE's rpm trace steps every 100 ms whatever the rpm.
+                    const bool trace = std::strcmp(fx.app.current().name(), "ENGINE") == 0;
+                    if (px && !trace) {
+                        std::printf("       %s/%s repainted %zu px at frame %d\n",
+                                    fx.app.mode_name(), fx.app.current().name(), px, i);
+                    }
+                    CHECK(px == 0 || trace);
+                    send_damage(fx.app, s.px);
+                }
+            }
+        }
+    }
+
     return check::report("ui");
 }

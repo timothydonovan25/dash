@@ -495,7 +495,8 @@ void PhoneScreen::update(const Frame& f) {
         }
     }
 
-    const uint32_t age_s = (f.t_ms - n.at_ms) / 1000u;
+    const int32_t ago_ms = static_cast<int32_t>(f.t_ms - n.at_ms);   // signed: may be just ahead
+    const uint32_t age_s = ago_ms > 0 ? static_cast<uint32_t>(ago_ms) / 1000u : 0;
     if (age_s < 60) std::snprintf(buf, sizeof buf, "just now");
     else if (age_s < 3600) std::snprintf(buf, sizeof buf, "%u min ago", static_cast<unsigned>(age_s / 60));
     else std::snprintf(buf, sizeof buf, "%u h ago", static_cast<unsigned>(age_s / 3600));
