@@ -354,9 +354,12 @@ void HeartScreen::update(const Frame& f) {
             status_.configure(buf, theme::secondary, 1, Align::Left);
             break;
         default:
-            if (h.contact_known && !h.contact && live) {
-                std::snprintf(buf, sizeof buf, "%s: no skin contact", h.name[0] ? h.name : "Watch");
-                status_.configure(buf, color::kWarn, 1, Align::Left);
+            if (core::hr::no_pulse(h, f.t_ms) || (h.contact_known && !h.contact && h.bpm == 0)) {
+                // The watch is talking and says there is no pulse: off the
+                // wrist, or worse. The number would be its last one, frozen.
+                std::snprintf(buf, sizeof buf, "%s: no pulse (no skin contact)",
+                              h.name[0] ? h.name : "Watch");
+                status_.configure(buf, color::kAlarm, 1, Align::Left);
             } else if (!live) {
                 std::snprintf(buf, sizeof buf, "%s: no reading", h.name[0] ? h.name : "Watch");
                 status_.configure(buf, color::kWarn, 1, Align::Left);

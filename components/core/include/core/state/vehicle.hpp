@@ -282,8 +282,9 @@ struct Heart {
         Live,         // subscribed: readings arrive
     };
     uint8_t  link = Off;
-    uint16_t bpm = 0;
+    uint16_t bpm = 0;            // 0 when the last reading had no pulse in it
     uint32_t at_ms = 0;          // dash clock of the last reading; 0 none yet
+    bool     worn = false;       // a pulse seen since this link came up
     bool     contact_known = false;
     bool     contact = false;
     int8_t   rssi_dbm = 0;       // 0 before one was read

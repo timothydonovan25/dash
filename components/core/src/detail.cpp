@@ -603,6 +603,7 @@ size_t format_event(char* buf, size_t n, const EventRow& e) {
                              : e.a == state::Heart::Connecting ? "connecting"
                              : e.a == state::Heart::Searching ? "searching" : "off");
             o.kv("bpm"); o.u(e.b);
+            if (e.i) { o.kv("pulse"); o.s("none"); }
             break;
         case Ev::None:
             break;
@@ -740,10 +741,11 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
         }
     }
 
-    if (w.hr_link != p.hr_link) {
+    if (w.hr_link != p.hr_link || w.hr_no_pulse != p.hr_no_pulse) {
         if (EventRow* e = emit(Ev::Heart)) {
             e->a = w.hr_link;
             e->b = w.hr_bpm;
+            e->i = w.hr_no_pulse ? 1 : 0;
         }
     }
 

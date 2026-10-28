@@ -381,7 +381,7 @@ the media half of step 9 is written. 50 host tests, all passing.
 - `sun/` sun elevation from the GPS date, time and position, and the
   backlight dim curve behind CONFIG → Display → Dim at night. `Gnss` carries
   `day_of_year` from the RMC date because `utc_ms` is time of day only
-- `alert/` which single alert the overlay shows (bike down, charging fault,
+- `alert/` which single alert the overlay shows (no pulse, bike down, charging fault,
   dead wheel sensor, SD, lamps, IMU, GPS lost mid-lap), with onset delays,
   clear delays and a dismissal that holds until the fault genuinely clears.
   `ui::App` runs it on every Frame. Low fuel is deliberately not here: the
@@ -462,10 +462,17 @@ the media half of step 9 is written. 50 host tests, all passing.
   under the rpm tile and RACE in the gear tile, coloured by zone, blank when
   the setting is off (`chrome::hr_readout`); the blackbox's
   last column is `HR` (0 for no current reading) and the detail log's
-  `_evt` has a `heart` event per link change. **Never run against a watch**:
-  the D2 Air X10's spec sheet says its broadcast is ANT+, which this dash
-  cannot hear; Venu 2-family firmware added Bluetooth, so check the watch
-  lists the dash as a sensor or DIAG → Radio leaves `searching`
+  `_evt` has a `heart` event per link change. **No pulse** (1.56): off the
+  wrist the D2 Air X10 keeps sending its last bpm, twice a second, with the
+  contact bit clear (`04 5E` against `06 61` worn), so a reading without
+  contact is published as bpm 0 (`Measurement::pulse()`), and `no_pulse()`
+  (live, a pulse seen on this link, readings arriving, none with a pulse)
+  for 10 s raises NO PULSE, first of all the alerts; `_evt` logs
+  `pulse=none`. **Run against the rider's D2 Air X10 on the demo** (its
+  spec sheet says ANT+, but its firmware broadcasts over Bluetooth too).
+  The watch's Broadcast ends when it restarts: a dash that hears no
+  heart-rate adverts (the log's 30 s `watch search` line) is a watch that
+  is not broadcasting
 - the toast (1.32): `ui::Toast`, a strip along the bottom of every screen,
   under the alert. A ringing call, then a notification (8 s), then a trick
   under way (live), then a finished trick (3.5 s) or a new perf best (4 s).

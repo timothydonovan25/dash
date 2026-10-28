@@ -37,6 +37,10 @@ inline constexpr uint32_t kStaleMs = 5000;
 // Connected and subscribed but silent this long: the broadcast was stopped
 // on the watch without it dropping the link. Let it go and look again.
 inline constexpr uint32_t kSilentDropMs = 20000;
+// How long the watch must say "no pulse" before the NO PULSE alert. A Garmin
+// takes 2-3 s to notice it is off the wrist, and a wrist shifting on rough
+// ground can lose contact for a moment.
+inline constexpr uint32_t kNoPulseMs = 10000;
 
 // One Heart Rate Measurement notification (GATT 0x2A37).
 struct Measurement {
@@ -45,9 +49,16 @@ struct Measurement {
     bool     contact = false;
     uint8_t  rr_count = 0;            // RR intervals in this packet, kept up to 4
     uint16_t rr_ms[4] = {};
+
+    // Whether this reading is a heartbeat. Off the wrist a Garmin keeps
+    // sending, twice a second, the last bpm it had with the contact bit
+    // clear (seen: 06 61 worn, then 04 5E for as long as it was off), so the
+    // number alone would freeze on the screen.
+    bool pulse() const { return bpm != 0 && (!contact_known || contact); }
 };
 
-// False for a packet too short for what its flags say, or a bpm of 0.
+// False for a packet too short for what its flags say. A bpm of 0 is a
+// reading, with no pulse in it.
 bool parse(const uint8_t* p, size_t n, Measurement& out);
 
 // Whether an advertisement (the AD structures of an advertising packet or a
@@ -115,6 +126,12 @@ private:
 
 // Whether the slot's reading is current enough to show or log.
 bool fresh(const state::Heart& h, uint32_t now_ms);
+
+// The watch is connected, has had a pulse on this link, and its current
+// readings say there is none: taken off, or worse. Readings must still be
+// arriving: a watch that has gone quiet or out of range says nothing about
+// the rider. The alert waits kNoPulseMs of this.
+bool no_pulse(const state::Heart& h, uint32_t now_ms);
 
 // Heart-rate zone 1-5 by percent of the rider's maximum (50-60 % is zone 1,
 // 90 % and over zone 5), 0 below zone 1 or with no maximum.

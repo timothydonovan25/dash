@@ -305,6 +305,19 @@ int main() {
         w.hr_link = core::state::Heart::Searching;
         n = ew.watch(w, 118, out, EventWatcher::kMaxPerPass);
         CHECK(n == 1 && out[0].kind == Ev::Heart && out[0].b == 131);
+        // No pulse, and back: an event each way.
+        w.hr_link = core::state::Heart::Live; w.hr_bpm = 0;
+        CHECK(ew.watch(w, 119, out, EventWatcher::kMaxPerPass) == 1);
+        w.hr_no_pulse = true;
+        n = ew.watch(w, 119, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::Heart);
+        format_event(b, sizeof b, out[0]);
+        CHECK(contains(b, "link=live bpm=0 pulse=none"));
+        w.hr_no_pulse = false; w.hr_bpm = 90;
+        n = ew.watch(w, 119, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::Heart && out[0].b == 90);
+        format_event(b, sizeof b, out[0]);
+        CHECK(!contains(b, "pulse=none"));
 
         w.stunt_seq = 1; w.stunt_kind = 1; w.stunt_grade = 2; w.stunt_ms = 2300;
         w.stunt_peak_deg = 34.0f; w.stunt_points = 410;

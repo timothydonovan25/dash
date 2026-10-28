@@ -316,7 +316,7 @@ void App::update_alert(const core::state::Frame& f) {
         alert_.dismiss();
         restore(kAlertBox);
     } else {
-        const bool grave = k == Kind::BikeDown || k == Kind::BatteryHigh;
+        const bool grave = k == Kind::NoPulse || k == Kind::BikeDown || k == Kind::BatteryHigh;
         alert_.show(core::alert::text(k), grave ? color::kAlarm : color::kWarn);
     }
 }

@@ -175,6 +175,9 @@ BIKE_TOGGLES = [
     # A bonded phone in range: DIAG -> Radio, the Phone health row. CONFIG ->
     # Phone -> Forget drops the bond; Pairing mode lets it back in.
     ("phone",   "Phone connected",         False),
+    # The watch taken off (heart rate above 0 and CONFIG -> Heart rate on):
+    # readings with no skin contact, then NO PULSE after 10 s.
+    ("hroff",   "Watch off the wrist",     False),
     # Someone on the update page, which keeps the hotspot from idling off.
     # Turn the hotspot on from DIAG -> Update.
     ("wclient", "Phone using the Wi-Fi page", False),

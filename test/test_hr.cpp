@@ -52,16 +52,33 @@ int main() {
         CHECK(m.rr_ms[1] == 500);
     }
 
-    CASE("short packets and a zero are refused");
+    CASE("short packets are refused; a zero is a reading with no pulse");
     {
         Measurement m;
         const uint8_t one[] = {0x00};
         CHECK(!parse(one, sizeof one, m));
         const uint8_t wide[] = {0x01, 0x50};          // says uint16, has one byte
         CHECK(!parse(wide, sizeof wide, m));
-        const uint8_t zero[] = {0x00, 0x00};
-        CHECK(!parse(zero, sizeof zero, m));
         CHECK(!parse(nullptr, 4, m));
+        const uint8_t zero[] = {0x00, 0x00};
+        CHECK(parse(zero, sizeof zero, m));
+        CHECK(m.bpm == 0 && !m.pulse());
+    }
+
+    CASE("a Garmin off the wrist: its last bpm with the contact bit clear");
+    {
+        // Captured from a D2 Air X10, 2026-10-28: worn, then taken off.
+        Measurement m;
+        const uint8_t worn[] = {0x06, 0x61};
+        CHECK(parse(worn, sizeof worn, m));
+        CHECK(m.bpm == 97 && m.pulse());
+        const uint8_t off[] = {0x04, 0x5E};
+        CHECK(parse(off, sizeof off, m));
+        CHECK(m.bpm == 94 && m.contact_known && !m.contact);
+        CHECK(!m.pulse());
+        const uint8_t no_contact_bits[] = {0x00, 0x48};   // a strap that does not say
+        CHECK(parse(no_contact_bits, sizeof no_contact_bits, m));
+        CHECK(m.pulse());
     }
 
     CASE("an advert with the Heart Rate Service and a name");
@@ -167,6 +184,24 @@ int main() {
         CHECK(fresh(h, 9996));
         h.link = core::state::Heart::Searching;
         CHECK(!fresh(h, 10001));
+    }
+
+    CASE("no pulse: live, worn on this link, readings arriving, none with a pulse");
+    {
+        core::state::Heart h;
+        h.link = core::state::Heart::Live;
+        h.bpm = 0;
+        h.at_ms = 10000;
+        CHECK(!no_pulse(h, 10500));          // never worn on this link: just put down
+        h.worn = true;
+        CHECK(no_pulse(h, 10500));
+        CHECK(no_pulse(h, 9997));            // stamped just ahead of the frame
+        CHECK(!no_pulse(h, 10000 + kStaleMs));   // gone quiet: says nothing
+        h.bpm = 88;
+        CHECK(!no_pulse(h, 10500));          // a pulse
+        h.bpm = 0;
+        h.link = core::state::Heart::Searching;
+        CHECK(!no_pulse(h, 10500));
     }
 
     CASE("zones by percent of max");

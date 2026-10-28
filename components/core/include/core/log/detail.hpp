@@ -312,6 +312,7 @@ struct Watched {
     uint32_t dropped[kStreamCount] = {};
     uint8_t  hr_link = 0;          // core::state::Heart::Link
     uint16_t hr_bpm = 0;
+    bool     hr_no_pulse = false;  // core::hr::no_pulse
 };
 
 // Turns one pass's Watched into the events since the last. The first call

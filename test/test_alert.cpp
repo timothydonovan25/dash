@@ -134,6 +134,37 @@ int main() {
         CHECK(run(b, 3000, 4000, timing) == Kind::GpsLost);
     }
 
+    CASE("no pulse from a watch worn this ride: 10 s, then over everything, until a pulse");
+    {
+        // The watch, connected, readings twice a second, none with a pulse.
+        auto off_wrist = [](Frame& f) {
+            f.heart.link = core::state::Heart::Live;
+            f.heart.worn = true;
+            f.heart.bpm = 0;
+            f.heart.at_ms = f.t_ms - (f.t_ms % 500);
+        };
+        Alerter a;
+        CHECK(run(a, 0, 9000, off_wrist) == Kind::None);   // a wrist shifting, a watch catching up
+        CHECK(run(a, 9000, 2000, off_wrist) == Kind::NoPulse);
+        // Over the bike on its side too: the rider comes first.
+        auto both = [&](Frame& f) { off_wrist(f); f.att.lean_deg = 80; };
+        CHECK(run(a, 11000, 3000, both) == Kind::NoPulse);
+        // A pulse again, and it clears.
+        auto worn = [](Frame& f) {
+            f.heart.link = core::state::Heart::Live;
+            f.heart.worn = true;
+            f.heart.bpm = 92;
+            f.heart.at_ms = f.t_ms - (f.t_ms % 500);
+        };
+        CHECK(run(a, 14000, 3000, worn) == Kind::None);
+
+        // Never worn on this link, or a watch gone quiet: nothing.
+        Alerter b;
+        CHECK(run(b, 0, 20000, [&](Frame& f) { off_wrist(f); f.heart.worn = false; }) == Kind::None);
+        Alerter c;
+        CHECK(run(c, 0, 20000, [&](Frame& f) { off_wrist(f); f.heart.at_ms = 1; }) == Kind::None);
+    }
+
     CASE("a dead wheel sensor names its wheel");
     {
         Alerter a;

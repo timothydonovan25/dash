@@ -17,6 +17,7 @@
 //                                shift (hours added to the host clock),
 //                                phone (a bonded phone connected),
 //                                hr (the watch's heart rate, bpm; 0 no watch),
+//                                hroff (the watch off the wrist: no pulse),
 //                                wclient (a phone using the Wi-Fi page),
 //                                duration (media track length, ms),
 //                                position (ms into the track, now),
@@ -319,8 +320,10 @@ struct FakeHeart {
     core::hr::Session session;
     uint32_t next_ms = 0;
 
+    // `off_wrist`: as a Garmin taken off sends it, readings with the contact
+    // bit clear, which `ble` publishes as bpm 0 (no pulse).
     void step(core::state::Slots& slots, const core::config::Settings& cfg, uint32_t now,
-              int bpm) {
+              int bpm, bool off_wrist) {
         const core::state::Heart before = h;
         h.zone_max_bpm = cfg.hr_max_bpm;
         if (!cfg.hr_on) {
@@ -335,11 +338,14 @@ struct FakeHeart {
             h.rssi_dbm = static_cast<int8_t>(-52 - static_cast<int>((now / 1000) % 4));
             if (static_cast<int32_t>(now - next_ms) >= 0) {
                 next_ms = now + 1000;
-                session.add(static_cast<uint16_t>(bpm));
-                h.bpm = static_cast<uint16_t>(bpm);
+                if (!off_wrist) {
+                    session.add(static_cast<uint16_t>(bpm));
+                    h.worn = true;
+                }
+                h.bpm = off_wrist ? 0 : static_cast<uint16_t>(bpm);
                 h.at_ms = now;
                 h.contact_known = true;
-                h.contact = true;
+                h.contact = !off_wrist;
                 h.avg_bpm = session.avg_bpm();
                 h.max_bpm = session.max_bpm();
                 h.min_bpm = session.min_bpm();
@@ -690,6 +696,7 @@ int main() {
     bool wifi_in_use = false;
     FakeHeart fake_heart;
     int  hr_bpm = 0;
+    bool hr_off_wrist = false;
 
     // `keeper`'s backlight: the CONFIG brightness, dimmed after dark by the
     // same core::sun::AutoDim, once a second. The sim has no backlight, so
@@ -754,6 +761,8 @@ int main() {
                     phone_on = v != 0.0f;
                 } else if (std::strcmp(a, "hr") == 0) {
                     hr_bpm = static_cast<int>(v);
+                } else if (std::strcmp(a, "hroff") == 0) {
+                    hr_off_wrist = v != 0.0f;
                 } else if (std::strcmp(a, "wclient") == 0) {
                     wifi_in_use = v != 0.0f;
                 } else if (std::strcmp(a, "position") == 0) {
@@ -818,7 +827,7 @@ int main() {
         if (card_in && !fake_storage.ejected) services::serve_tracks(tracks, card);
         fake_wifi.step(slots, now, bike.speed_mph(), wifi_in_use);
         fake_ble.step(slots, health, now, phone_on);
-        fake_heart.step(slots, settings, now, hr_bpm);
+        fake_heart.step(slots, settings, now, hr_bpm, hr_off_wrist);
 
         // What `input` does: poll the pod, debounce, hand events to the UI.
         core::nav::InputEvent ev[core::input::kButtonCount];

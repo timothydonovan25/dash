@@ -33,7 +33,7 @@ bool parse(const uint8_t* p, size_t n, Measurement& out) {
             k += 2;
         }
     }
-    return out.bpm != 0;
+    return true;
 }
 
 Advert parse_advert(const uint8_t* ad, size_t n) {
@@ -154,6 +154,12 @@ bool fresh(const state::Heart& h, uint32_t now_ms) {
     // every reading.
     const int32_t age = static_cast<int32_t>(now_ms - h.at_ms);
     return h.link == state::Heart::Live && h.bpm != 0 && h.at_ms != 0 &&
+           age < static_cast<int32_t>(kStaleMs);
+}
+
+bool no_pulse(const state::Heart& h, uint32_t now_ms) {
+    const int32_t age = static_cast<int32_t>(now_ms - h.at_ms);   // signed, as in fresh()
+    return h.link == state::Heart::Live && h.worn && h.bpm == 0 && h.at_ms != 0 &&
            age < static_cast<int32_t>(kStaleMs);
 }
 

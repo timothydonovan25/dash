@@ -317,6 +317,7 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
             const core::state::Heart h = d.slots->heart.get();
             w.hr_link = h.link;
             w.hr_bpm = core::hr::fresh(h, now) ? h.bpm : 0;
+            w.hr_no_pulse = core::hr::no_pulse(h, now);
         }
         w.dropped[core::log::kMain] = d.blackbox ? d.blackbox->dropped() : 0;
         w.dropped[core::log::kImu] = d.imu_log ? d.imu_log->dropped() : 0;

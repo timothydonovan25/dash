@@ -801,6 +801,8 @@ public:
                     break;
                 }
                 conn_ = e.conn;
+                heart_.worn = false;   // worn on this link, not on the last one
+                heart_.bpm = 0;
                 g_ctx.hr_conn.store(conn_);
                 picker_.latch(target_, heart_.name);
                 ESP_LOGI(kTag, "watch connected (%s), finding heart rate", heart_.name);
@@ -898,8 +900,22 @@ public:
                 if (!core::hr::parse(e.data, e.len, m)) break;
                 if (step_ == Step::Discovering) set_step(Step::Live, now);   // beat the write's answer
                 last_data_ms_ = now;
-                session_.add(m.bpm);
-                heart_.bpm = m.bpm;
+                // A reading with no pulse in it is still a reading (the link
+                // is alive), but its bpm is the last one the watch had, so it
+                // is published as 0 and kept out of the session.
+                const bool pulse = m.pulse();
+                if (pulse != (heart_.bpm != 0) || !heart_.worn) {
+                    if (pulse && !heart_.worn) ESP_LOGI(kTag, "watch: pulse");
+                    else if (pulse) ESP_LOGI(kTag, "watch: pulse back");
+                    else if (heart_.worn) ESP_LOGI(kTag, "watch: no pulse (skin contact %s)",
+                                                   m.contact_known ? (m.contact ? "yes" : "no")
+                                                                   : "not reported");
+                }
+                if (pulse) {
+                    session_.add(m.bpm);
+                    heart_.worn = true;
+                }
+                heart_.bpm = pulse ? m.bpm : 0;
                 heart_.at_ms = now != 0 ? now : 1;
                 heart_.contact_known = m.contact_known;
                 heart_.contact = m.contact;

@@ -22,6 +22,7 @@ namespace core::alert {
 // shows, so the bike on its side outranks a dead shift lamp.
 enum class Kind : uint8_t {
     None = 0,
+    NoPulse,       // the rider's watch, worn this ride, says no pulse
     BikeDown,      // leaned right over and not moving
     BatteryHigh,   // regulator fault: a battery cooked at 16 V
     BatteryLow,    // engine running and not charging

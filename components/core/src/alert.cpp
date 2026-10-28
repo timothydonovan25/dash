@@ -1,4 +1,5 @@
 #include "core/alert/alert.hpp"
+#include "core/hr/hr.hpp"
 #include <cmath>
 
 namespace core::alert {
@@ -8,6 +9,7 @@ using state::DevState;
 
 const char* text(Kind k) {
     switch (k) {
+        case Kind::NoPulse:     return "NO PULSE";
         case Kind::BikeDown:    return "BIKE DOWN";
         case Kind::BatteryHigh: return "OVERCHARGING";
         case Kind::BatteryLow:  return "NOT CHARGING";
@@ -23,6 +25,7 @@ const char* text(Kind k) {
 
 uint32_t Alerter::onset_ms(Kind k) {
     switch (k) {
+        case Kind::NoPulse:     return hr::kNoPulseMs;
         case Kind::BikeDown:    return 2000;   // a wheelie recovery is not a crash
         case Kind::BatteryHigh: return 3000;
         case Kind::BatteryLow:  return 5000;   // cranking and lamps sag it briefly
@@ -36,6 +39,8 @@ bool Alerter::condition(Kind k, const state::Frame& f) const {
     // vbat is 0 when the reading failed, and below 8 V it is USB, not a bike.
     const bool on_bike = f.elec.vbat > 8.0f;
     switch (k) {
+        case Kind::NoPulse:
+            return hr::no_pulse(f.heart, f.t_ms);
         case Kind::BikeDown:
             return f.health.ok(Dev::Imu) && std::fabs(f.att.lean_deg) > cfg_.down_lean_deg &&
                    f.motion.best_mph < cfg_.down_mph;
