@@ -96,7 +96,10 @@ hal::Status Ili9488::init() {
     // panel_test's corners screen shows which.
     esp_lcd_panel_swap_xy(panel, true);
     esp_lcd_panel_mirror(panel, true, false);
-    return from_esp(esp_lcd_panel_disp_on_off(panel, true));
+    // No esp_lcd_panel_disp_on_off(panel, true) here: init() above already
+    // sent DISPON, and the call sends it again and waits another 100 ms,
+    // all of it before the first frame.
+    return hal::Status::Ok;
 }
 
 hal::Status Ili9488::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,

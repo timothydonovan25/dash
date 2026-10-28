@@ -30,6 +30,7 @@
 #include "esp_ldo_regulator.h"
 #include "esp_cache.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -198,14 +199,18 @@ const InitCmd kInitCmds[] = {
     {0x29, kNop, sizeof(kNop), 20},    // display on
 };
 
+// ST7701S: a reset pulse of at least 10 us, then 5 ms before commands if
+// the panel was asleep, 120 ms if it was awake. At power-on it is asleep;
+// after any other reset of the P4 it was showing a picture, so it is awake.
+// The short wait is the first-frame time on every key-on.
 void pulse_panel_reset() {
     const auto rst = static_cast<gpio_num_t>(p4pins::kPanelReset);
     gpio_reset_pin(rst);
     gpio_set_direction(rst, GPIO_MODE_OUTPUT);
     gpio_set_level(rst, 0);
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(1));
     gpio_set_level(rst, 1);
-    vTaskDelay(pdMS_TO_TICKS(120));
+    vTaskDelay(pdMS_TO_TICKS(esp_reset_reason() == ESP_RST_POWERON ? 5 : 120));
 }
 
 }  // namespace

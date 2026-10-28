@@ -138,3 +138,11 @@ CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 # board that will not boot.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# Flash in quad mode: twice the bandwidth of DIO for code run from flash and
+# for the bootloader's image check after a reset. The module's flash is a
+# Boya, which the bootloader sets to quad by its generic method. If a board
+# ever fails to boot after this, flash it in DIO over USB (the ROM's download
+# mode does not depend on it).
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y

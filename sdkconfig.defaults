@@ -70,6 +70,13 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 # GPIO37/38 stays on test pads as a fallback for when USB is wedged.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
+# Flash in quad mode, as the demo (same module, same Boya flash; run there
+# since 1.55): twice DIO's bandwidth for code run from flash and the
+# bootloader's image check. A board that will not boot after this is
+# flashed in DIO over USB; the ROM's download mode does not depend on it.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y
+
 # BLE (§11). The P4 has no radio: NimBLE runs here as the host and the
 # controller runs on the module's ESP32-C6, reached over SDIO through
 # esp_hosted's VHCI transport. demo_p4/sdkconfig.defaults is where every line
