@@ -61,7 +61,9 @@ private:
     MediaProgress progress_;
     Label       odo_;
     Label       trip_;
-    Widget*     list_[18] = {};
+    Label       hr_;
+    Label       hr_unit_;
+    Widget*     list_[20] = {};
 };
 
 // The dedicated now-playing screen: title/artist/album at a size actually
@@ -283,7 +285,8 @@ private:
     DeltaBar delta_;
     Label    last_;
     Label    best_;
-    Widget*  list_[7] = {};
+    Label    hr_;
+    Widget*  list_[8] = {};
 };
 
 // The ride so far, on one page: the laps (best, ideal, the track's record),

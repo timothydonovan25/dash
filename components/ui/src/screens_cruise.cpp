@@ -44,6 +44,11 @@ constexpr Rect kSpeedTile {310,  12, 162, 78};
 // scale 10 is 70 px of glyph in an 84 px tile.
 constexpr Rect kGearText  {216,  10,  78,  70};
 constexpr Rect kShiftStrip{136,   2,  72,  20};
+// The rider's heart rate, under the rpm tile and left of the lean gauge
+// (which starts at x=116): the bpm at scale 4, its unit small under it as
+// rpm and mph have theirs. Blank unless CONFIG -> Heart rate -> Watch HR.
+constexpr Rect kHr        { 28, 100,  84,  28};
+constexpr Rect kHrUnit    { 28, 132,  84,  10};
 
 // The middle band is the lean gauge alone, as big as the band allows: this
 // is read on a moving dirt bike, where a g-ball's dot was detail nobody
@@ -134,6 +139,11 @@ void SpeedScreen::enter(Canvas&) {
     clock_.set_bounds(kClock);
     clock_.configure("--:--", color::kText, 2, Align::Right);
 
+    hr_.set_bounds(kHr);
+    hr_.configure("", color::kDim, 4, Align::Center);
+    hr_unit_.set_bounds(kHrUnit);
+    hr_unit_.configure("", theme::secondary, 1, Align::Center);
+
     bar_stem_.set_bounds(kTachStem);
     bar_stem_.configure(kTachStem.y, kTachStem.bottom());
     bar_flare_.set_bounds(kTachFlare);
@@ -163,6 +173,7 @@ void SpeedScreen::enter(Canvas&) {
     list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
     list_[12] = &fault_;    list_[13] = &fault_what_; list_[14] = &song_;
     list_[15] = &album_;    list_[16] = &artist_;     list_[17] = &progress_;
+    list_[18] = &hr_;       list_[19] = &hr_unit_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -200,6 +211,10 @@ void SpeedScreen::update(const Frame& f) {
                  has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0,
                  f.gnss.fix);
     clock_.set_text(buf);
+
+    const Color hc = chrome::hr_readout(f.heart, f.t_ms, buf, sizeof buf, "");
+    hr_.configure(buf, hc, 4, Align::Center);
+    hr_unit_.set_text(buf[0] ? "bpm" : "");
 
     // Full scale is the first shift lamp, not the redline: above that the
     // lamps are the instrument and the bar just stays full.
@@ -378,16 +393,17 @@ void SpeedScreen::draw_background(Canvas& c) {
                 color::kDim, 1, Align::Right);
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 18}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 20}; }
 
 const char* SpeedScreen::widget_name(size_t i) const {
     // Same order as list_ above.
-    static const char* kNames[18] = {
+    static const char* kNames[20] = {
         "tach stem", "tach flare", "speed", "rpm", "shift", "gear",
         "clock", "lean", "sats", "hdop", "odo", "trip",
         "fault", "fault what", "song", "album", "artist", "progress",
+        "hr", "hr unit",
     };
-    return i < 18 ? kNames[i] : nullptr;
+    return i < 20 ? kNames[i] : nullptr;
 }
 
 // --- MediaScreen ----------------------------------------------------------

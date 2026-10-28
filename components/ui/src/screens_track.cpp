@@ -379,6 +379,11 @@ void RaceScreen::enter(Canvas&) {
                             static_cast<int16_t>(kRaceGear.bottom() - 26),
                             static_cast<int16_t>(kRaceGear.w - 12), 14});
     status_.configure("NO LINE", color::kWarn, 1, Align::Center);
+    // The heart rate in the gap between the gear (to y=242) and the status
+    // line (from y=288). Blank unless Watch HR is on.
+    hr_.set_bounds(Rect{static_cast<int16_t>(kRaceGear.x + 6), 252,
+                        static_cast<int16_t>(kRaceGear.w - 12), 22});
+    hr_.configure("", color::kDim, 3, Align::Center);
     current_.set_bounds(kRaceLap.inset(6));
     current_.configure("--:--.--", color::kText, 6, Align::Center);
     delta_.set_bounds(kRaceDelta);
@@ -392,11 +397,11 @@ void RaceScreen::enter(Canvas&) {
     best_.configure("--:--.--", color::kAccent, 3, Align::Center);
     list_[0] = &rev_;     list_[1] = &gear_;  list_[2] = &status_;
     list_[3] = &current_; list_[4] = &delta_; list_[5] = &last_;
-    list_[6] = &best_;
+    list_[6] = &best_;    list_[7] = &hr_;
 }
 
 const char* RaceScreen::widget_name(size_t i) const {
-    static const char* const kNames[] = {"rev", "gear", "status", "lap", "delta", "last", "best"};
+    static const char* const kNames[] = {"rev", "gear", "status", "lap", "delta", "last", "best", "hr"};
     return i < sizeof kNames / sizeof kNames[0] ? kNames[i] : nullptr;
 }
 
@@ -441,6 +446,9 @@ void RaceScreen::update(const Frame& f) {
     current_.set_text(buf);
     delta_.set(f.lap.delta_ms, f.lap.delta_valid);
 
+    const Color hc = chrome::hr_readout(f.heart, f.t_ms, buf, sizeof buf, " bpm");
+    hr_.configure(buf, hc, 3, Align::Center);
+
     // A new best flashes, as on LAP.
     u::fmt_duration(buf, sizeof buf, f.lap.last_ms, f.lap.count > 0);
     const int32_t since = static_cast<int32_t>(f.t_ms - f.lap.last_done_ms);   // signed, as on LAP
@@ -482,7 +490,7 @@ void RaceScreen::draw_background(Canvas& c) {
                 "BEST", theme::secondary, 1, Align::Left);
 }
 
-WidgetList RaceScreen::widgets() { return WidgetList{list_, 7}; }
+WidgetList RaceScreen::widgets() { return WidgetList{list_, 8}; }
 
 // --- SessionScreen ------------------------------------------------------
 namespace {

@@ -458,7 +458,9 @@ the media half of step 9 is written. 50 host tests, all passing.
   name, for the power-on; turning the setting off and on forgets it),
   `Session` (average, highest, lowest) and zones by percent of CONFIG's Max
   HR. `ble` is the central (DIAG → Radio shows the link); CONFIG → Heart
-  rate → Watch HR, off by default. STAT → HEART shows it; the blackbox's
+  rate → Watch HR, off by default. STAT → HEART shows it, and (1.51) SPEED
+  under the rpm tile and RACE in the gear tile, coloured by zone, blank when
+  the setting is off (`chrome::hr_readout`); the blackbox's
   last column is `HR` (0 for no current reading) and the detail log's
   `_evt` has a `heart` event per link change. **Never run against a watch**:
   the D2 Air X10's spec sheet says its broadcast is ANT+, which this dash

@@ -1,4 +1,5 @@
 #include "check.hpp"
+#include "core/hr/hr.hpp"
 #include "core/gearcal/gearcal.hpp"
 #include "core/fusion/speed.hpp"
 #include "ui/app.hpp"
@@ -3327,6 +3328,55 @@ int main() {
                     send_damage(fx.app, s.px);
                 }
             }
+        }
+    }
+
+    CASE("SPEED and RACE carry the watch's heart rate, and no space for it when off");
+    {
+        struct W { Mode m; uint8_t n; Rect r; };
+        const W ws[] = {{Mode::Cruise, 0, Rect{28, 100, 84, 44}},   // under the rpm tile
+                        {Mode::Track, 0, Rect{12, 252, 144, 22}}};  // in the gear tile
+        for (const W& w : ws) {
+            Fixture fx;
+            fx.settings.gauge_sweep = false;
+            Screen320x480 s;
+            fx.app.begin(s.canvas);
+            go_to(fx.app, s.canvas, w.m, w.n);
+            // `want`: whether that colour is somewhere in it (the edges are
+            // anti-aliased blends, the strokes are the colour itself).
+            const auto ink_at = [&](const Frame& f, bool* want) {
+                fx.app.update(f);
+                s.wipe();
+                fx.app.render(s.canvas, true);
+                size_t n = 0;
+                for (int16_t y = w.r.y; y < w.r.bottom(); ++y) {
+                    for (int16_t x = w.r.x; x < w.r.right(); ++x) {
+                        const Color c = s.px[static_cast<size_t>(y) * kScreenW + x];
+                        if (c != color::kBg && c != 0) {
+                            ++n;
+                            if (want && c == color::kGood) *want = true;
+                        }
+                    }
+                }
+                return n;
+            };
+            Frame f = busy_frame();
+            CHECK(ink_at(f, nullptr) == 0);                       // Watch HR off
+
+            f.heart.link = core::state::Heart::Searching;
+            const size_t dashes = ink_at(f, nullptr);
+            CHECK(dashes > 0);                                     // on, nothing yet: "--"
+
+            f.heart.link = core::state::Heart::Live;
+            f.heart.bpm = 142;
+            f.heart.at_ms = f.t_ms - 500;
+            f.heart.zone_max_bpm = 185;                            // 76 %: zone 3
+            bool green = false;
+            CHECK(ink_at(f, &green) > dashes);
+            CHECK(green);
+
+            f.t_ms += core::hr::kStaleMs;                          // gone quiet
+            CHECK(ink_at(f, nullptr) == dashes);
         }
     }
 

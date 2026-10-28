@@ -8,6 +8,9 @@
 // fifteen dashboards, and the rider has to relearn the layout every time
 // they press B.
 #pragma once
+#include <cstdio>
+
+#include "core/hr/hr.hpp"
 #include "ui/canvas.hpp"
 #include "ui/theme.hpp"
 
@@ -68,6 +71,36 @@ inline void unit(Canvas& c, const Rect& r, const char* u) {
     c.draw_text(static_cast<int16_t>(r.right() - 4),
                 static_cast<int16_t>(r.bottom() + 3), u, theme::secondary, 1,
                 Align::Right);
+}
+
+// The rider's heart rate is coloured by zone wherever it shows (HEART, SPEED,
+// RACE), so a colour means the same effort on every screen.
+inline Color hr_zone_color(uint8_t zone) {
+    switch (zone) {
+        case 1:  return theme::secondary;
+        case 2:  return color::kAccent;
+        case 3:  return color::kGood;
+        case 4:  return color::kWarn;
+        case 5:  return color::kAlarm;
+        default: return theme::primary;
+    }
+}
+
+// SPEED's and RACE's heart rate: the bpm while a reading is current, "--"
+// while Watch HR is on and none is, and nothing at all when it is off, so a
+// rider without a watch never sees the space. `suffix` follows the number.
+inline Color hr_readout(const core::state::Heart& h, uint32_t t_ms, char* buf, size_t n,
+                        const char* suffix) {
+    if (h.link == core::state::Heart::Off) {
+        if (n) buf[0] = '\0';
+        return color::kDim;
+    }
+    if (!core::hr::fresh(h, t_ms)) {
+        std::snprintf(buf, n, "--%s", suffix);
+        return color::kDim;
+    }
+    std::snprintf(buf, n, "%u%s", static_cast<unsigned>(h.bpm), suffix);
+    return hr_zone_color(core::hr::zone(h.bpm, h.zone_max_bpm));
 }
 
 }  // namespace ui::chrome

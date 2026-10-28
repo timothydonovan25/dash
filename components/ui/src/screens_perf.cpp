@@ -290,16 +290,7 @@ constexpr int16_t kHrTileW = 110, kHrTileH = 58;
 constexpr const char* kHrCaption[4] = {"AVERAGE", "HIGHEST", "LOWEST", "% OF MAX"};
 Rect hr_tile(int i) { return Rect{kHrTileX[i], kHrTileY, kHrTileW, kHrTileH}; }
 
-Color zone_color(uint8_t z) {
-    switch (z) {
-        case 1:  return theme::secondary;
-        case 2:  return color::kAccent;
-        case 3:  return color::kGood;
-        case 4:  return color::kWarn;
-        case 5:  return color::kAlarm;
-        default: return theme::primary;
-    }
-}
+Color zone_color(uint8_t z) { return chrome::hr_zone_color(z); }
 }  // namespace
 
 void HeartScreen::enter(Canvas&) {
