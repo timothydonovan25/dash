@@ -52,10 +52,11 @@ inline constexpr int kTftCs          = 50;   // U16-70 → FPC 9, R21 pull-up
 inline constexpr int kTftTe          = 49;   // U16-69 ← FPC 8 FMARK, optional
 inline constexpr int kTftWidth       = 320;
 inline constexpr int kTftHeight      = 480;
-// BRINGUP: 10 MHz is where panel_test starts. The ILI9488's write cycle is
-// about 66 ns, so about 15 MHz is the in-spec ceiling. Raise this to
-// whatever panel_test's toggle pattern stays clean at, and no further.
-inline constexpr int kTftWrHz        = 10'000'000;
+// The ILI9488's write cycle is about 66 ns, so 15 MHz is the in-spec
+// ceiling. The first board looked clean at 20 MHz once it had the IPS init
+// sequence (2026-10-28); held at 15, in spec. Its speckle before that was
+// the init sequence, at every clock from 5 to 25 MHz, not the bus.
+inline constexpr int kTftWrHz        = 15'000'000;
 // The largest single transfer: one band of the render task's band buffer,
 // 40 landscape lines. The bus and the panel driver's staging buffer are
 // both sized from this.

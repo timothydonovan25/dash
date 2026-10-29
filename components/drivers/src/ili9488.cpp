@@ -76,7 +76,11 @@ hal::Status Ili9488::init() {
 
         esp_lcd_panel_handle_t panel = nullptr;
         // No conversion buffer: the 16-bit path never converts.
-        const esp_err_t err = esp_lcd_new_panel_ili9488(
+        // The IPS sequence: the HT035SHV007NS is IPS, and the default one
+        // (TN power, VCOM and gamma, no INVON) gave it a negative image and,
+        // once inverted by hand, a fine crawling speckle on every colour at
+        // any write clock (first light, 2026-10-28). It ends with INVON.
+        const esp_err_t err = esp_lcd_new_panel_ili9488_ips(
             static_cast<esp_lcd_panel_io_handle_t>(io_), &panel_cfg, 0, &panel);
         if (err != ESP_OK) return from_esp(err);
         panel_ = panel;
@@ -95,7 +99,7 @@ hal::Status Ili9488::init() {
     // board arrives, these two lines are the only thing to change.
     // panel_test's corners screen shows which.
     esp_lcd_panel_swap_xy(panel, true);
-    esp_lcd_panel_mirror(panel, true, false);
+    esp_lcd_panel_mirror(panel, true, true);
     // No esp_lcd_panel_disp_on_off(panel, true) here: init() above already
     // sent DISPON, and the call sends it again and waits another 100 ms,
     // all of it before the first frame.
