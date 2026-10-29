@@ -6,10 +6,10 @@ at 20 Hz while a USB host is connected (keeper_service.cpp). This draws the
 board turned by the firmware's own lean, pitch and heading, so a sign or axis
 error shows as the drawing moving the wrong way.
 
-Frame (core/attitude/attitude.hpp): x forward, y LEFT, z up. The IMU's axes
-are the chip's, so forward is the board's +X edge (gerber right edge, seen
-from the component side) and up is out of the component side. Lean + is
-right, pitch + is nose up, heading + is a right turn.
+Frame (core/attitude/attitude.hpp): x forward, y LEFT, z up. The board stands
+upright facing the rider (icm42688p.cpp): forward is out of the component
+side, up is the LED edge, left is the gerber +X edge. Lean + is right, pitch
++ is nose up, heading + is a right turn.
 
 Run with ESP-IDF's Python (it has pyserial and Tk):
     ~/.espressif/python_env/idf6.0_py3.14_env/bin/python tools/imu_view.py [-p PORT]
@@ -25,7 +25,8 @@ import tkinter as tk
 
 import serial
 
-# Board, mm, from the gerbers; centred. x forward = gerber +X, y left = gerber +Y.
+# Board, mm, from the gerbers; centred, in board axes (gerber X, Y, and Z out of
+# the component side). to_bike() stands it up the way icm42688p.cpp maps it.
 BW, BH, BT = 119.4, 68.6, 1.6
 LEDS_X = [61.24 + i * (114.7 - 61.24) / 7 - 67.31 for i in range(8)]
 LED_Y = 79.12 - 46.99
@@ -124,7 +125,9 @@ class App:
         cx, cy = w * 0.42, h * 0.55
         lean, pitch, head, glon, glat, gvert, yaw, temp, tmo = self.data or [0] * 9
         r = rot(lean, pitch, head - self.h0)
-        P = lambda v: view(apply(r, v))
+        to_bike = lambda v: (v[2], v[0], v[1])     # board (X, Y, Z) -> bike (fwd, left, up)
+        P = lambda v: view(apply(r, to_bike(v)))
+        Pb = lambda v: view(apply(r, v))
         S = lambda s: (cx + s[0] * SCALE, cy - s[1] * SCALE)
 
         # ground grid, fixed in the world
@@ -161,7 +164,7 @@ class App:
 
         # body axes from the centre
         for v, col, lab in (((90, 0, 0), "#ff5050", "x fwd"), ((0, 60, 0), "#50d070", "y left"), ((0, 0, 45), "#5090ff", "z up")):
-            a, b = S(P((0, 0, 0))), S(P(v))
+            a, b = S(Pb((0, 0, 0))), S(Pb(v))
             c.create_line(*a, *b, fill=col, width=3, arrow="last")
             c.create_text(b[0] + 6, b[1], text=lab, fill=col, anchor="w", font=("Sans", 10, "bold"))
 
@@ -174,7 +177,7 @@ class App:
                f"IMU    {temp:5.1f} °C\ntimeouts {int(tmo)}")
         c.create_text(w - 16, 16, text=txt, fill="#ff8080" if stale else "#e6e6e6", anchor="ne", font=("Monospace", 12))
         c.create_text(16, 16, anchor="nw", fill="#9aa0a6", font=("Sans", 10),
-                      text="red edge = forward (+X)\ngreen = component side (up)\nblack + red dots = screen side")
+                      text="screen (black, LED dots) faces you\ngreen = component side, forward\nred edge = gerber +X, your left")
 
 
 def main():

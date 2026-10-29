@@ -190,14 +190,17 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         if ((p[0] & 0x80) != 0) continue;         // empty-FIFO header
 
         Sample sm;
-        // Chip axes to board axes: x forward, y LEFT, z up, right-handed,
-        // which is what core/attitude documents and depends on. The part is
-        // right-handed, so a correct mapping only permutes axes in pairs or
-        // negates two at once; negating one makes a mirror image, and that
-        // reads a right turn as a left lean. BRINGUP: this mapping is taken
-        // from the board outline and has never been checked against a real
-        // part. Do bringup §6 in full, the moving check too: the stand
-        // alone does not test gz.
+        // Chip axes to bike axes: x forward, y LEFT, z up, right-handed,
+        // which is what core/attitude documents and depends on. The board
+        // stands upright facing the rider, LED edge on top: forward is out of
+        // the component side (chip +Z), up is toward the LED edge (chip +Y),
+        // left is chip +X. A cyclic permutation, so still right-handed; a
+        // single negation would make a mirror image and read a right turn as
+        // a left lean. The tilt back toward the rider is the pitch offset
+        // (CONFIG -> IMU, Calibrate level). Taken as flat, x along the long
+        // edge, it read tipping the board toward the rider as roll (first
+        // board, 2026-10-28). BRINGUP: signs checked on the bench only; do
+        // bringup §6's moving check too, the stand does not test gz.
         const float ax = be16(p + 1) * accel_scale_;
         const float ay = be16(p + 3) * accel_scale_;
         const float az = be16(p + 5) * accel_scale_;
@@ -205,12 +208,12 @@ hal::Status Icm42688p::read_fifo(Sample* out, size_t max, size_t& count) {
         const float gy = be16(p + 9) * gyro_scale_;
         const float gz = be16(p + 11) * gyro_scale_;
 
-        sm.ax_g = ax;
-        sm.ay_g = ay;
-        sm.az_g = az;
-        sm.gx_dps = gx - bias_[0];
-        sm.gy_dps = gy - bias_[1];
-        sm.gz_dps = gz - bias_[2];
+        sm.ax_g = az;
+        sm.ay_g = ax;
+        sm.az_g = ay;
+        sm.gx_dps = gz - bias_[0];
+        sm.gy_dps = gx - bias_[1];
+        sm.gz_dps = gy - bias_[2];
         sm.temp_c = static_cast<int8_t>(p[13]) / 2.07f + 25.0f;
         // Bytes 14-15: the part's timestamp, on its own oscillator. Not used
         // for t_ms; logged so the first rides can measure the real ODR and
