@@ -178,7 +178,10 @@ Things that will bite you:
   device its own clock. **Never call `spi_device_acquire_bus()`** — the
   IDF driver serialises the bus on its own. The IDF's SD host does call
   it, for a whole SD command including the card's busy time, so the IMU
-  waits out each one; its FIFO absorbs it (architecture §5.1).
+  waits out each one; its FIFO absorbs it (architecture §5.1). **Every
+  IMU transaction is polling** (`spi_device_polling_transmit`): a queued
+  `spi_device_transmit` pending while the SD host waited for the bus
+  deadlocked both, and the task watchdog rebooted the board (2026-10-28).
 - **The tach is an inductive wrap on the plug lead, 5–10 V.** R34/C19 may
   filter its spike away; see `p4-board-pin-map.md` §6.3 before blaming
   firmware for a dead tach.

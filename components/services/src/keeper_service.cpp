@@ -21,6 +21,9 @@
 
 #include "esp_core_dump.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "driver/usb_serial_jtag.h"
+#include <cstdio>
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -79,6 +82,7 @@ void keeper_task(void* arg) {
     core::sun::AutoDim auto_dim;
     uint32_t pass = 0;
     uint32_t saved_wp_gen = 0;
+    uint32_t gnss_log_ms = 0;
     TickType_t next = xTaskGetTickCount();
 
     for (;;) {
@@ -101,6 +105,19 @@ void keeper_task(void* arg) {
         }
 
         d.health->publish_if_changed(d.slots->health, now);
+
+        // shortcut: bring-up only. The attitude at 20 Hz for tools/imu_view.py,
+        // only while a USB host is there to read it (is_connected() costs a
+        // little on every tick); remove once DIAG -> IMU is on a panel.
+        if (d.system && usb_serial_jtag_is_connected()) {
+            const core::state::Attitude a = d.slots->attitude.get();
+            printf("IMU %.2f %.2f %.2f %.3f %.3f %.3f %.2f %.1f %u\n",
+                   static_cast<double>(a.lean_deg), static_cast<double>(a.pitch_deg),
+                   static_cast<double>(a.heading_deg), static_cast<double>(a.g_lon),
+                   static_cast<double>(a.g_lat), static_cast<double>(a.g_vert),
+                   static_cast<double>(a.yaw_rate_dps), static_cast<double>(a.imu_temp_c),
+                   static_cast<unsigned>(d.system->imu_timeouts));
+        }
 
         if (++pass < kSlowEvery) continue;
         pass = 0;
@@ -184,6 +201,18 @@ void keeper_task(void* arg) {
             d.system->chip_temp_ok = ok;
 
             watch_stacks(*d.system, now);
+
+            // The GPS on the console every 10 s: with no panel, DIAG -> GPS
+            // is not there to read. From here, core 1, not from `gnss`.
+            if (now - gnss_log_ms >= 10000) {
+                gnss_log_ms = now;
+                const core::state::Gnss g = d.slots->gnss.get();
+                ESP_LOGI("gnss", "sentences %u, bad checksums %u, %s, sats %u, hdop %.1f",
+                         static_cast<unsigned>(d.system->gnss_sentences),
+                         static_cast<unsigned>(d.system->gnss_bad_csum),
+                         g.fix ? "FIX" : "no fix", static_cast<unsigned>(g.sats),
+                         static_cast<double>(g.hdop));
+            }
 
             // Bus recoveries live in the driver that performs them; the
             // DIAG bus screen is the reason they are counted at all.

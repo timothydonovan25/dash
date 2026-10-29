@@ -2,13 +2,12 @@ CONFIG_IDF_TARGET="esp32p4"
 
 # The P4 board: Guition JC-ESP32P4-M3-C6 module. docs/p4-board-pin-map.md.
 #
-# BRINGUP: chip revision. The only P4 measured so far (demo_p4's board) was
-# revision v1.3, which needs the pre-v3 selection below; v3.x silicon is a
-# different hardware family in IDF's own words. Read the module's revision
-# with `esptool.py chip-id` on arrival and change these two lines if it is
-# v3 or later.
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESP32P4_REV_MIN_100=y
+# Chip revision. The bike board's module is v3.2 (its boot log, 2026-10-28);
+# the demo board's is v1.3, which demo_p4/sdkconfig.defaults keeps. v3.x
+# silicon is a different hardware family in IDF's own words, so an image
+# built for one does not run on the other.
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set
+CONFIG_ESP32P4_REV_MIN_301=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

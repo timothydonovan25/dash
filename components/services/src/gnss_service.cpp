@@ -6,6 +6,7 @@
 #include "services/services.hpp"
 #include "core/nmea/nmea.hpp"
 
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -23,6 +24,9 @@ constexpr uint32_t kWaitMs = 50;
 void bring_up(Deps& d) {
     const hal::Status s = d.gnss->init();
     const uint32_t now = d.clock->now_ms();
+    // Once per bring-up, so the console tells a dead receiver from a slow one.
+    ESP_LOGI("gnss", "receiver: %s, %s", hal::status_name(s),
+             hal::ok(s) ? (d.gnss->full_rate() ? "10 Hz" : "stuck at 1 Hz") : "no answer");
     if (hal::ok(s)) {
         d.health->report_limited(core::state::Dev::Gnss, !d.gnss->full_rate());
         d.health->report_ok(core::state::Dev::Gnss, now);

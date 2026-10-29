@@ -70,7 +70,13 @@ hal::Status Icm42688p::read_regs(uint8_t reg, uint8_t* out, size_t len) {
     t.length = 8 * (len + 1);
     t.tx_buffer = tx_;
     t.rx_buffer = rx_;
-    const hal::Status s = from_esp(spi_device_transmit(
+    // Polling, never the queued spi_device_transmit: the SD host shares SPI2
+    // and calls spi_device_acquire_bus() for every command, and a queued
+    // transaction pending while it waits for the bus deadlocked both, imu
+    // and logger, until the task watchdog rebooted the board (2026-10-28,
+    // core dump). Polling takes the same bus lock the SD host does. At most
+    // 513 bytes at 24 MHz: ~170 us of spin, ctrl still preempts it.
+    const hal::Status s = from_esp(spi_device_polling_transmit(
         static_cast<spi_device_handle_t>(dev_), &t));
     if (hal::ok(s)) {
         for (size_t i = 0; i < len; ++i) out[i] = rx_[i + 1];
