@@ -212,6 +212,11 @@ void keeper_task(void* arg) {
                          static_cast<unsigned>(d.system->gnss_bad_csum),
                          g.fix ? "FIX" : "no fix", static_cast<unsigned>(g.sats),
                          static_cast<double>(g.hdop));
+                const core::state::Battery bt = d.slots->battery.get();
+                ESP_LOGI("power", "battery %.2f V (VIN + trim), rest %.2f, charge %.2f, crank min %.2f, verdict %u",
+                         static_cast<double>(d.slots->elec.get().vbat), static_cast<double>(bt.rest_v),
+                         static_cast<double>(bt.charge_v), static_cast<double>(bt.crank_min_v),
+                         static_cast<unsigned>(bt.verdict));
             }
 
             // Bus recoveries live in the driver that performs them; the

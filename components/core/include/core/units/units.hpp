@@ -88,7 +88,8 @@ size_t fmt_delta(char* buf, size_t n, int32_t ms, bool valid, int decimals = 1);
 
 // Clock time from a UTC millisecond count, with a whole-hour offset for the
 // local zone. `24:00` wrap handled; no date, because the dash never shows one.
+// `twelve_hour`: "1:30" for 13:30 and "12:05" for 00:05, no AM/PM.
 size_t fmt_clock(char* buf, size_t n, uint32_t utc_ms, int tz_offset_hours,
-                 bool valid);
+                 bool valid, bool twelve_hour = false);
 
 }  // namespace core::units

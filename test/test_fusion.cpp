@@ -181,6 +181,37 @@ int main() {
         CHECK_NEAR(o.mph, 30.0, 0.2);
     }
 
+    CASE("no wheel sensors fitted: both read a healthy 0, GPS at 1 Hz still gets through");
+    {
+        // The first ride on the bike board (2026-10-28): no wheel sensors,
+        // GPS stuck at 1 Hz, 9-13 sats, and the speedo read 0 throughout.
+        for (const uint32_t fix_ms : {1000u, 100u}) {
+            SpeedFilter f;
+            SpeedOutput o;
+            for (uint32_t t = 0; t <= 30000; t += 20) {
+                // Standing 2 s, 0 to 30 mph over 6 s (0.23 g), then 30 mph.
+                const float ts = t / 1000.0f;
+                const float v = ts < 2 ? 0 : ts < 8 ? (ts - 2) * 5.0f : 30.0f;
+                SpeedInput in = at(t);
+                in.accel_ok = true;
+                in.accel_g = (ts >= 2 && ts < 8) ? 5.0f / kMphPerSecPerG : 0.0f;
+                in.front_ok = in.rear_ok = true;     // healthy, reading nothing
+                in.front_mph = in.rear_mph = 0.0f;
+                in.gps_ok = true;
+                in.gps_new = t % fix_ms == 0;
+                in.gps_mph = v;
+                o = f.step(in);
+            }
+            CHECK(o.valid);
+            CHECK_NEAR(o.mph, 30.0, 2.0);
+            CHECK(o.rejected & kSrcFront);
+            CHECK(o.rejected & kSrcRear);
+            const float shown = shown_speed_mph(0.0f, true, 0.0f, true, 30.0f, true,
+                                                o.mph, o.valid, o.rejected);
+            CHECK_NEAR(shown, 30.0, 2.0);
+        }
+    }
+
     CASE("hard braking: the wheels are judged against where GPS is now, not was");
     {
         // 0.8 g from 20 mph, GPS at 10 Hz. Between fixes the last one goes

@@ -169,7 +169,7 @@ size_t fmt_delta(char* buf, size_t n, int32_t ms, bool valid, int decimals) {
 }
 
 size_t fmt_clock(char* buf, size_t n, uint32_t utc_ms, int tz_offset_hours,
-                 bool valid) {
+                 bool valid, bool twelve_hour) {
     if (!valid) return emit_lit(buf, n, "--:--");
 
     constexpr int32_t kDay = 24 * 60 * 60;
@@ -180,7 +180,15 @@ size_t fmt_clock(char* buf, size_t n, uint32_t utc_ms, int tz_offset_hours,
 
     char tmp[8];
     size_t k = 0;
-    k += two_digits(tmp + k, static_cast<uint32_t>(s / 3600));
+    uint32_t h = static_cast<uint32_t>(s / 3600);
+    if (twelve_hour) {
+        h %= 12;
+        if (h == 0) h = 12;
+        if (h < 10) tmp[k++] = static_cast<char>('0' + h);
+        else k += two_digits(tmp + k, h);
+    } else {
+        k += two_digits(tmp + k, h);
+    }
     tmp[k++] = ':';
     k += two_digits(tmp + k, static_cast<uint32_t>((s / 60) % 60));
     return emit(buf, n, tmp, k);

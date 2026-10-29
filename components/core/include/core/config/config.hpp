@@ -35,6 +35,8 @@ struct Settings {
     uint8_t brightness_pct = 80;
     uint8_t unit_system    = static_cast<uint8_t>(units::System::Imperial);
     int32_t tz_offset_h    = -5;
+    // "1:30" rather than "13:30". No AM/PM: it would not fit the clock tiles.
+    bool    clock_12h      = true;
     bool    dim_at_night   = false;
     // The wheelspin / lockup bar across the top of every screen (core/slip).
     bool    slip_bar       = true;

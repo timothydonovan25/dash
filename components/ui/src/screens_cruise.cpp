@@ -209,7 +209,7 @@ void SpeedScreen::update(const Frame& f) {
     char buf[24];
     u::fmt_clock(buf, sizeof buf, f.gnss.utc_ms,
                  has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0,
-                 f.gnss.fix);
+                 f.gnss.fix, has_ctx() && ctx().settings && ctx().settings->clock_12h);
     clock_.set_text(buf);
 
     const Color hc = chrome::hr_readout(f.heart, f.t_ms, buf, sizeof buf, "");
@@ -523,7 +523,7 @@ void MinimalScreen::update(const Frame& f) {
     char clock[12];
     u::fmt_clock(clock, sizeof clock, f.gnss.utc_ms,
                  has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0,
-                 f.gnss.fix);
+                 f.gnss.fix, has_ctx() && ctx().settings && ctx().settings->clock_12h);
     clock_.set_text(clock);
 }
 
@@ -613,7 +613,8 @@ void NavScreen::update(const Frame& f) {
     if (w.set) {
         char clock[12];
         u::fmt_clock(clock, sizeof clock, w.utc_ms,
-                     has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0, true);
+                     has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0, true,
+                     has_ctx() && ctx().settings && ctx().settings->clock_12h);
         std::snprintf(when, sizeof when, "%s set %s", core::waypoint::name(sel), clock);
     }
     dropped_.set_text(when);

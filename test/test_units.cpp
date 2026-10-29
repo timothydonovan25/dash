@@ -83,6 +83,12 @@ int main() {
     fmt_clock(b.b, sizeof b.b, t_1330_utc, -14, true);  CHECK(eq(b.b, "23:30"));
     fmt_clock(b.b, sizeof b.b, t_1330_utc, 11, true);   CHECK(eq(b.b, "00:30"));
     fmt_clock(b.b, sizeof b.b, 0, 0, false);            CHECK(eq(b.b, "--:--"));
+    // 12-hour: no leading zero, 12 not 0, no AM/PM.
+    fmt_clock(b.b, sizeof b.b, t_1330_utc, 0, true, true);   CHECK(eq(b.b, "1:30"));
+    fmt_clock(b.b, sizeof b.b, t_1330_utc, 11, true, true);  CHECK(eq(b.b, "12:30"));
+    fmt_clock(b.b, sizeof b.b, t_1330_utc, -1, true, true);  CHECK(eq(b.b, "12:30"));
+    fmt_clock(b.b, sizeof b.b, t_1330_utc, -2, true, true);  CHECK(eq(b.b, "11:30"));
+    fmt_clock(b.b, sizeof b.b, 0, 0, false, true);           CHECK(eq(b.b, "--:--"));
 
     CASE("a short buffer truncates and still terminates");
     char small[4];

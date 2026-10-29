@@ -63,6 +63,7 @@ const ConfigItem kItems[] = {
     choice(0x0105, "Speedo",       "Display", FIELD(speedo_source), kSpeedoOptions, 2),
     boolean(0x0106,"Slip bar",     "Display", FIELD(slip_bar)),
     boolean(0x0107,"Popups",       "Display", FIELD(popups)),
+    boolean(0x0108,"12h clock",    "Display", FIELD(clock_12h)),
 
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),
