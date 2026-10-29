@@ -27,6 +27,7 @@
 
 #include "esp_app_desc.h"
 #include "esp_attr.h"
+#include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -84,6 +85,8 @@ struct Logger {
     uint32_t         sd_max_ms = 0;
     uint16_t         sd_slow = 0;
     uint16_t         sd_errors = 0;
+    // shortcut: bring-up totals for the console; remove once DIAG is on a panel.
+    uint32_t         tot_bytes = 0, tot_errors = 0, tot_max_ms = 0, next_report_ms = 0;
     char             line[1024] = {};
     Batches*         batch = nullptr;
 };
@@ -94,11 +97,15 @@ uint32_t now_ms(const Logger& L) { return L.d->clock->now_ms(); }
 void account(Logger& L, uint32_t t0, hal::Status s, size_t bytes) {
     const uint32_t dt = now_ms(L) - t0;
     if (dt > L.sd_max_ms) L.sd_max_ms = dt;
+    if (dt > L.tot_max_ms) L.tot_max_ms = dt;
     if (dt >= kSlowMs && L.sd_slow < UINT16_MAX) ++L.sd_slow;
     if (hal::ok(s)) {
         L.sd_bytes += static_cast<uint32_t>(bytes);
-    } else if (s != hal::Status::Busy && L.sd_errors < UINT16_MAX) {
-        ++L.sd_errors;
+        L.tot_bytes += static_cast<uint32_t>(bytes);
+    } else if (s != hal::Status::Busy) {
+        if (L.sd_errors < UINT16_MAX) ++L.sd_errors;
+        ++L.tot_errors;
+        ESP_LOGW("logger", "card write failed: %s", hal::status_name(s));
     }
 }
 
@@ -531,6 +538,13 @@ void logger_task(void* arg) {
         }
 
         flush(L);
+        if (static_cast<int32_t>(now_ms(L) - L.next_report_ms) >= 0) {
+            L.next_report_ms = now_ms(L) + 10000;
+            ESP_LOGI("logger", "%s: %u rows, %u bytes to the card, %u errors, slowest %u ms",
+                     L.out[core::log::kMain].path, static_cast<unsigned>(L.out[core::log::kMain].rows),
+                     static_cast<unsigned>(L.tot_bytes), static_cast<unsigned>(L.tot_errors),
+                     static_cast<unsigned>(L.tot_max_ms));
+        }
         vTaskDelay(pdMS_TO_TICKS(n == 0 ? 200 : 20));
     }
 }

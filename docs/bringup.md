@@ -482,8 +482,49 @@ SDIO via ESP-Hosted, as `demo_p4/` does on the demo board
 **needs an external antenna** fitted before range means anything.
 
 The C6 has its own reset (GPIO54, U16-74) and boot (U16-18, R1) lines.
-Its UART is on test pads H1/H3; its boot pin has no pad, so forcing it
+Its UART is on test pads **H1 = U0RXD** (U16-16, into the C6) and
+**H3 = U0TXD** (U16-17, out of it); its boot pin has no pad, so forcing it
 into download mode means clipping onto R1.
+
+**Found on the first board (2026-10-28): the C6 does not speak ESP-Hosted.**
+`sdmmc_card_init` succeeds and the very next CCCR read times out
+(`sdio_card_fn_init failed`, `0x107`), the same at 40 MHz 4-bit and 5 MHz
+1-bit, with the demo's identical ESP-Hosted settings. So it is the
+module's factory C6 firmware, not the link, and the SDIO push from
+`slave_fw` cannot reach it. Flash the C6 over its own UART once:
+
+With an FTDI TTL-232R-3V3: **black** GND, **yellow** its RXD, **orange**
+its TXD. **Red is 5 V: leave it unconnected.** It ends up as
+`/dev/ttyUSB0`. Source ESP-IDF (`export.sh`) and run from the repo root.
+
+1. **Listen.** Board off. Black to GND, **yellow to H3** (the C6's TX).
+   Open `idf.py -C demo_p4/c6_cp -p /dev/ttyUSB0 monitor --no-reset`, then
+   power the board. Do not open the P4's `/dev/ttyACM0` meanwhile: that
+   resets the P4, which resets the C6. The text is the first evidence of
+   what Guition put on it; keep it.
+2. **Wire for flashing.** **Orange to H1** (the C6's RX).
+3. **Find R1's IO9 end.** Board off, meter on continuity: the end of R1
+   that beeps to a 3.3 V point (VCC) is the wrong one; the other is IO9.
+   Ground the IO9 end **through a 1 kΩ resistor**, not a bare wire: it
+   still reads low (0.3 V against the 10 kΩ pull-up), and the wrong end
+   would only pass 3.3 mA instead of shorting VCC.
+4. **Download mode.** With IO9 grounded, power the board and wait 10 s.
+   The P4 resets the C6 once at boot (GPIO54) and gives up on the link by
+   ~6 s, so the C6 is left in its ROM bootloader. Check with
+   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset chip-id`.
+   If it never answers, the C6's GPIO8 strap may be reading low (download
+   needs GPIO8 high, GPIO9 low); look at the module before going further.
+5. **Back up what is there**, 4 MB, about a minute and a half:
+   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 460800 --before no-reset --after no-reset read-flash 0 0x400000 c6_factory_backup.bin`
+6. **Flash ESP-Hosted** (`demo_p4/c6_cp`, 2.12.8, Wi-Fi and BLE; build it
+   first with `idf.py -C demo_p4/c6_cp build`):
+   `cd demo_p4/c6_cp/build && python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 460800 --before no-reset --after no-reset write-flash "@flash_args"`
+7. **Run it.** Unclip the 1 kΩ from R1, power-cycle the board, and read
+   the P4's console. Expect `transport: Identified slave [esp32c6]` and the
+   C6 reporting 2.12.8, then `ble: advertising`. The yellow wire can stay
+   on to watch the C6's side at the same time.
+8. **Then `idf.py -p /dev/ttyACM0 c6-flash`**, so `slave_fw` holds the same
+   image and later C6 updates go over SDIO, as on the demo.
 
 The `ble` service is built in (`services/src/ble_service.cpp`) and starts
 last at boot. It has not run on this board. The same GATT code advertised
