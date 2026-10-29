@@ -259,10 +259,11 @@ Result Parser::parse_rmc(state::Gnss& out) {
     const uint32_t t = read_time_ms(field_[1], &ok);
     if (ok) out.utc_ms = t;
 
-    // ddmmyy. Kept even for a void fix, like the time: the clock is right
-    // before the position is.
+    // ddmmyy, from a valid fix only. Before the receiver has the time, a
+    // void RMC carries a placeholder date: the PA1616D sends 050180, read as
+    // 2080-01-05, and the logger renamed a ride's files to it (2026-10-28).
     int year = 0, month = 0, day = 0;
-    const uint16_t doy = day_of_year_from_ddmmyy(field_[9], year, month, day);
+    const uint16_t doy = valid ? day_of_year_from_ddmmyy(field_[9], year, month, day) : 0;
     if (doy != 0) {
         out.day_of_year = doy;
         out.year = static_cast<uint16_t>(year);

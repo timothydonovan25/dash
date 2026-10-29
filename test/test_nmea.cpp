@@ -227,6 +227,21 @@ int main() {
         CHECK(g.day_of_year == 1);
     }
 
+    CASE("a void fix's date is ignored: before it has the time, the receiver sends a placeholder");
+    {
+        Parser p;
+        Gnss g;
+        send(p, g, "GPRMC,000010.800,V,,,,,0.00,0.00,050180,,,N");   // the PA1616D, cold
+        CHECK(g.year == 0);
+        CHECK(g.day_of_year == 0);
+        send(p, g, kGoodRmc);                    // a fix brings the real date, 23 March
+        CHECK(g.day_of_year == 31 + 28 + 23);
+        const uint16_t year = g.year;
+        send(p, g, "GPRMC,123521,V,,,,,,,050180,,,N");   // and a later void one keeps it
+        CHECK(g.day_of_year == 31 + 28 + 23);
+        CHECK(g.year == year);
+    }
+
     CASE("a missing or impossible date leaves the last good one alone");
     {
         Parser p;
