@@ -120,7 +120,10 @@ the effect is visible in the lean readout.
 
 ## 6. Physical mount
 
-The pads are already in `mount/mount.py`. What changes:
+`mount/pod.py` (2026-10-28) is the isolated design, open, no housing: the
+board on a tray floating on four silicone gimbal damping balls in front of an
+H-frame on the bar clamp. Nothing limits its travel but the balls. `mount/mount.py` is the earlier rigid carrier. What
+the isolation must do:
 
 - **Revise the target frequency.** I said ~30 Hz earlier. That was wrong
   for this engine: idle's 1st order is ~28 Hz (*estimate*), so a 30 Hz mount

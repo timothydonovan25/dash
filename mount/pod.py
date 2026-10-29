@@ -1,0 +1,260 @@
+"""Open, isolated mount for the dash board: the board floats on four silicone
+damping balls in front of a rigid H-frame on the handlebar. No housing.
+
+    frame  (rigid, one print with the clamp's lower half)  ── 4 damping balls ──  tray + PCB + panel
+    clamp_cap  (the clamp's upper half; the mount's angle is set by turning it on the bar)
+
+Three prints: tray, frame, clamp_cap. The frame prints front face down, the
+clamp half growing up from it with its bore open at the top: no supports.
+
+Why balls, not foam or hard posts (docs/imu-vibration.md §6): idle's 1st engine
+order is ~28 Hz, so the board must sit at fn ~15-20 Hz. On ~100 g, four gimbal
+damping balls land there and damp well. Open means nothing stops the board but
+the balls: a ball that pops out is a board on its cables.
+
+Frame: board frame, gerber X right / Y up, mm. Z = 0 is the PCB's rider face
+(panel and shift LEDs, bottom layer); the rider is at -Z. Y max is the LED edge,
+the top. Run:  python pod.py  -> mount/out/pod_*.stl, *.step
+"""
+import os
+import cadquery as cq
+
+# ---- board (from the gerbers and the pick-and-place) -------------------------
+BX0, BX1, BY0, BY1 = 7.62, 127.0, 12.7, 81.28
+HOLES = [(10.922, 16.002), (123.698, 16.002), (123.698, 77.978), (10.922, 77.978)]  # 3.0 mm NPTH
+# U8's body is ~1.2 mm from the bottom-right hole: no post there can keep a wall on that side
+POSTS = [h for h in HOLES if h != (123.698, 16.002)]
+PCB_T = 1.6
+CX, CY = (BX0 + BX1) / 2, (BY0 + BY1) / 2
+LEDS_X = (61.24, 114.7)        # LED7..LED0 centres, bottom layer, y = 79.12
+LED_Y, LED_L, LED_H = 79.12, 3.2, 1.9
+
+# Top-side parts the tray must clear: ref, x, y, rot (pick-and-place), body L x W from the
+# footprint, h above the PCB's top face with any mating plug. Every h is an estimate: MEASURE.
+# open=True: nothing above it at all: vertical connectors, whose wires leave straight up
+# and then away, and the terminals' screws.
+PARTS = [
+    ("U11 terminal+plug", 31.75, 16.25, 0, 7.6, 9.0, 16.0, True),
+    ("U8 terminal+plug", 117.51, 16.25, 0, 7.6, 9.0, 16.0, True),
+    ("F1 fuse holder", 91.0, 17.5, 180, 16.0, 6.7, 10.0, False),
+    ("C23 220uF", 78.27, 17.3, 270, 6.6, 6.6, 8.0, False),
+    ("SW2 slide switch", 105.76, 16.5, 0, 8.7, 3.7, 7.5, False),
+    ("U16 module+IPEX", 67.82, 63.63, 0, 27.0, 27.0, 6.0, False),
+    ("C22 10uF", 84.46, 25.91, 270, 5.3, 5.3, 5.6, False),
+    ("L1 5.6uH", 107.95, 37.85, 180, 8.5, 8.0, 5.4, False),
+    ("U4 GPS", 36.64, 72.57, 0, 16.0, 16.0, 5.0, False),
+    ("JP1 u.FL+plug", 44.6, 61.77, 180, 3.5, 3.5, 5.0, False),
+    ("CN1 GH vertical+plug", 40.77, 16.13, 0, 7.0, 6.0, 7.0, True),
+    ("CN2 GH vertical+plug", 55.12, 16.26, 0, 5.8, 6.0, 7.0, True),
+    ("CN3 GH vertical+plug", 64.14, 16.26, 0, 5.8, 6.0, 7.0, True),
+    ("U6 opto", 39.5, 35.43, 0, 10.3, 4.6, 4.0, False),
+    ("U9 USB-C", 11.81, 68.33, 270, 9.0, 7.4, 3.5, False),
+    ("FPC1 + tail", 122.52, 48.28, 270, 25.0, 5.5, 3.0, False),
+    ("U5 TO-252", 121.83, 70.97, 135, 10.0, 6.2, 2.5, False),
+    ("CARD1 microSD", 17.02, 46.61, 270, 14.0, 12.0, 2.0, False),
+    ("D4 SMB", 92.96, 25.02, 0, 5.3, 3.6, 2.5, False),
+    ("D8 SMB", 49.02, 16.64, 90, 5.3, 3.6, 2.5, False),
+    ("D9 SMB", 69.98, 16.64, 90, 5.3, 3.6, 2.5, False),
+]
+KEEP = 1.0           # air the tray keeps around every part, each way
+WIRE_WINDOW = (27.0, 68.5, 21.5)   # x0, x1, y1: one opening over U11 and CN1-CN3, no slivers between
+BALL_HEAD_D, BALL_HEAD_L = 10.0, 5.0   # MEASURE: ball head below the tray's plate, toward the board
+
+# ---- panel: MEASURE it; the board has no outline for it ------------------------
+PANEL_W, PANEL_H, PANEL_T = 85.0, 55.5, 3.0   # HT035SHV007NS module + tape; landscape
+PANEL_CX, PANEL_CY = 81.0, 48.28              # tail centred on FPC1 (y), x a guess
+
+# ---- tunables ---------------------------------------------------------------
+SPACER = 15.0        # PCB top face to tray: must clear the tallest part incl. terminal plugs
+TRAY_T = 4.0
+TRAY_W = 7.0         # tray ring width, over the board's edge
+PILOT_M25 = 2.2      # M2.5 self-tapping pilot (PETG), screws in from the rider side
+DAMP = [(22.0, 30.0), (22.0, 64.0), (112.0, 30.0), (112.0, 64.0)]  # clear of parts > 6 mm
+DAMP_HOLE = 6.5      # MEASURE: the hole your balls snap into
+DAMP_GAP = 10.0      # MEASURE: plate face to plate face across a seated ball
+DAMP_PLATE = 2.0     # plate thickness at the ball hole (the ball's neck length)
+DAMP_CB = 12.0       # counterbore that thins a plate down to DAMP_PLATE
+FRAME_T = 6.0        # H-frame thickness; ball holes are thinned to DAMP_PLATE
+FRAME_W = 16.0       # H-frame leg width
+
+BAR_D = 28.6         # MEASURE: handlebar diameter at the clamp (7/8" bar = 22.2)
+BAR_RUBBER = 1.0     # inner-tube strip in the bore, compressed, per side: grip + no slip
+CLAMP_W = 44.0
+CLAMP_WALL = 6.0
+CLAMP_BOLT_X = 15.0
+LUG_R, LUG_H = 6.5, 7.0
+SPLIT_GAP = 1.0
+M5_CLEAR, M5_NUT_AF, M5_NUT_H = 5.5, 8.4, 4.2
+BASE_W, BASE_D, BASE_T = 64.0, 44.0, 6.0   # pad under the clamp, spreading it over the frame
+BASE_MIN = 8.0                       # base under the barrel
+
+# ---- derived heights --------------------------------------------------------
+Z_PANEL = -PANEL_T
+Z_TRAY0 = PCB_T + SPACER
+Z_TRAY1 = Z_TRAY0 + TRAY_T
+Z_BACK_IN = Z_TRAY1 + DAMP_GAP       # ball plates: tray's back face .. frame's front face
+Z_BACK_OUT = Z_BACK_IN + FRAME_T
+
+
+def _box(x0, x1, y0, y1, z0, z1):
+    return cq.Workplane("XY").box(x1 - x0, y1 - y0, z1 - z0, centered=False).translate((x0, y0, z0))
+
+
+def _cyl(x, y, z0, z1, d):
+    return cq.Workplane("XY").workplane(offset=z0).center(x, y).circle(d / 2).extrude(z1 - z0)
+
+
+def _part(x, y, rot, L, W, z0, z1):
+    return (cq.Workplane("XY").box(L, W, z1 - z0, centered=(True, True, False))
+            .rotate((0, 0, 0), (0, 0, 1), rot).translate((x, y, z0)))
+
+
+def chips(grow=0.0):
+    """The parts as boxes; grown by `grow` and, if open, to the sky: the tray's keep-outs."""
+    out = None
+    for _, x, y, rot, L, W, h, sky in PARTS:
+        top = 99 if (sky and grow) else PCB_T + h + grow
+        p = _part(x, y, rot, L + 2 * grow, W + 2 * grow, PCB_T, top)
+        out = p if out is None else out.union(p)
+    return out
+
+
+def ball_heads():
+    return [_cyl(x, y, Z_TRAY1 - DAMP_PLATE - BALL_HEAD_L, Z_TRAY1 - DAMP_PLATE, BALL_HEAD_D) for x, y in DAMP]
+
+
+def tray():
+    """Rigid ring the PCB screws to, with two cross bars carrying the ball plates."""
+    ring = (_box(BX0, BX1, BY0, BY1, Z_TRAY0, Z_TRAY1)
+            .cut(_box(BX0 + TRAY_W, BX1 - TRAY_W, BY0 + TRAY_W, BY1 - TRAY_W, Z_TRAY0 - 1, Z_TRAY1 + 1)))
+    for x in sorted({d[0] for d in DAMP}):
+        ring = ring.union(_box(x - 7, x + 7, BY0, BY1, Z_TRAY0, Z_TRAY1))
+    for x, y in DAMP:
+        ring = ring.union(_cyl(x, y, Z_TRAY0, Z_TRAY1, DAMP_CB + 5))
+    for x, y in POSTS:
+        post = _cyl(x, y, PCB_T, Z_TRAY0 + 0.5, 6.4)
+        flare = cq.Workplane("XY").add(cq.Solid.makeCone(
+            3.2, 6.5, 6, pnt=cq.Vector(x, y, Z_TRAY0 - 6), dir=cq.Vector(0, 0, 1)))
+        ring = ring.union(post).union(flare).cut(_cyl(x, y, PCB_T, PCB_T + 10, PILOT_M25))
+    for x, y in DAMP:   # ball hole; counterbore from the board side leaves a DAMP_PLATE web at the back
+        ring = (ring.cut(_cyl(x, y, Z_TRAY0 - 1, Z_TRAY1 + 1, DAMP_HOLE))
+                .cut(_cyl(x, y, Z_TRAY0 - 1, Z_TRAY1 - DAMP_PLATE, DAMP_CB)))
+    ring = ring.intersect(_box(BX0, BX1, BY0, BY1, 0, 99))   # flares stay inside the board outline
+    ring = ring.cut(_box(WIRE_WINDOW[0], WIRE_WINDOW[1], BY0 - 1, WIRE_WINDOW[2], 0, 99))
+    return ring.cut(chips(KEEP))   # posts next to a part become D-shaped; check() guards their walls
+
+
+def frame():
+    """H: a leg under each pair of balls, a cross bar under the clamp plate."""
+    xs = sorted({d[0] for d in DAMP})
+    ys = [d[1] for d in DAMP]
+    f = _box(xs[0], xs[1], CY - BASE_D / 2, CY + BASE_D / 2, Z_BACK_IN, Z_BACK_OUT)
+    for x in xs:
+        f = f.union(_box(x - FRAME_W / 2, x + FRAME_W / 2, min(ys), max(ys), Z_BACK_IN, Z_BACK_OUT))
+    for x, y in DAMP:
+        f = f.union(_cyl(x, y, Z_BACK_IN, Z_BACK_OUT, FRAME_W))
+    f = f.edges("|Z").fillet(3)
+    for x, y in DAMP:   # ball holes; counterbore from the back leaves a DAMP_PLATE web
+        f = (f.cut(_cyl(x, y, Z_BACK_IN - 1, Z_BACK_OUT + 1, DAMP_HOLE))
+             .cut(_cyl(x, y, Z_BACK_IN + DAMP_PLATE, Z_BACK_OUT + 1, DAMP_CB)))
+    base, _, _ = clamp()
+    return f.union(base)
+
+
+def clamp():
+    """Built on the frame's back (bar along X, base face z=0, +z away from the pod), then placed."""
+    r = (BAR_D + 2 * BAR_RUBBER + 0.4) / 2
+    ro = r + CLAMP_WALL
+    zc = BASE_MIN + ro
+    by = r + LUG_R * 0.6
+    bolts = [(sx * CLAMP_BOLT_X, sy * by) for sx in (-1, 1) for sy in (-1, 1)]
+    barrel = (cq.Workplane("YZ").workplane(offset=-CLAMP_W / 2).center(0, zc).circle(ro).extrude(CLAMP_W))
+    for x, y in bolts:
+        barrel = barrel.union(_cyl(x, y, zc - LUG_H, zc + LUG_H, 2 * LUG_R))
+    plate = (cq.Workplane("XY").rect(BASE_W, BASE_D).extrude(BASE_T)
+             .edges("|Z").fillet(6))
+    # the plate narrows to the barrel: a tapered web, not a block
+    web = (cq.Workplane("YZ").workplane(offset=-CLAMP_W / 2)
+           .polyline([(-BASE_D / 2, 0), (BASE_D / 2, 0), (by + LUG_R, zc), (-by - LUG_R, zc)]).close()
+           .extrude(CLAMP_W))
+    ped = plate.union(web)
+    base = barrel.union(ped).intersect(_box(-99, 99, -99, 99, -99, zc - SPLIT_GAP / 2))
+    cap = barrel.intersect(_box(-99, 99, -99, 99, zc + SPLIT_GAP / 2, 99))
+    bore = cq.Workplane("YZ").workplane(offset=-CLAMP_W).center(0, zc).circle(r).extrude(2 * CLAMP_W)
+    base, cap = base.cut(bore), cap.cut(bore)
+    for x, y in bolts:
+        thru = _cyl(x, y, -50, 99, M5_CLEAR)
+        base, cap = base.cut(thru), cap.cut(thru)
+        zn = zc - LUG_H - 6     # side-entry nut slot; the nut pulls up, so keep meat above it
+        base = base.cut(_box(x - M5_NUT_AF / 2 - 0.1, x + M5_NUT_AF / 2 + 0.1,
+                             min(y, y * 9), max(y, y * 9), zn, zn + M5_NUT_H + 0.3))
+    place = lambda p: p.translate((CX, CY, Z_BACK_OUT))
+    bolt_len = 2 * LUG_H + 6 + 2   # cap top to the nut's far face, plus 2 mm
+    return place(base), place(cap), bolt_len
+
+
+def ghost():
+    pcb = _box(BX0, BX1, BY0, BY1, 0, PCB_T)
+    for x, y in HOLES:
+        pcb = pcb.cut(_cyl(x, y, -1, 3, 3.0))
+    panel = _box(PANEL_CX - PANEL_W / 2, PANEL_CX + PANEL_W / 2,
+                 PANEL_CY - PANEL_H / 2, PANEL_CY + PANEL_H / 2, Z_PANEL, 0)
+    leds = None
+    for i in range(8):
+        x = LEDS_X[0] + i * (LEDS_X[1] - LEDS_X[0]) / 7
+        led = _box(x - LED_L / 2, x + LED_L / 2, LED_Y - 1.4, LED_Y + 1.4, -LED_H, 0)
+        leds = led if leds is None else leds.union(led)
+    return pcb, panel, leds
+
+
+def _vol(a, b):
+    return a.intersect(b).val().Volume()
+
+
+def check(parts):
+    """Fail the build if anything shades the screen or the LEDs, or the float has no room."""
+    tr, fr, cap = parts
+    pcb, panel, leds = ghost()
+    board = tr.union(pcb).union(panel).union(leds)
+    rigid = fr.union(cap)
+    # 1. the view: extrude the panel and every LED toward the rider, through everything
+    for name, g in (("panel", panel), ("leds", leds)):
+        bb = g.val().BoundingBox()
+        ray = _box(bb.xmin, bb.xmax, bb.ymin, bb.ymax, bb.zmin - 50, bb.zmin)
+        v = _vol(ray, rigid)
+        assert v < 1e-3, f"{name} is obscured: {v:.1f} mm^3 in its line of sight"
+    # 2. the chips: the tray's cuts keep KEEP by construction; the ball heads must too,
+    #    and a post cut D-shaped must still hold its screw with >= 1 mm of wall
+    keep = chips(KEEP)
+    for i, h in enumerate(ball_heads()):
+        assert _vol(h, keep) < 1e-3, f"ball head {DAMP[i]} is within {KEEP} mm of a part"
+    for x, y in POSTS:
+        ring = _cyl(x, y, PCB_T, Z_TRAY0, PILOT_M25 + 2).cut(_cyl(x, y, PCB_T - 1, Z_TRAY0 + 1, PILOT_M25))
+        assert ring.val().Volume() - _vol(ring, tr) < 1e-3, f"post at {(x, y)} has under 1 mm wall"
+    # 3. the wires: nothing rigid above an open part either, all the way up
+    for ref, x, y, rot, L, W, h, sky in PARTS:
+        if sky:
+            v = _vol(_part(x, y, rot, L, W, PCB_T + h, 99), rigid)
+            assert v < 1e-3, f"{ref}: frame or clamp above it, {v:.1f} mm^3"
+    # 4. the float: the board must clear the rigid parts at rest and at the travel limit's start
+    for dx, dy, dz in ((0, 0, 0), (2, 0, 0), (-2, 0, 0), (0, 2, 0), (0, -2, 0), (0, 0, -2), (0, 0, 2)):
+        v = _vol(board.translate((dx, dy, dz)), rigid)
+        assert v < 1e-3, f"board hits the frame moved by {(dx, dy, dz)}: {v:.1f} mm^3"
+
+
+if __name__ == "__main__":
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
+    os.makedirs(out, exist_ok=True)
+    _, cap, bolt_len = clamp()
+    parts = (tray(), frame(), cap)
+    check(parts)
+    pcb, panel, leds = ghost()
+    parts_ghost = chips()
+    names = ("tray", "frame", "clamp_cap")
+    for name, part in list(zip(names, parts)) + [("ghost", pcb.union(panel).union(leds).union(parts_ghost))]:
+        cq.exporters.export(part, f"{out}/pod_{name}.stl")
+        cq.exporters.export(part, f"{out}/pod_{name}.step")
+    for name, part in zip(names, parts):
+        bb = part.val().BoundingBox()
+        print(f"{name:11s} {bb.xlen:6.1f} x {bb.ylen:6.1f} x {bb.zlen:5.1f} mm  {part.val().Volume() / 1000 * 1.27:5.1f} g solid")
+    print(f"clamp bolts M5 x >= {bolt_len:.0f} mm; checks passed")
