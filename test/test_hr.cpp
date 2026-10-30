@@ -354,6 +354,15 @@ int main() {
         drive(d, 211000, 30000, riding);
         CHECK(!drive(d, 241000, 70000, park));
         CHECK(d.publish().count == 1);
+
+        // A short stop in neutral that rides off is not a parked minute: it
+        // leaves the ride for the next stop.
+        Recovery e;
+        drive(e, 0, 150000, riding);
+        CHECK(!drive(e, 150000, 10000, park));
+        CHECK(!drive(e, 160000, 30000, riding));
+        CHECK(drive(e, 190000, 61000, park));
+        CHECK(e.publish().count == 1);
     }
 
     CASE("zones by percent of max");

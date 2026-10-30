@@ -239,7 +239,6 @@ bool Recovery::update(const RecoveryInput& in) {
                 phase_ = Phase::Measuring;
                 out_.measuring = true;
                 have1_ = false;
-                ride_ms_ = 0;              // the next one needs a ride of its own
             }
             break;
         case Phase::Measuring:
@@ -254,6 +253,7 @@ bool Recovery::update(const RecoveryInput& in) {
                     break;
                 }
                 have1_ = true;
+                ride_ms_ = 0;              // the next one needs a ride of its own
                 out_.drop1 = static_cast<int16_t>(out_.start_bpm - in.bpm);
                 out_.from_bpm = out_.start_bpm;
                 out_.has_drop2 = false;
