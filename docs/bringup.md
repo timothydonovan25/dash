@@ -496,6 +496,8 @@ module's factory C6 firmware, not the link, and the SDIO push from
 With an FTDI TTL-232R-3V3: **black** GND, **yellow** its RXD, **orange**
 its TXD. **Red is 5 V: leave it unconnected.** It ends up as
 `/dev/ttyUSB0`. Source ESP-IDF (`export.sh`) and run from the repo root.
+`tools/c6_uart.py` does steps 1 and 4–6 (`listen`, `wait`, `backup`,
+`flash`); `flash` refuses to run until a 4 MB backup exists.
 
 1. **Listen.** Board off. Black to GND, **yellow to H3** (the C6's TX).
    Open `idf.py -C demo_p4/c6_cp -p /dev/ttyUSB0 monitor --no-reset`, then
