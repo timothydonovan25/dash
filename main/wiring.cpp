@@ -62,6 +62,7 @@ hal::NullEngine      g_engine;   // the ECU is unreachable on this board (§10.1
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
+drivers::Ili9488*      g_panel = nullptr;   // built in build(), probed in finish_panel()
 
 // Bring one device up and record what happened. Nothing here fails the boot:
 // a dash that refuses to start because the GPS is unplugged is worse than a
@@ -91,6 +92,7 @@ services::Deps& build() {
     // is up. A function-local static is still built exactly once and never
     // freed, like everything else in this file.
     static drivers::Ili9488 panel{buses.lcd_bus, &g_leds};
+    g_panel = &panel;
     // Likewise the I2C devices: each driver adds itself to its bus at init().
     g_leds.attach(buses.i2c1);
     g_pod.attach(buses.i2c0);
@@ -165,8 +167,25 @@ services::Deps& build() {
 void finish_panel() {
     // 4. The panel. Its reset is a plain GPIO on this board, and its
     //    backlight is three of the LED driver's channels, which build() has
-    //    already brought up.
-    bring_up(core::state::Dev::Display, g_deps.panel->init());
+    //    already brought up. The panel that was fitted last time is tried
+    //    first: the same panel again costs one TE period, a swapped one a
+    //    second init (drivers/ili9488.hpp).
+    float saved = 0.0f;
+    g_storage.read_f32(hal::kNsLife, hal::kKeyPanelModel, saved);   // NotPresent: the HT035
+    const auto guess = saved == 1.0f ? drivers::PanelModel::Ueed035
+                                     : drivers::PanelModel::Ht035;
+    g_panel->set_first_guess(guess);
+    bring_up(core::state::Dev::Display, g_panel->init());
+    ESP_LOGI(kTag, "panel: %s%s",
+             g_panel->model() == drivers::PanelModel::Ueed035 ? "UEED035HV" : "HT035SHV007NS",
+             g_panel->confirmed() ? "" : " (no TE: unconfirmed)");
+    // Saved only when a heard panel differs from the guess: a flash write
+    // freezes core 0, and ctrl is already running. A change means the panel
+    // was swapped, which happens parked.
+    if (g_panel->confirmed() && g_panel->model() != guess) {
+        g_storage.write_f32(hal::kNsLife, hal::kKeyPanelModel,
+                            static_cast<float>(g_panel->model()));
+    }
     g_deps.panel->set_backlight(20);
     g_health.tick(g_clock.now_ms(), core::health::Policy{});
     g_slots.health.publish(g_health.publish());

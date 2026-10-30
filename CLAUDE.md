@@ -153,13 +153,17 @@ Things that will bite you:
 
 - **The TFT pins are as the board drew them, not as first planned.** D0..D7
   are GPIO33 down to GPIO26 (reversed); RST 53, WR 52, DC 51, CS 50, TE 49.
-  The firmware follows the board.
+  The firmware follows the board. The VIEWE transflective panel
+  (UEED035HV) has WR and RS the other way round on FPC pins 10/11; the
+  panel's first `init()` tells the two apart by which wiring makes TE pulse,
+  trying the one saved last boot first (`hal::kKeyPanelModel`).
 - **The panel connector is top-contact and the panel's FPC arrives
   flipped.** The panel is on the bottom side, its tail wraps the right edge
   to FPC1 (AFC07-S40ECA-00), so panel pin n lands on pad 41−n.
 - **The panel is 8-bit 8080, RGB565, two bytes per pixel.** Not SPI. IM[2:0]
   = 011 on the FPC. Use the `esp_lcd_ili9488` component over an i80 IO
-  handle; do not write the command set.
+  handle; do not write the command set. The one exception is the
+  UEED035HV's ST7365 init, VIEWE's own table (`drivers/ili9488.cpp`).
 - **The backlight and the shift lamps are one chip.** PCA9955B (U2) on its
   own I2C1 bus at 1 MHz: OUT0–7 are the lamps, OUT8–10 the backlight
   cathodes. A dead PCA9955B is a dark screen *and* dark lamps. **`ctrl` is

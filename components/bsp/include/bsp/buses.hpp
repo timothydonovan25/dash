@@ -18,9 +18,10 @@ struct BusStatus {
     void* i2c0 = nullptr;  // handlebar pod, 100 kHz
     void* i2c1 = nullptr;  // PCA9955B LED driver, 1 MHz
     bool uart1 = false;   // GPS
-    // The 8080 bus for the panel, an esp_lcd_i80_bus_handle_t. Only
-    // board_init() creates it, because creating it twice makes a second
-    // bus on the same pins rather than failing.
+    // The 8080 bus for the panel, an esp_lcd_i80_bus_handle_t, with WR and
+    // DC as the HT035 wants them. Creating it twice makes a second bus on
+    // the same pins rather than failing, so only board_init() creates it,
+    // and only the panel's probe swaps it, by releasing it first.
     void* lcd_bus = nullptr;
 };
 
@@ -39,6 +40,12 @@ void* init_pod_bus();
 // pod's device must already be removed from it. init_pod_bus() brings it
 // back, as a new handle.
 void release_pod_bus();
+
+// The 8080 bus, with WR and DC traded for the UEED035HV if `swap_wr_dc`
+// (pins.hpp). For the panel's probe alone, which owns the bus and must
+// release_lcd_bus() the old one first. Returns the handle, or null.
+void* init_lcd_bus(bool swap_wr_dc);
+void release_lcd_bus(void* bus);
 
 // Everything that has to be true before any driver runs. Call once, first.
 BusStatus board_init();

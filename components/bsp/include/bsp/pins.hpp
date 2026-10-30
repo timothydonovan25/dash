@@ -46,10 +46,14 @@ inline constexpr int kSpiHzSd        = 20'000'000;
 // GPIO for any bit, so a reversed bus costs nothing.
 inline constexpr int kTftData[8]     = {33, 32, 31, 30, 29, 28, 27, 26};  // D0..D7 = U16-52..45 → FPC 17..24
 inline constexpr int kTftRst         = 53;   // U16-73 → FPC 15, R3 pull-up
+// As the HT035SHV007NS wants them. The VIEWE UEED035HV has WR on FPC 10
+// and RS on 11 (Sitronix puts SPI's SCL on WRX, Ilitek on D/CX), so it runs
+// with these two traded and R30's 22 Ω on DC instead. drivers::Ili9488 finds
+// which panel is fitted at boot by which way round its TE line answers.
 inline constexpr int kTftWr          = 52;   // U16-72 → R30 22 Ω → FPC 11
 inline constexpr int kTftDc          = 51;   // U16-71 → FPC 10
 inline constexpr int kTftCs          = 50;   // U16-70 → FPC 9, R21 pull-up
-inline constexpr int kTftTe          = 49;   // U16-69 ← FPC 8 FMARK, optional
+inline constexpr int kTftTe          = 49;   // U16-69 ← FPC 8 FMARK, the panel probe
 inline constexpr int kTftWidth       = 320;
 inline constexpr int kTftHeight      = 480;
 // The ILI9488's write cycle is about 66 ns, so 15 MHz is the datasheet's
@@ -59,6 +63,9 @@ inline constexpr int kTftHeight      = 480;
 // sequence, at every clock from 5 to 25 MHz, not the bus. If a panel ever
 // speckles hot or on the bike, this is the first thing to lower.
 inline constexpr int kTftWrHz        = 25'000'000;
+// The UEED035HV's ST7365: its write cycle is "TBD" in VIEWE's spec V1.0, so
+// start slow and raise it as the HT035's was.
+inline constexpr int kTftWrHzUeed035 = 10'000'000;
 // The largest single transfer: one band of the render task's band buffer,
 // 40 landscape lines. The bus and the panel driver's staging buffer are
 // both sized from this.

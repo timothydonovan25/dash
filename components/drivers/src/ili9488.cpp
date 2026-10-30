@@ -1,14 +1,21 @@
 #include "drivers/ili9488.hpp"
 #include "drivers/pca9955b.hpp"
+#include "bsp/buses.hpp"
 #include "bsp/pins.hpp"
 
+#include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_ili9488.h"
 #include "esp_lcd_io_i80.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 #include <cstring>
+#include <initializer_list>
 
 namespace drivers {
 namespace {
@@ -22,6 +29,60 @@ constexpr int kCaset    = 0x2A;
 constexpr int kPaset    = 0x2B;
 constexpr int kRamwr    = 0x2C;
 constexpr int kRamwrCon = 0x3C;   // Memory Write Continue
+constexpr int kTeon     = 0x35;   // Tearing Effect Line On, the same on both chips
+
+// How long the probe listens for TE. The first pulse comes within one frame
+// of TEON, about 17 ms at 60 Hz, so this is three.
+constexpr uint32_t kTeWaitMs = 50;
+
+SemaphoreHandle_t s_te = nullptr;
+
+// The UEED035HV's ST7365, as VIEWE configure it: byte for byte the table in
+// their UEDX32480035E-WB-A board file (ESP32_Display_Panel) and in Draftling
+// (github.com/clackups/draftling PR 81), whose author ran it on this very
+// panel over SPI. MADCTL is left out: swap_xy() and mirror() send it whole.
+struct InitCmd {
+    uint8_t  cmd;
+    uint8_t  len;
+    uint8_t  data[14];
+    uint16_t wait_ms;
+};
+constexpr InitCmd kSt7365Init[] = {
+    {0x11, 0, {}, 120},                     // sleep out
+    {0xF0, 1, {0xC3}, 0},                   // command set unlock, 1 of 2
+    {0xF0, 1, {0x96}, 0},                   // command set unlock, 2 of 2
+    {0x3A, 1, {0x55}, 0},                   // RGB565
+    {0xB4, 1, {0x01}, 0},                   // inversion control
+    {0xB7, 1, {0xC6}, 0},                   // entry mode
+    {0xC0, 2, {0x80, 0x04}, 0},             // power control 1
+    {0xC1, 1, {0x13}, 0},                   // power control 2
+    {0xC5, 1, {0xA7}, 0},                   // VCOM, as VIEWE send it twice:
+    {0xC5, 1, {0x16}, 0},                   //   the second one stands
+    {0xE8, 8, {0x40, 0x8A, 0x00, 0x00, 0x29, 0x19, 0xA5, 0x33}, 0},
+    {0xE0, 14, {0xF0, 0x19, 0x20, 0x10, 0x11, 0x0A, 0x46, 0x44, 0x57, 0x09,
+                0x1A, 0x1B, 0x2A, 0x2D}, 0},           // positive gamma
+    {0xE1, 14, {0xF0, 0x12, 0x1A, 0x0A, 0x0C, 0x18, 0x45, 0x44, 0x56, 0x3F,
+                0x15, 0x11, 0x24, 0x26}, 0},           // negative gamma
+    {0xF0, 1, {0x3C}, 0},                   // command set lock, 1 of 2
+    {0xF0, 1, {0x69}, 0},                   // command set lock, 2 of 2
+    {0x21, 0, {}, 0},                       // inversion on, or colours invert
+    {0x29, 0, {}, 50},                      // display on
+};
+
+esp_err_t init_st7365(esp_lcd_panel_io_handle_t io) {
+    for (const InitCmd& c : kSt7365Init) {
+        const esp_err_t err = esp_lcd_panel_io_tx_param(io, c.cmd, c.len ? c.data : nullptr, c.len);
+        if (err != ESP_OK) return err;
+        if (c.wait_ms) vTaskDelay(pdMS_TO_TICKS(c.wait_ms));
+    }
+    return ESP_OK;
+}
+
+void IRAM_ATTR on_te(void*) {
+    BaseType_t woke = pdFALSE;
+    xSemaphoreGiveFromISR(s_te, &woke);
+    if (woke) portYIELD_FROM_ISR();
+}
 
 hal::Status from_esp(esp_err_t err) {
     if (err == ESP_OK) return hal::Status::Ok;
@@ -45,10 +106,47 @@ hal::Status Ili9488::init() {
         if (!staging_) return hal::Status::IoError;
     }
 
+    // A re-init after a fault keeps the wiring the probe found.
+    if (probed_) return start();
+    probed_ = true;
+
+    const PanelModel guess = model_;
+    const PanelModel other = guess == PanelModel::Ht035 ? PanelModel::Ueed035
+                                                         : PanelModel::Ht035;
+    for (PanelModel m : {guess, other}) {
+        const hal::Status s = wire_for(m);
+        if (!hal::ok(s)) return s;
+        if (te_answers()) {
+            confirmed_ = true;
+            return hal::Status::Ok;
+        }
+    }
+    // Neither answered: no TE from this panel, or no panel. Back to the
+    // guess, so a panel whose TE alone is broken still shows a picture.
+    return wire_for(guess);
+}
+
+// The bus, IO and panel handles for `m`, then start(). WR and DC are a bus
+// setting and the write clock an IO one, so a change of wiring rebuilds
+// all three.
+hal::Status Ili9488::wire_for(PanelModel m) {
+    const bool swap = m == PanelModel::Ueed035;
+    if (swap != swapped_) {
+        if (panel_) esp_lcd_panel_del(static_cast<esp_lcd_panel_handle_t>(panel_));
+        if (io_) esp_lcd_panel_io_del(static_cast<esp_lcd_panel_io_handle_t>(io_));
+        panel_ = nullptr;
+        io_ = nullptr;
+        bsp::release_lcd_bus(bus_);
+        bus_ = bsp::init_lcd_bus(swap);
+        swapped_ = swap;
+        if (!bus_) return hal::Status::IoError;
+    }
+    model_ = m;
+
     if (!io_) {
         esp_lcd_panel_io_i80_config_t cfg = {};
         cfg.cs_gpio_num = static_cast<gpio_num_t>(bsp::kTftCs);
-        cfg.pclk_hz = bsp::kTftWrHz;
+        cfg.pclk_hz = m == PanelModel::Ueed035 ? bsp::kTftWrHzUeed035 : bsp::kTftWrHz;
         cfg.trans_queue_depth = 4;
         cfg.lcd_cmd_bits = 8;
         cfg.lcd_param_bits = 8;
@@ -80,16 +178,23 @@ hal::Status Ili9488::init() {
         // (TN power, VCOM and gamma, no INVON) gave it a negative image and,
         // once inverted by hand, a fine crawling speckle on every colour at
         // any write clock (first light, 2026-10-28). It ends with INVON.
+        // The UEED035HV's ST7365 never runs it: start() sends VIEWE's table
+        // instead, and uses this handle only for reset, swap and mirror.
         const esp_err_t err = esp_lcd_new_panel_ili9488_ips(
             static_cast<esp_lcd_panel_io_handle_t>(io_), &panel_cfg, 0, &panel);
         if (err != ESP_OK) return from_esp(err);
         panel_ = panel;
     }
+    return start();
+}
 
+hal::Status Ili9488::start() {
     auto* panel = static_cast<esp_lcd_panel_handle_t>(panel_);
     esp_err_t err = esp_lcd_panel_reset(panel);
     if (err != ESP_OK) return from_esp(err);
-    err = esp_lcd_panel_init(panel);
+    err = model_ == PanelModel::Ueed035
+              ? init_st7365(static_cast<esp_lcd_panel_io_handle_t>(io_))
+              : esp_lcd_panel_init(panel);
     if (err != ESP_OK) return from_esp(err);
     // Landscape. swap_xy transposes, and one mirror puts the origin at the
     // top left rather than giving a mirror image — which way round depends
@@ -104,6 +209,38 @@ hal::Status Ili9488::init() {
     // sent DISPON, and the call sends it again and waits another 100 ms,
     // all of it before the first frame.
     return hal::Status::Ok;
+}
+
+// TEON, then wait for the first pulse. A panel whose init went in the wrong
+// way round never saw TEON, and the reset left its TE output low.
+bool Ili9488::te_answers() {
+    static StaticSemaphore_t buf;
+    if (!s_te) s_te = xSemaphoreCreateBinaryStatic(&buf);
+    xSemaphoreTake(s_te, 0);
+
+    const uint8_t vblank_only = 0x00;
+    if (esp_lcd_panel_io_tx_param(static_cast<esp_lcd_panel_io_handle_t>(io_),
+                                  kTeon, &vblank_only, 1) != ESP_OK) {
+        return false;
+    }
+
+    const auto pin = static_cast<gpio_num_t>(bsp::kTftTe);
+    gpio_config_t te = {};
+    te.pin_bit_mask = 1ULL << bsp::kTftTe;
+    te.mode = GPIO_MODE_INPUT;
+    te.pull_down_en = GPIO_PULLDOWN_ENABLE;   // no edges from a floating pin
+    te.intr_type = GPIO_INTR_POSEDGE;
+    if (gpio_config(&te) != ESP_OK) return false;
+    // engine_sense has usually installed the service already.
+    const esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    if (gpio_isr_handler_add(pin, on_te, nullptr) != ESP_OK) return false;
+
+    const bool heard = xSemaphoreTake(s_te, pdMS_TO_TICKS(kTeWaitMs)) == pdTRUE;
+
+    gpio_isr_handler_remove(pin);
+    gpio_set_intr_type(pin, GPIO_INTR_DISABLE);
+    return heard;
 }
 
 hal::Status Ili9488::blit(uint16_t x, uint16_t y, uint16_t w, uint16_t h,

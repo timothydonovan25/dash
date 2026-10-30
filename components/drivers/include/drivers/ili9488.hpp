@@ -12,15 +12,29 @@
 //    bytes goes out as the parameters of a Memory Write Continue command.
 //    The caller's buffer is free the moment blit() returns.
 //  - **The backlight is on the PCA9955B**, so set_backlight() forwards there.
+//  - **Two panels fit FPC1, with WR and RS on opposite pins**, and RD is
+//    tied high, so neither can be read. The first init() tells them apart
+//    by the one line that comes back, TE: each wiring is tried in turn,
+//    starting with the caller's guess, and the panel's tearing-effect
+//    output only pulses once its init went in the right way round.
 //
-// The panel command set comes from the `esp_lcd_ili9488` managed component.
+// The panel command set comes from the `esp_lcd_ili9488` managed component,
+// except the UEED035HV's init, which is VIEWE's own ST7365 table.
 // This class bridges that to hal::IPanel and owns the blit path itself.
 #pragma once
 #include "hal/i_display.hpp"
+#include <cstdint>
 
 namespace drivers {
 
 class Pca9955b;
+
+// The panels FPC1 takes. The values are stored (hal::kKeyPanelModel), so
+// they never change.
+enum class PanelModel : uint8_t {
+    Ht035   = 0,   // HT035SHV007NS, ILI9488, IPS
+    Ueed035 = 1,   // VIEWE UEED035HV-RX40-L001A, ST7365, transflective
+};
 
 class Ili9488 final : public hal::IPanel {
 public:
@@ -36,12 +50,27 @@ public:
                      const uint16_t* pixels) override;
     hal::Status set_backlight(uint8_t percent) override;
 
+    // Which wiring the first init() tries first. Call before it.
+    void set_first_guess(PanelModel m) { model_ = m; }
+    // The panel init() settled on: the one whose TE answered, or the guess
+    // if neither did (no TE, or no panel), when confirmed() is false.
+    PanelModel model() const { return model_; }
+    bool confirmed() const { return confirmed_; }
+
 private:
+    hal::Status wire_for(PanelModel m);
+    hal::Status start();
+    bool te_answers();
+
     void*     bus_;
     Pca9955b* backlight_;
     void*     io_ = nullptr;        // esp_lcd_panel_io_handle_t
     void*     panel_ = nullptr;     // esp_lcd_panel_handle_t
     uint8_t*  staging_ = nullptr;   // DMA-capable, 64-byte aligned
+    PanelModel model_ = PanelModel::Ht035;
+    bool      swapped_ = false;     // bus_ has WR and DC traded (bsp)
+    bool      probed_ = false;
+    bool      confirmed_ = false;
 };
 
 }  // namespace drivers

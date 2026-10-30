@@ -94,11 +94,13 @@ bool init_uart1() {
                         UART_PIN_NO_CHANGE) == ESP_OK;
 }
 
-void* init_lcd_bus() {
+}  // namespace
+
+void* init_lcd_bus(bool swap_wr_dc) {
     esp_lcd_i80_bus_config_t bus = {};
     bus.clk_src = LCD_CLK_SRC_DEFAULT;
-    bus.dc_gpio_num = static_cast<gpio_num_t>(kTftDc);
-    bus.wr_gpio_num = static_cast<gpio_num_t>(kTftWr);
+    bus.dc_gpio_num = static_cast<gpio_num_t>(swap_wr_dc ? kTftWr : kTftDc);
+    bus.wr_gpio_num = static_cast<gpio_num_t>(swap_wr_dc ? kTftDc : kTftWr);
     for (int i = 0; i < 8; ++i) {
         bus.data_gpio_nums[i] = static_cast<gpio_num_t>(kTftData[i]);
     }
@@ -115,7 +117,9 @@ void* init_lcd_bus() {
     return handle;
 }
 
-}  // namespace
+void release_lcd_bus(void* bus) {
+    if (bus) esp_lcd_del_i80_bus(static_cast<esp_lcd_i80_bus_handle_t>(bus));
+}
 
 BusStatus init_buses() {
     BusStatus s;
@@ -140,7 +144,7 @@ BusStatus board_init() {
     // out of power-on reset with zero current and zero duty, and the panel's
     // reset and chip select are held inactive by R3 and R21.
     BusStatus s = init_buses();
-    s.lcd_bus = init_lcd_bus();
+    s.lcd_bus = init_lcd_bus(false);
     return s;
 }
 

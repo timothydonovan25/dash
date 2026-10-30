@@ -22,6 +22,9 @@ inline constexpr const char* kNsCfg  = "cfg";
 // written by the keeper rather than the config screen.
 inline constexpr uint16_t kKeyOdometerMi   = 0x0001;
 inline constexpr uint16_t kKeyEngineHours  = 0x0002;
+// Which panel FPC1 had at the last boot (drivers::PanelModel), so the probe
+// tries it first. Written by wiring, at boot, only when it changes.
+inline constexpr uint16_t kKeyPanelModel   = 0x0003;
 // The named waypoints: three keys each from here (lat, lon, when), in
 // core::waypoint's order.
 inline constexpr uint16_t kKeyWaypointBase = 0x0100;
