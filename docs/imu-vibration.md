@@ -1,7 +1,7 @@
 # IMU vibration plan — ICM-42688-P (U1)
 
-**Status.** A plan, not built. Nothing here has run on the board (it has not
-arrived). Every number marked *estimate* is arithmetic from assumptions, not
+**Status.** A plan, not built. Nothing here has run on the board (it
+arrived on 2026-10-28; the IMU has run on the bench only). Every number marked *estimate* is arithmetic from assumptions, not
 a measurement; Phase 0 exists to replace them with data.
 
 ## 1. The problem, precisely
@@ -44,7 +44,7 @@ Three layers, each cheap and independent, in this order of leverage:
 
 And a measurement layer under all three, **built first**.
 
-## 3. Phase 0 — measure (build before the board arrives)
+## 3. Phase 0 — measure (build before the first rides)
 
 - **`vibcap` capture.** A DIAG action that records raw IMU samples at
   ≥1 kHz plus rpm and speed to the SD card for N seconds (60 s default).

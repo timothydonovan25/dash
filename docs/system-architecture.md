@@ -19,7 +19,8 @@ TPMS scan is not written) and **Wi-Fi updates** (§11.7.1). Both have run on
 the Guition demo board. Not built, deliberately: **CAN / `engine_service`**
 (§10.1 — the board has no transceiver), **USB mass storage** (§9.3 — the
 ownership seam exists, the TinyUSB half does not). The P4 board was
-ordered on 2026-10-07 and has not arrived; nothing here has run on it.
+ordered on 2026-10-07 and arrived on 2026-10-28; `bringup.md` opens with
+what has run on it.
 
 Decisions already made:
 
@@ -528,7 +529,9 @@ an 8-bit 8080 bus, where **RGB565, two bytes per pixel,** works. Use the
 `esp_lcd_ili9488` component over an i80 IO handle rather than writing the
 command set. Budget: a full 320×480 frame is 307 kB, about 31 ms at the
 10 MHz starting write clock and about 20 ms at the panel's ~15 MHz
-ceiling, so draw in bands and send only what changed. 40-line bands are
+datasheet ceiling. The first board's panel ran clean at 25 and 30 MHz,
+and runs at 25: about 12 ms. Still, draw in bands and send only what
+changed. 40-line bands are
 the starting point (`bsp::kTftBandLines`).
 
 ---

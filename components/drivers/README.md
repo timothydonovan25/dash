@@ -6,14 +6,16 @@ from the `esp_lcd_ili9488` managed component rather than being written here.
 
 This is the P4 board's set (docs/p4-board-pin-map.md): no MCP23S17, the
 panel on an 8-bit 8080 bus, the shift lamps and backlight on a PCA9955B.
-They compile clean for esp32p4 against IDF v6.0.2. **None of it has run.**
-The P4 board is ordered but not here yet, and compiling is not working: they are written against
+They compile clean for esp32p4 against IDF v6.0.2. **Only some of it has
+run:** the panel, the SD card, GPS and the IMU on the bench, on the first
+board (2026-10-28; `docs/bringup.md` opens with the full status). Compiling
+is not working: they are written against
 the datasheets and the netlist, which is not the same as correct — every class
 is the right shape, the register maps and init orders are there, and the
 places that can only be settled on a bench are marked BRINGUP rather than
 guessed at confidently. In particular:
 
-- the IMU axis mapping has never been checked against a real part;
+- the IMU axis mapping is checked on the bench, not yet on a ride;
 - the tach refractory window is a starting number, not a measured one;
 - I2C bus recovery (`ButtonPod::recover_bus`: up to nine SCL clocks by
   hand, then a STOP) is written but has never freed a real stuck slave;
@@ -24,5 +26,4 @@ guessed at confidently. In particular:
 latched read. The backlight is three channels of the `pca9955b`, which
 `ili9488` forwards to.
 
-When the board arrives, work down DIAG → Sensors. That screen exists for
-this week.
+Work down DIAG → Sensors. That screen exists for bring-up.

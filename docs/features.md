@@ -3,13 +3,14 @@
 Every feature of the v2 firmware, its tools and its simulator, as of
 firmware **1.46** (`tach-smooth`), 2026-10-24.
 
-**Read this first.** The P4 board was ordered on 2026-10-07 and has not
-arrived. Everything below is *written*. The parts under `components/core/`
+**Read this first.** The P4 board was ordered on 2026-10-07 and arrived on
+2026-10-28. Everything below is *written*. The parts under `components/core/`
 and `components/ui/` are host-tested (48 test files under `test/`) and run in
 the simulator. The parts that talk to hardware (drivers, services, BLE,
-Wi-Fi, OTA, power-fail) compile and link for the ESP32-P4, but **none of it
-has run on the bike board.** Some of it has run on the Guition demo board,
-and that is said where it applies. Where a feature is a placeholder or runs
+Wi-Fi, OTA, power-fail) compile and link for the ESP32-P4, and **only some
+of it has run on the bike board**: the panel, the SD card, GPS and the IMU
+on the bench (`docs/bringup.md` opens with the full status). Some of it has
+run on the Guition demo board, and that is said where it applies. Where a feature is a placeholder or runs
 on guessed thresholds, its section says so.
 
 Each section gives what the feature does, where it lives in the code, and
@@ -157,9 +158,10 @@ screen does not take goes to the navigation state machine in `core/nav/`.
 
 ## 4. Display and rendering
 
-- **Panel.** A 480×320 landscape panel on an 8-bit 8080 bus at a 10 MHz
-  write clock to start. A whole frame is 307 kB in RGB565, about 31 ms on
-  the wire, which is roughly four render periods. The driver is the
+- **Panel.** A 480×320 landscape panel on an 8-bit 8080 bus at a 25 MHz
+  write clock (clean at 25 and 30 MHz on the first board). A whole frame is
+  307 kB in RGB565, about 12 ms on the wire, roughly one and a half render
+  periods (31 ms at the 10 MHz it started at). The driver is the
   `esp_lcd_ili9488` component on an i80 IO handle.
 - **Partial updates.** `render` sends only the widgets that changed, and
   where a widget can say (`Widget::damage()`), only the part that changed:
@@ -879,7 +881,8 @@ python3 sim/dash_sim.py
 ## 31. The demo board build
 
 `demo_p4/` builds the firmware for the off-the-shelf Guition P4 board, which
-does exist, so UI, Wi-Fi and OTA can run before the bike board arrives.
+does exist, so UI, Wi-Fi and OTA could run before the bike board arrived,
+and still can away from it.
 - Its own panel and pins (`p4_panel.cpp`, `p4_pins.hpp`) and a fake bike
   task.
 - Its SD card is the Guition's microSD on 4-bit SDMMC slot 0. ESP-Hosted

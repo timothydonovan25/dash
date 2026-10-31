@@ -9,10 +9,26 @@ the panel on an 8-bit 8080 bus, the shift lamps and backlight on a
 PCA9955B (U2). `p4-board-pin-map.md` is the pin truth and its §6 is the
 pre-order audit; read §6 before starting here.
 
-Nothing in this repository has run on this board. Every driver is written
-against a datasheet and a netlist, which is not the same as correct. The
-places that can only be settled here are marked `BRINGUP` in the source
-and collected in §10 below.
+Every driver was written against a datasheet and a netlist, which is not
+the same as correct. The places that can only be settled here are marked
+`BRINGUP` in the source and collected in §10 below.
+
+**The first board arrived on 2026-10-28.** Where it has got to:
+
+| § | Status | Notes |
+|---|---|---|
+| 0–1 Before power, rails | Done | Rails in spec |
+| 2 Boots | Done | P4 silicon **v3.2**, so the build is for v3.1+, at 400 MHz. Boot time and the watchdog test not done |
+| 3 Panel | Done (HT035) | IPS init, mirrored on both axes, 25 MHz write clock. The VIEWE UEED035HV probe is not run |
+| 4 DIAG → Sensors, Bus | Not done | |
+| 5 Pod | Demo board only | The pod works on the demo; its GH1.25 connector for this board is not fitted yet |
+| 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done |
+| 7 GPS | Fixes | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. 10 Hz not confirmed |
+| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first ride the speedo read 0; its logs on the card are unread |
+| 8.1 Power-fail | Not done | |
+| 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
+| 9 Radio | Blocked | The C6's factory firmware does not speak ESP-Hosted: flash it over its UART (§9) |
+| 9.1 OTA slots | Not done | |
 
 **The order matters more than the speed.** Each session below assumes the
 one above it works. Skipping ahead means debugging two unknowns at once,
@@ -94,9 +110,12 @@ the P4's USB-Serial/JTAG on GPIO24/25 (U16-42/43). UART0 is also on test
 pads H8/H9 (U16-56/57) as a fallback.
 
 **Read the chip revision first.** `esptool.py chip_id` prints it. The
-`sdkconfig.defaults` has `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` because
-the demo board was v1.3. If yours is v3 or later, that setting has to
-change (§11 explains why editing the defaults alone is not enough).
+first board's module is **v3.2**, and `sdkconfig.defaults` builds for
+v3.1+ (`CONFIG_ESP32P4_REV_MIN_301`), at 400 MHz since v3 has no 360. The
+demo board is v1.3 and `demo_p4/sdkconfig.defaults` keeps the pre-v3
+selection; an image built for one does not run on the other. A module of
+another revision means changing that line (§11 explains why editing the
+defaults alone is not enough).
 
 **What you should see.** `dash v2 — N config items`, then thirteen tasks
 starting (`ctrl`, `imu`, `gnss`, `logic`, `input` on core 0; `render`,
@@ -193,18 +212,22 @@ be an I2C fault (§4).
 |---|---|
 | Backlight on, white screen | Panel got power but no init. WR, DC, RST, CS — check each toggles. |
 | Backlight off entirely | The PCA9955B on I2C1 (§4), then LEDA at about 5 V, then FPC 33–36. |
-| Image mirrored or upside down | `ili9488.cpp:94` — `swap_xy` plus **one** mirror. Marked BRINGUP; this is the one you are expected to fix here. `panel_test`'s corners screen shows which. |
-| Torn, speckled, or wrong colours | Drop `bsp::kTftWrHz` (starts at 10 MHz) before suspecting anything else. Swapped red/blue is the byte order, not wiring. |
+| Image mirrored or upside down | `ili9488.cpp`, `swap_xy` and the mirror after it. The first board's HT035 needed `swap_xy` and a mirror on both axes, as fitted. `panel_test`'s corners screen shows which. |
+| A negative image, or a fine crawling speckle at every clock | The init sequence, not the bus: the HT035 is IPS and needs `esp_lcd_new_panel_ili9488_ips`. The default (TN) sequence did exactly this on the first board. |
+| Torn, speckled, or wrong colours | Drop `bsp::kTftWrHz` (25 MHz) before suspecting anything else. Swapped red/blue is the byte order, not wiring. |
 | Colours right, garbage in places | A data line: D0–D7 are panel pins 17–24, which land on connector pads 24–17, from GPIO33 down to GPIO26. |
 
 The panel runs **RGB565, two bytes per pixel**, on this bus: 30.7 ms per
-full frame at 10 MHz, about 15 MHz in spec. `render` runs at 120 Hz and
+full frame at 10 MHz, about 15 MHz in spec, about 12 ms at the 25 MHz the
+first board runs. `render` runs at 120 Hz and
 sends only what changed, and only where it differs from the shadow copy:
 SPEED's riding frame is about 1 ms on the wire, against an 8.3 ms period.
 **Raise the write clock** once the panel is right: `kTftWrHz` in steps
 (12.5, 15, 20 MHz), `panel_test` and a ride's worth of screens at each,
 and keep the last one with no speckle, wrong colour or torn band. Every
-blit and the 31 ms full frame shrink in proportion. If you find yourself
+blit and the 31 ms full frame shrink in proportion. **Done on the first
+board:** clean at 25 and 30 MHz with the IPS init, held at 25. If a panel
+speckles hot or on the bike, lower it first. If you find yourself
 writing panel command sequences, stop — that is the `esp_lcd_ili9488`
 managed component's job.
 
@@ -246,6 +269,9 @@ Two rows on that screen only matter once something has gone wrong:
 
 ## 5. The handlebar pod
 
+**Status:** the pod works on the demo board; on the bike board it is
+untested, as its GH1.25 connector is not fitted to the pod's cable yet.
+
 **100 kHz, not 400.** Already set in `bsp/buses.cpp` with the reason in a
 comment. 4.7 k pull-ups (R35/R36) over half a metre give ~470 ns of rise
 time; fast mode allows 300 ns. At 400 kHz this works on the bench and
@@ -272,9 +298,13 @@ in gear (`p4-board-pin-map.md` §6.2).
 
 ## 6. The IMU
 
-Build-order step 5. **The axis mapping has never been checked against a
-real part** (`icm42688p.cpp:180`, BRINGUP). Nor has the data-ready
-interrupt setup (`icm42688p.cpp:132`): if it is wrong the service falls
+Build-order step 5. **The axis mapping is checked on the bench only**
+(`icm42688p.cpp:202`, BRINGUP). The board stands upright, LED edge on top,
+facing the rider: forward is chip +Z, up is chip +Y, left is chip +X.
+`tools/imu_view.py` (fed by `keeper` over USB) showed pitch, lean and
+heading moving the right way on the first board; step 7's ride has not
+been done. The data-ready interrupt setup (`icm42688p.cpp:137`) is still
+from the register map only: if it is wrong the service falls
 back to polling, and DIAG → System counts how often.
 
 Do this statically before trusting any filter output:
@@ -337,7 +367,10 @@ the bus is about 90 mm long with no source termination.
 
 ## 7. GPS
 
-Build-order step 6. Take it outside. **Every power-up is a cold start**:
+Build-order step 6. Take it outside. **First board:** fixes with 9–13
+satellites. A cold PA1616D sends the placeholder date 050180 (2080-01-05)
+before it knows; the date is now taken only from a valid fix, after the
+first boot with a card renamed a session to `2080-01-05`. **Every power-up is a cold start**:
 VBACKUP (U4-4) is tied to VCC, so the module keeps nothing when the dash
 is off. Expect minutes, not seconds.
 
@@ -386,6 +419,14 @@ trace, and tuning them is a track-day job.
 
 Build-order step 7, and last on purpose: it is the latency-critical path
 and you want the diag screens working before you touch it.
+
+**First board (2026-10-28):** the tach wrap was fitted and gave **no
+signal**; the R34/C19 filter below is the suspect, a hardware fix still to
+make. No wheel sensors were fitted. The backlight lights, so the PCA9955B
+answers on I2C1; the lamps are untested. On that ride the speedo read 0
+with 9–13 satellites; a host test (`test_fusion`) shows fusion following
+GPS with no wheels, so the cause is elsewhere and the logs on the card
+are the next thing to read.
 
 **Scope the tach before trusting the reading.** The pickup is an
 inductive wrap on the spark plug lead, 5–10 V at most. It goes through
@@ -470,6 +511,13 @@ Not done, and not possible on this board: flushing the log file.
 Steps 8 and 9. The SD card is on SPI2 in SPI mode, not SDMMC, sharing the
 bus with the IMU. Card detect is GPIO1, LOW with a card in.
 
+**First board:** on 12 V the card mounts and the logger writes ~32 kB/s
+with no errors. On USB alone it did not mount, which was the supply
+(`p4-board-pin-map.md` §6.2). With a card in, the IMU and the SD host
+deadlocked on SPI2 and the task watchdog rebooted the board; every IMU
+transaction is now polling, and three 30 s boots with a card since had no
+watchdog.
+
 USB mass storage cannot be a partial implementation: the device must
 unmount the card before a host touches it, or the FAT volume gets two
 writers and is corrupted.
@@ -497,7 +545,10 @@ With an FTDI TTL-232R-3V3: **black** GND, **yellow** its RXD, **orange**
 its TXD. **Red is 5 V: leave it unconnected.** It ends up as
 `/dev/ttyUSB0`. Source ESP-IDF (`export.sh`) and run from the repo root.
 `tools/c6_uart.py` does steps 1 and 4–6 (`listen`, `wait`, `backup`,
-`flash`); `flash` refuses to run until a 4 MB backup exists.
+`flash`); `flash` refuses to run until a 4 MB backup exists, and
+`inspect` reads the backup offline: bootloader, partition table, each app's
+project, version (ESP-Hosted's own, for a `network_adapter`) and IDF, and
+whether it was built for SDIO or SPI.
 
 1. **Listen.** Board off. Black to GND, **yellow to H3** (the C6's TX).
    Open `idf.py -C demo_p4/c6_cp -p /dev/ttyUSB0 monitor --no-reset`, then
@@ -622,16 +673,15 @@ the flash calls are not.
 
 | Where | What |
 |---|---|
-| `icm42688p.cpp:180` | IMU axis mapping, never checked against a real part |
-| `icm42688p.cpp:132` | IMU data-ready interrupt configuration, from the register map only |
-| `engine_sense.cpp:89` | Wheel-Hall debounce window, 200 µs, unconfirmed |
-| `bsp/pins.hpp:81` | `kTachRefractoryUs` 1500 µs — "tune on the bench" |
-| `bsp/pins.hpp:51` | `kTftWrHz` 10 MHz — raise to what `panel_test` stays clean at |
-| `ili9488.cpp:94` | Panel rotation — `swap_xy` plus one mirror |
-| `drivers.hpp:10` | The general warning that none of this has run |
+| `icm42688p.cpp:202` | IMU axis mapping, checked on the bench only; the riding check (§6 step 7) is to do |
+| `icm42688p.cpp:137` | IMU data-ready interrupt configuration, from the register map only |
+| `engine_sense.cpp:133` | Wheel-Hall debounce window, 200 µs, unconfirmed |
+| `bsp/pins.hpp:99` | `kTachRefractoryUs` 1500 µs — "tune on the bench" |
+| `ili9488.cpp:281` | A strip's head relies on the panel continuing a 0x2C write with 0x3C: wrong colours at a strip's left edge mean it does not |
+| `drivers.hpp:10` | The general warning: what has run is in the status table at the top |
 | `ble_service.cpp` `kHostedPrio` | ESP-Hosted's tasks lowered from 23 to 8. Check SDIO keeps up and `ctrl` is unaffected |
 | `ota_service.cpp` | Rollback, install and promote: never run against the real bootloader (§9.1) |
-| `icm42688p.cpp` `chip_ts` | Whether the FIFO carries the part's timestamp: read `Hdr` (§6) |
+| `icm42688p.cpp:221` `chip_ts` | Whether the FIFO carries the part's timestamp: read `Hdr` (§6) |
 | `bsp/pins.hpp` `kGpsRxFullBytes` | UART1 hands on bytes after 8 / 2 idle characters: checksums and `ctrl` overruns (§7) |
 | `services/watchdog.cpp` | Task-watchdog panic: trigger it once, time the reboot (§2) |
 | `sdkconfig.defaults` `BT_NIMBLE_USE_ESP_TIMER=n` | NimBLE on FreeRTOS timers: bond, reconnect, encrypt deadline (§9) |

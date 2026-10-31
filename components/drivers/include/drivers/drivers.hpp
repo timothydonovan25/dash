@@ -2,16 +2,16 @@
 // interface and knowing nothing about the application.
 //
 // ────────────────────────────────────────────────────────────────────────
-//  NONE OF THIS HAS RUN. The P4 board has not been drawn yet. Every class below is written
-//  against a datasheet and a netlist, which is not the same as working.
+//  MOST OF THIS IS UNPROVEN. Every class below was written against a
+//  datasheet and a netlist, which is not the same as working; what has run
+//  on the first board (2026-10-28) is in docs/bringup.md's status table.
 //  CLAUDE.md says not to write drivers you cannot test, and the spirit of
 //  that is respected here: these are the shape of the drivers, the register
 //  maps, the init orders and the health reporting. The parts that can only
 //  be settled on a bench are marked BRINGUP and left honest rather than
 //  guessed at confidently.
 //
-//  When the board arrives, work down DIAG → Sensors. That screen exists for
-//  this week.
+//  Work down DIAG → Sensors. That screen exists for bring-up.
 // ────────────────────────────────────────────────────────────────────────
 #pragma once
 #include "drivers/clock.hpp"

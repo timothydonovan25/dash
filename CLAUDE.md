@@ -16,9 +16,12 @@ contract for how this code is organised, and it was argued through
 deliberately.
 
 **Hardware status: the P4 board was ordered on 2026-10-07** (JLCPCB,
-top side assembled) **and has not arrived.** Nothing in this repo has run
-on it. Treat every driver as
-unproven. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
+top side assembled) **and arrived on 2026-10-28; bring-up is under way.**
+`docs/bringup.md` opens with what has run on it and what has not. Rails,
+boot, the panel, the SD card on 12 V, GPS and the IMU on the bench have
+run; the shift lamps, the pod on this board, tach, wheels, power-fail,
+the C6 radio and the OTA slots have not. Treat a driver as unproven until
+that table says otherwise. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
 board is superseded; its reviews stay in `docs/` as history.
 
 ## Build
@@ -164,6 +167,13 @@ Things that will bite you:
   = 011 on the FPC. Use the `esp_lcd_ili9488` component over an i80 IO
   handle; do not write the command set. The one exception is the
   UEED035HV's ST7365 init, VIEWE's own table (`drivers/ili9488.cpp`).
+  The HT035SHV007NS is **IPS**: it takes the component's `_ips` init. The
+  default (TN) one came up as a negative with a crawling speckle at every
+  write clock. With the IPS init the first board was clean at 25 and
+  30 MHz, so `kTftWrHz` is 25 MHz, above the datasheet's 15.
+- **The bike's P4 is silicon v3.2, the demo's v1.3.** An image built for
+  one does not run on the other, so each project's `sdkconfig.defaults`
+  picks its own revision. v3 has no 360 MHz and runs at 400.
 - **The backlight and the shift lamps are one chip.** PCA9955B (U2) on its
   own I2C1 bus at 1 MHz: OUT0–7 are the lamps, OUT8–10 the backlight
   cathodes. A dead PCA9955B is a dark screen *and* dark lamps. **`ctrl` is
@@ -188,9 +198,13 @@ Things that will bite you:
   deadlocked both, and the task watchdog rebooted the board (2026-10-28).
 - **The tach is an inductive wrap on the plug lead, 5–10 V.** R34/C19 may
   filter its spike away; see `p4-board-pin-map.md` §6.3 before blaming
-  firmware for a dead tach.
+  firmware for a dead tach. On the first board's first ride the wrap was
+  fitted and there was no tach signal; the filter is the suspect, and the
+  fix is on the board, not in firmware.
 - **VIN sense exists on this board** (GPIO20, R17/R18), so firmware can
-  tell bike power from USB. `ctrl` caps lamp duty on USB.
+  tell bike power from USB. `ctrl` caps lamp duty on USB. On USB alone the
+  first board's SD card did not mount (the supply); on 12 V it writes
+  ~32 kB/s clean. Test the card on 12 V.
 - **The P4 has no radio.** BLE and Wi-Fi live on the module's ESP32-C6, reached over
   internal SDIO with ESP-Hosted, as `demo_p4/` does. The C6 is a MINI-1U
   and needs an external antenna on its IPEX. Never call `start_ble` earlier
@@ -239,8 +253,8 @@ idling), OTA only parked, and `power` saves the totals at key-off (moving,
 only once VIN has stayed down a few ms).
 
 The panel is the other budget. A whole 480x320 frame is 307 kB in RGB565
-— about 31 ms on the 8-bit bus at the 10 MHz starting write clock, four
-whole periods of the 120 Hz render loop. `render` therefore sends only the widgets that
+— about 12 ms on the 8-bit bus at the 25 MHz write clock (31 ms at the
+10 MHz it started at), one and a half periods of the 120 Hz render loop. `render` therefore sends only the widgets that
 changed — and only the part that changed, where a widget can say
 (`Widget::damage()`: a table's changed rows, the tach marker's rows), via
 `ui::App::damage()`, which the sim and `test_ui` use too — and **anything that moves must be a widget**: background chrome
@@ -553,10 +567,10 @@ UART1 (GPS) and the i80 LCD bus are brought up in one place, and a driver
 only ever adds a device to a bus.
 
 **`drivers/`, `services/`, `main/`** — compile clean for esp32p4 against
-IDF v6.0.2 and link into a 1.8 MB `dash.bin` (1.40, -O2; NimBLE and esp_hosted were about 430 kB of it when last measured). **Nothing has run.** Compiling
-is not working: the drivers are written against datasheets and a netlist,
-and the board has not arrived yet. See `components/drivers/README.md` for the
-specific BRINGUP holes.
+IDF v6.0.2 and link into a 1.8 MB `dash.bin` (1.40, -O2; NimBLE and esp_hosted were about 430 kB of it when last measured). **Part of it has
+run on the first board** (`docs/bringup.md`'s status table); the rest is
+still written against datasheets and a netlist, and compiling is not
+working. See `components/drivers/README.md` for the specific BRINGUP holes.
 
 Thirteen tasks: ctrl, imu, gnss, logic, input on core 0; render, logger,
 storage, keeper, power, ota, ble, wifi on core 1.
@@ -641,7 +655,10 @@ shows "safe to pull" until the card comes out. One lock in
 `drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
 `wifi`.
 
-**BLE media is built, and has never run on this board.** `services/src/ble_service.cpp`
+**BLE media is built, and has never run on this board.** The first board's
+C6 came with firmware that does not speak ESP-Hosted, so the SDIO push
+cannot reach it; it has to be flashed over its own UART once
+(`docs/bringup.md` §9, `tools/c6_uart.py`). `services/src/ble_service.cpp`
 brings up ESP-Hosted to the C6, NimBLE on core 1, and the §11.1 Dash Media
 service (Feed in, Ctrl out). The phone must bond: Feed needs an encrypted
 link, and `core/ble/` decides which phone may (first one freely, then only
@@ -713,14 +730,14 @@ one `engine_sense` driver because they are the same three counters;
 `backlight` is three PCA9955B channels that `ili9488` forwards to; `theme.hpp`
 is the semantic layer over the palette in `geometry.hpp`.
 
-## When the board arrives
+## Bring-up
 
 `docs/bringup.md` is the procedure: what to do in what order, what you
 should see, and what each failure means. Read §0 before applying power —
 the FPC pin check and the partition table are both irreversible — and do
 §1's rail check before hand-fitting U16 and U4. F1 needs its 1 A fuse.
 
-## Before the board arrives
+## Away from the board
 
 Do not write drivers you cannot test. Write `core/` and the UI against a
 fake `Frame`. The most valuable work right now is the lap timer, the

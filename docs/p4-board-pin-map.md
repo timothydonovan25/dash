@@ -2,15 +2,16 @@
 
 **Status.** Ordered 2026-10-07 from the package listed in §6. The board
 implements this map as drawn (§2, rows 45–52 and 69–73 moved from the first
-plan) and was audited before ordering (§6). Nothing here has run. The module is a Guition JC-ESP32P4-M3-C6:
+plan) and was audited before ordering (§6). It arrived on 2026-10-28; what has run on
+it is in `bringup.md`'s status table. The module is a Guition JC-ESP32P4-M3-C6:
 ESP32-P4NRW32 (32 MB in-package PSRAM, 16 MB flash) plus an
 ESP32-C6-MINI-1U-N4 on SDIO, 27 × 27 mm, 80 castellated pins.
 
 The panel runs on an **8-bit 8080 parallel bus**, not SPI. The panel's
 datasheet (HT035SHV007NS, ILI9488, 40-pin FPC) lists 8080 8/16-bit and
 3/4-wire SPI, and brings DB0–DB15 out on FPC 17–32. FPC pin functions in
-§4 are taken from it. It has not run in parallel yet: `panel_test/` on
-the breakout is the proof (`s3-parallel-respin.md` §2).
+§4 are taken from it. It runs in parallel on the first board, at a
+25 MHz write clock with the IPS init sequence.
 
 Sources: the module symbol and schematic in Guition's dev-board repo
 (github.com/megavatt05/JC-ESP32P4-M3-DEV, `5-Schematic/`), the Espressif
@@ -430,7 +431,8 @@ clears it.
   with a 5 V pull-up, it now sees 12 V. Measure the stock harness first.
   4.7 kΩ for R6 still saturates the opto.
 - **USB-only power is marginal.** VIN is about 4.3–4.6 V after D5, at the
-  LMR51430's 4.5 V minimum, and the backlight LDO is in dropout.
+  LMR51430's 4.5 V minimum, and the backlight LDO is in dropout. On the
+  first board the SD card did not mount on USB alone and did on 12 V.
 - **GPS VBACKUP (U4-4) is tied to VCC**, so every power-up is a cold
   start. A supercap or coin cell through a diode buys hot starts.
 - **Mechanical.** Four 3.0 mm corner holes, about 112 mm apart, nothing in
@@ -447,6 +449,9 @@ The risk runs the other way: **the input filter may hide the pulse.**
 R34 (100 kΩ) with C19 (470 pF) is a 47 µs time constant, and a wrap
 around the lead gives a spike of a few µs or less. A 1 µs, 10 V spike
 charges C19 to about 0.2 V, far below the P4's ~2.5 V input threshold.
+
+**First board (2026-10-28):** the wrap was fitted on the first ride and
+there was no tach signal. Not scoped yet; this filter is the suspect.
 
 Both parts are 0805, so this is a bench fix, not a respin:
 

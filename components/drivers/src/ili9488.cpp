@@ -200,9 +200,9 @@ hal::Status Ili9488::start() {
     // top left rather than giving a mirror image — which way round depends
     // on how the panel is fitted in the case.
     //
-    // BRINGUP: if the display comes up mirrored or upside down when the
-    // board arrives, these two lines are the only thing to change.
-    // panel_test's corners screen shows which.
+    // The first board's HT035, as fitted, needs both mirrors (2026-10-28).
+    // A panel fitted another way changes only these two lines; panel_test's
+    // corners screen shows which.
     esp_lcd_panel_swap_xy(panel, true);
     esp_lcd_panel_mirror(panel, true, true);
     // No esp_lcd_panel_disp_on_off(panel, true) here: init() above already
