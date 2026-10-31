@@ -21,7 +21,7 @@ the same as correct. The places that can only be settled here are marked
 | 2 Boots | Done | P4 silicon **v3.2**, so the build is for v3.1+, at 400 MHz. Boot time and the watchdog test not done |
 | 3 Panel | Done (HT035) | IPS init, mirrored on both axes, 25 MHz write clock. The VIEWE UEED035HV probe is not run |
 | 4 DIAG → Sensors, Bus | Not done | |
-| 5 Pod | Demo board only | The pod works on the demo; its GH1.25 connector for this board is not fitted yet |
+| 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet |
 | 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done |
 | 7 GPS | Fixes | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. 10 Hz not confirmed |
 | 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first ride the speedo read 0; its logs on the card are unread |
@@ -288,7 +288,7 @@ the F2 polyfuse), 4 GND — check the pod's harness against that.
 | Buttons work, then stop after a jump | Brown-out. Expected; recovery should handle it. If **still stuck** climbs too, it is the cable. |
 | Pod dead, F2 hot | A short in the cable; the polyfuse is doing its job. |
 
-**Neutral** is separate: GPIO12 (U16-19), opto-isolated by U6 and pulled
+**Neutral** is separate, and works on the first board: GPIO12 (U16-19), opto-isolated by U6 and pulled
 up by R64, and it reads **LOW when in neutral**. A neutral light that reads
 inverted is this, not a bug. Before connecting it to the bike, measure
 the stock neutral wire: the dash pulls it to about 12 V through R6 when

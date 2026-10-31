@@ -183,6 +183,7 @@ Things that will bite you:
 - **The PCA9955B's reset is on the P4's EN.** A software or USB-JTAG reset
   does not reset it, so `init()` must rewrite its registers.
 - **Neutral reads LOW.** Opto-isolated (U6), pulled up by R64, on GPIO12.
+  Works on the first board, on the bike.
 - **The handlebar button pod has no interrupt line.** It must be polled.
   200 Hz (`bsp::kPodPollHz`): a press is seen 5–10 ms after it lands.
 - **Pod I2C runs at 100 kHz, not 400 kHz.** 4.7k pull-ups over 0.5 m of

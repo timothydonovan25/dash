@@ -425,7 +425,8 @@ clears it.
 
 ### 6.2 Open — check at bring-up
 
-- **The neutral input pulls the bike's neutral wire up.** VIN → R6
+- **The neutral input pulls the bike's neutral wire up** (it works on the
+  first board, on the bike). VIN → R6
   (2.2 kΩ) → D1 → the PC817 LED → `NEUTRAL_12V`, so with the switch open
   the wire sits near 12 V. If anything else on the bike shares that wire
   with a 5 V pull-up, it now sees 12 V. Measure the stock harness first.
