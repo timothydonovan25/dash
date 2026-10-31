@@ -16,15 +16,19 @@ once at boot via GPIO54 and gives up on SDIO by ~6 s).
     python3 tools/c6_uart.py wait            # until the ROM bootloader answers
     python3 tools/c6_uart.py backup          # 4 MB to c6_factory_backup.bin
     python3 tools/c6_uart.py flash           # demo_p4/c6_cp's build
+    python3 tools/c6_uart.py inspect         # what the backup holds; no board needed
 
 Do not open the P4's /dev/ttyACM0 meanwhile: that resets the P4, which
 resets the C6.
 """
 import argparse
 import os
+import struct
 import subprocess
 import sys
 import time
+
+from flash_dev import APP_DESC, APP_DESC_MAGIC, IMAGE_MAGIC, OTADATA_SECTOR, stable_slot
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 FLASH_SIZE = 0x400000                    # ESP32-C6-MINI-1U-N4
@@ -88,6 +92,65 @@ def flash(a):
     print("done: unclip IO9, power-cycle, then `idf.py -p /dev/ttyACM0 c6-flash` (bringup.md step 8)")
 
 
+CHIP_ESP32C6 = 0x000D
+BOOT_DESC_MAGIC = 0x50                   # esp_bootloader_desc_t, IDF 5.2 on
+PART_ENTRY = struct.Struct("<2sBBII16sI")
+# strings that say what an image is for when its app description does not
+MARKERS = (b"ESP-Hosted", b"sdio_slave", b"spi_slave", b"spi_hd", b"AT version")
+
+
+def cstr(b):
+    return b.split(b"\0")[0].decode(errors="replace")
+
+
+def describe_app(img, off):
+    head = img[off:off + APP_DESC + 256]
+    if head.count(0xFF) == len(head):
+        return "erased"
+    if head[0] != IMAGE_MAGIC:
+        return f"no image (first byte {head[0]:#04x})"
+    chip = struct.unpack_from("<H", head, 12)[0]
+    note = "" if chip == CHIP_ESP32C6 else f", chip id {chip:#06x}, not a C6"
+    d = APP_DESC
+    if head[d] == BOOT_DESC_MAGIC:
+        return f"bootloader, IDF {cstr(head[d+8:d+40])}, built {cstr(head[d+40:d+64])}{note}"
+    if struct.unpack_from("<I", head, d)[0] != APP_DESC_MAGIC:
+        return f"image with no description{note}"
+    # an ESP-Hosted network_adapter's version is the ESP-Hosted version
+    return (f"'{cstr(head[d+48:d+80])}' version '{cstr(head[d+16:d+48])}', IDF {cstr(head[d+112:d+144])}, "
+            f"built {cstr(head[d+96:d+112])} {cstr(head[d+80:d+96])}{note}")
+
+
+def inspect(a):
+    img = open(a.image, "rb").read()
+    print(f"{a.image}: {len(img)} bytes" + ("" if len(img) == FLASH_SIZE else f", not {FLASH_SIZE}"))
+    if img.count(0xFF) == len(img):
+        print("the whole flash is erased: nothing was ever on it")
+        return
+    print(f"  0x0      {describe_app(img, 0)}")
+    table = next((o for o in range(0x1000, 0x10001, 0x1000) if img[o:o + 2] == b"\xaa\x50"), None)
+    if table is None:
+        print("  no partition table between 0x1000 and 0x10000")
+    else:
+        print(f"  partition table at {table:#x}:")
+        for i in range(0, 0xC00, PART_ENTRY.size):
+            magic, kind, sub, off, size, label, _ = PART_ENTRY.unpack_from(img, table + i)
+            if magic != b"\xaa\x50":
+                break
+            line = f"    {cstr(label):<16} {kind:#04x}/{sub:#04x} {off:#09x} {size // 1024:>5} kB"
+            if kind == 0:
+                line += "  " + describe_app(img, off)
+            print(line)
+            if kind == 1 and sub == 0:   # otadata: which app slot the bootloader picks
+                otadata = img[off:off + 2 * OTADATA_SECTOR]
+                if otadata.count(0xFF) == len(otadata):
+                    print("    otadata erased: the bootloader runs factory, else ota_0")
+                else:
+                    stable_slot(otadata)
+    found = [m.decode() for m in MARKERS if m in img]
+    print("  strings: " + (", ".join(found) if found else "none of " + ", ".join(m.decode() for m in MARKERS)))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("-p", "--port", default="/dev/ttyUSB0")
@@ -105,6 +168,9 @@ def main():
     s.add_argument("--backup", default="c6_factory_backup.bin")
     s.add_argument("--no-backup", action="store_true")
     s.set_defaults(fn=flash)
+    s = sub.add_parser("inspect", help="say what a flash backup holds, offline")
+    s.add_argument("image", nargs="?", default="c6_factory_backup.bin")
+    s.set_defaults(fn=inspect)
     a = p.parse_args()
     a.fn(a)
 
