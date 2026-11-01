@@ -654,7 +654,9 @@ the sim's `crash <task|none> [new]` stands in for one.
 **Startup** shows a 1 s splash before the gauge sweep, 1 s by default (CONFIG → Startup).
 
 **SD eject.** CONFIG → SD card → Eject flushes and unmounts; DIAG → System
-shows "safe to pull" until the card comes out. One lock in
+shows "safe to pull" until the card comes out. `storage` first has `logger`
+put its RAM blocks on the card (`Deps::log_flush_req`/`ack`, 1.61: the last
+~2 s of every stream, ~20 kB, were lost before). One lock in
 `drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
 `wifi`.
 
