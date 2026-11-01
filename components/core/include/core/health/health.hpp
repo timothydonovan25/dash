@@ -97,6 +97,12 @@ public:
     // kept verbatim for the diag screen — this layer does not interpret it.
     void report_error(state::Dev d, int32_t err, uint32_t t_ms);
 
+    // An error since the last success. A task that vouches for a device
+    // without using it (storage's "the card is mounted") must not while
+    // this holds: its ok cleared the logger's streak of failed writes every
+    // 500 ms, and a card that refused every write never raised the alert.
+    bool erring(state::Dev d) const;
+
     // Keeper, once per tick before reading the table. Turns reports into
     // states, and is what notices a device that went quiet without ever
     // reporting an error.

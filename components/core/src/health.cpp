@@ -187,6 +187,10 @@ bool Tracker::publish_if_changed(Published<state::Health>& slot, uint32_t t_ms,
     return true;
 }
 
+bool Tracker::erring(Dev d) const {
+    return cell_[ix(d)].streak.load(kRlx) != 0;
+}
+
 DevHealth Tracker::operator[](Dev d) const {
     const Cell& c = cell_[ix(d)];
     DevHealth h;

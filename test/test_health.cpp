@@ -66,6 +66,29 @@ int main() {
         CHECK(t[Dev::Gnss].fault_count == 3);
     }
 
+    CASE("a voucher that holds off while erring lets one failure a second fault");
+    {
+        // storage says the card is mounted every 500 ms; the logger fails a
+        // write once a second. Vouching regardless kept it Ok for good.
+        Tracker t;
+        t.begin_init(Dev::Sd, 0);
+        t.report_ok(Dev::Sd, 0);
+        t.tick(0, p);
+        CHECK(!t.erring(Dev::Sd));
+        for (uint32_t ms = 500; ms <= 12000; ms += 500) {
+            if (ms % 1000 == 0) t.report_error(Dev::Sd, 5, ms);
+            if (!t.erring(Dev::Sd)) t.report_ok(Dev::Sd, ms);
+            t.tick(ms, p);
+        }
+        CHECK(t.erring(Dev::Sd));
+        CHECK(t[Dev::Sd].state == DevState::Fault);
+        // One good write ends it.
+        t.report_ok(Dev::Sd, 12100);
+        CHECK(!t.erring(Dev::Sd));
+        t.tick(12100, p);
+        CHECK(t[Dev::Sd].state == DevState::Ok);
+    }
+
     CASE("a device that goes quiet without erroring is still broken");
     {
         // The handlebar pod that browns out and comes back with default

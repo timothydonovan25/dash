@@ -110,7 +110,10 @@ void storage_task(void* arg) {
             }
         } else {
             was_present = true;
-            d.health->report_ok(core::state::Dev::Sd, now);
+            // Mounted says nothing about writes; only the logger's next
+            // good write ends a streak of failed ones.
+            if (!d.health->erring(core::state::Dev::Sd))
+                d.health->report_ok(core::state::Dev::Sd, now);
         }
 
         // Saved tracks (services/track_store.hpp): one job per pass, while
