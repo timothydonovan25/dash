@@ -66,7 +66,12 @@ void serial_task(void* arg) {
     size_t n = 0;
     for (;;) {
         uint8_t ch;
-        if (usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY) != 1) continue;
+        // Half a line left by a sender that stopped mid-write is dropped
+        // after a moment of silence, not glued onto the next command.
+        if (usb_serial_jtag_read_bytes(&ch, 1, n ? pdMS_TO_TICKS(500) : portMAX_DELAY) != 1) {
+            n = 0;
+            continue;
+        }
         if (ch == '\r') continue;
         if (ch == '\n') {
             line[n] = '\0';
