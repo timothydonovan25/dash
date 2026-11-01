@@ -55,10 +55,19 @@ void storage_task(void* arg) {
             request_gen = gen;
             if (d.slots->storage_request.get().op ==
                     core::state::StorageRequest::Eject && inserted) {
-                // Closing the log file flushes it. The logger sees the card
-                // gone on its next pass and stops writing. "Safe to pull"
-                // only once it really is unmounted; if the card lock never
-                // came free, nothing changed and CONFIG's Eject can go again.
+                // The logger's RAM blocks first (up to ~2 s of every
+                // stream), then closing the files flushes them. The logger
+                // sees the card gone on its next pass and stops writing.
+                // Waited for, but not forever: a logger that does not answer
+                // in 3 s (a dying card) costs those rows, not the eject.
+                const uint32_t req = d.log_flush_req.fetch_add(1) + 1;
+                for (int i = 0; i < 150 &&
+                     d.log_flush_ack.load(std::memory_order_acquire) != req; ++i) {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                }
+                // "Safe to pull" only once it really is unmounted; if the
+                // card lock never came free, nothing changed and CONFIG's
+                // Eject can go again.
                 if (card->unmount()) {
                     was_present = false;
                     ejected = true;

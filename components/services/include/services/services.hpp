@@ -127,6 +127,11 @@ struct Deps {
     // keeps the lamps dark, `keeper` keeps the backlight off. Cleared if the
     // supply comes back, or if the board turns out to be on USB.
     std::atomic<bool> power_fail{false};
+    // CONFIG's Eject: `storage` bumps the request and waits for `logger` to
+    // put what it holds in RAM on the card and answer with the same number,
+    // then unmounts. Without it the last ~2 s of every stream were lost.
+    std::atomic<uint32_t> log_flush_req{0};
+    std::atomic<uint32_t> log_flush_ack{0};
 
     // Re-inits `keeper` has decided on, one bit per core::state::Dev. The
     // keeper owns the retry *policy* (core::health::claim_retry); the task

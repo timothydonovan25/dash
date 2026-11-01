@@ -514,12 +514,18 @@ void logger_task(void* arg) {
         maybe_date(L);
 
         const bool detail = d.settings && d.settings->detail_log;
-        size_t n = drain_main(L);
+        const auto drain_all = [&]() {
+            size_t got = drain_main(L);
+            if (detail) {
+                got += drain(L, core::log::kImu, d.imu_log, batches.imu, core::log::format_imu);
+                got += drain(L, core::log::kTach, d.tach_log, batches.tach, core::log::format_tach);
+                got += drain(L, core::log::kDet, d.det_log, batches.det, core::log::format_det);
+                got += drain(L, core::log::kEvt, d.evt_log, batches.evt, core::log::format_event);
+            }
+            return got;
+        };
+        size_t n = drain_all();
         if (detail) {
-            n += drain(L, core::log::kImu, d.imu_log, batches.imu, core::log::format_imu);
-            n += drain(L, core::log::kTach, d.tach_log, batches.tach, core::log::format_tach);
-            n += drain(L, core::log::kDet, d.det_log, batches.det, core::log::format_det);
-            n += drain(L, core::log::kEvt, d.evt_log, batches.evt, core::log::format_event);
             const uint32_t now = now_ms(L);
             if (static_cast<int32_t>(now - L.next_diag_ms) >= 0) {
                 L.next_diag_ms = now + kDiagEveryMs;
@@ -530,6 +536,30 @@ void logger_task(void* arg) {
             // flight goes. The files stay as they are; turned on again, the
             // same files carry on.
             clear_detail_rings(d);
+        }
+
+        // Eject asked for everything on the card before it unmounts: the
+        // rings (bounded: they refill while this runs), every block, a sync.
+        const uint32_t req = d.log_flush_req.load(std::memory_order_acquire);
+        if (req != d.log_flush_ack.load(std::memory_order_relaxed)) {
+            for (int i = 0; i < 8 && n > 0; ++i) n = drain_all();
+            const uint32_t now = now_ms(L);
+            size_t bytes = 0;
+            for (Out& o : L.out) {
+                if (o.used == 0) continue;
+                bytes += o.used;
+                const hal::Status st = append(L, o);
+                o.used = 0;
+                o.flush.written(now);
+                if (hal::ok(st)) o.on_card = true;
+                else report(L, st);
+            }
+            const hal::Status st = sync_all(L);
+            for (Out& o : L.out) o.flush.synced();
+            if (!hal::ok(st)) report(L, st);
+            ESP_LOGI("logger", "flushed for eject: %u bytes, sync %s",
+                     static_cast<unsigned>(bytes), hal::status_name(st));
+            d.log_flush_ack.store(req, std::memory_order_release);
         }
 
         if (d.system) {
