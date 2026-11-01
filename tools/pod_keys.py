@@ -12,7 +12,7 @@ Sends `btn X` / `long X` lines to main/serial_buttons.cpp (the bike) or
 demo_p4/main/serial_buttons.cpp (the demo), and prints the board's log
 alongside. Presses arrive already decoded, so the firmware's debounce and
 hold timing are not exercised, and a held button does not repeat.
-Opens the port with DTR/RTS low so it does not reset the board.
+Opens the port without resetting the board (RTS is lowered before DTR).
 """
 import argparse
 import sys
@@ -43,8 +43,13 @@ def main():
 
     s = serial.Serial()
     s.port, s.baudrate, s.timeout = a.port, 115200, 0.2
-    s.dtr = s.rts = False
+    # The USB-Serial-JTAG resets the chip on DTR low with RTS high. Opening
+    # with both False reset it every time: pyserial lowers DTR before RTS.
+    # Open as the kernel does anyway (both high), then RTS down first.
+    s.dtr = s.rts = True
     s.open()
+    s.rts = False
+    s.dtr = False
 
     def echo():
         while s.is_open:

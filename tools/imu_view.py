@@ -13,7 +13,7 @@ side, up is the LED edge, left is the gerber +X edge. Lean + is right, pitch
 
 Run with ESP-IDF's Python (it has pyserial and Tk):
     ~/.espressif/python_env/idf6.0_py3.14_env/bin/python tools/imu_view.py [-p PORT]
-Opening the port resets the board; the stream starts once it has booted.
+Opening the port does not reset the board.
 """
 import argparse
 import glob
@@ -70,9 +70,13 @@ def reader(port, q, stop):
         try:
             s = serial.Serial()
             s.port, s.baudrate, s.timeout = p, 115200, 0.2
-            s.dtr = s.rts = False
+            # Both high as the kernel opens it, then RTS down before DTR: DTR
+            # low with RTS high is the USB-Serial-JTAG's reset (pod_keys.py).
+            s.dtr = s.rts = True
             s.open()
-            q.put(("status", f"{p}: connected, waiting for IMU lines (the board resets on open)"))
+            s.rts = False
+            s.dtr = False
+            q.put(("status", f"{p}: connected, waiting for IMU lines"))
             buf = b""
             while not stop.is_set():
                 buf += s.read(4096)
