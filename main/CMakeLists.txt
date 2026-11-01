@@ -1,6 +1,7 @@
 idf_component_register(
-    SRCS "main.cpp" "wiring.cpp"
-    REQUIRES bsp core dash_hal ui drivers services p4_restart_fix)
+    SRCS "main.cpp" "wiring.cpp" "serial_buttons.cpp"
+    REQUIRES bsp core dash_hal ui drivers services p4_restart_fix
+             esp_driver_usb_serial_jtag freertos)
 
 # The C6's ESP-Hosted firmware, written into the `slave_fw` partition by
 # `idf.py c6-flash` so services/src/c6_firmware.cpp has something to push

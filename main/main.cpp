@@ -4,6 +4,7 @@
 // sequence and nothing else, so that "why did it come up like that" has one
 // short file to read.
 #include "wiring.hpp"
+#include "serial_buttons.hpp"
 
 #include "core/config/config.hpp"
 #include "esp_log.h"
@@ -103,6 +104,7 @@ extern "C" void app_main() {
     services::start_gnss(deps);
     services::start_logic(deps, commands);
     services::start_input(deps, commands);
+    start_serial_buttons();   // bench stand-in for the pod: tools/pod_keys.py
 
     services::start_logger(deps);
     services::start_storage(deps);
