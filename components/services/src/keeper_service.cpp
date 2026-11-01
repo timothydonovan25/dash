@@ -225,6 +225,10 @@ void keeper_task(void* arg) {
                          static_cast<unsigned>(d.system->psram_free_b));
                 ESP_LOGI("imu", "most samples waiting at one wake: %u (the FIFO holds ~128)",
                          static_cast<unsigned>(d.system->imu_catchup_max));
+                ESP_LOGI("timing", "ctrl late ticks %u, render %u.%u Hz",
+                         static_cast<unsigned>(d.system->ctrl_late),
+                         static_cast<unsigned>(d.system->render_hz_x10 / 10),
+                         static_cast<unsigned>(d.system->render_hz_x10 % 10));
             }
 
             // Bus recoveries live in the driver that performs them; the
