@@ -581,10 +581,14 @@ void logger_task(void* arg) {
         flush(L);
         if (static_cast<int32_t>(now_ms(L) - L.next_report_ms) >= 0) {
             L.next_report_ms = now_ms(L) + 10000;
-            ESP_LOGI("logger", "%s: %u rows, %u bytes to the card, %u errors, slowest %u ms",
+            // Rows the rings threw away since boot (blackbox, imu, tach, det,
+            // evt): a soak's sign that a card stall outlasted a ring.
+            const auto lost = [](const auto* r) { return r ? static_cast<unsigned>(r->dropped()) : 0u; };
+            ESP_LOGI("logger", "%s: %u rows, %u bytes to the card, %u errors, slowest %u ms, dropped %u/%u/%u/%u/%u",
                      L.out[core::log::kMain].path, static_cast<unsigned>(L.out[core::log::kMain].rows),
                      static_cast<unsigned>(L.tot_bytes), static_cast<unsigned>(L.tot_errors),
-                     static_cast<unsigned>(L.tot_max_ms));
+                     static_cast<unsigned>(L.tot_max_ms), lost(d.blackbox), lost(d.imu_log),
+                     lost(d.tach_log), lost(d.det_log), lost(d.evt_log));
         }
         vTaskDelay(pdMS_TO_TICKS(n == 0 ? 200 : 20));
     }
