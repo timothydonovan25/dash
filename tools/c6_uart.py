@@ -7,9 +7,10 @@ this puts ESP-Hosted on it once, after which `idf.py c6-flash` takes over.
 
 Wiring: black GND, yellow (cable RXD) to H3 (C6 TX), orange (cable TXD) to
 H1 (C6 RX). Red is 5 V: leave it off. The cable's RTS/CTS go nowhere, so
-nothing here can reset the C6: download mode is IO9 (R1's far end) to GND
-through 1 kOhm, then power the board and wait 10 s (the P4 resets the C6
-once at boot via GPIO54 and gives up on SDIO by ~6 s).
+nothing here can reset the C6: download mode is C6_BOOT/IO9 (R1's far end)
+to GND through 1 kOhm, then tap C6_RST (R22's far end) to GND; the C6's own
+watchdog resets do not re-read IO9. Park the P4 first (bringup.md section 9,
+step 5), or its resets of the C6 cut a backup short.
 
     . ~/.espressif/v6.0.2/esp-idf/export.sh
     python3 tools/c6_uart.py listen          # boot text, saved to c6_boot.log

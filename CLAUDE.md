@@ -18,9 +18,9 @@ deliberately.
 **Hardware status: the P4 board was ordered on 2026-10-07** (JLCPCB,
 top side assembled) **and arrived on 2026-10-28; bring-up is under way.**
 `docs/bringup.md` opens with what has run on it and what has not. Rails,
-boot, the panel, the SD card on 12 V, GPS and the IMU on the bench have
-run; the shift lamps, the pod on this board, tach, wheels, power-fail,
-the C6 radio and the OTA slots have not. Treat a driver as unproven until
+boot, the panel, the SD card on 12 V, GPS, the IMU on the bench and the
+C6's SDIO link (advertising, nothing connected) have run; the shift lamps,
+the pod on this board, tach, wheels, power-fail and the OTA slots have not. Treat a driver as unproven until
 that table says otherwise. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
 board is superseded; its reviews stay in `docs/` as history.
 
@@ -656,10 +656,11 @@ shows "safe to pull" until the card comes out. One lock in
 `drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
 `wifi`.
 
-**BLE media is built, and has never run on this board.** The first board's
-C6 came with firmware that does not speak ESP-Hosted, so the SDIO push
-cannot reach it; it has to be flashed over its own UART once
-(`docs/bringup.md` §9, `tools/c6_uart.py`). `services/src/ble_service.cpp`
+**BLE media is built; on this board the radio advertises and nothing has
+connected.** The first board's C6 came with **blank flash**, so the SDIO
+push could not reach it; it was flashed over its own UART once
+(2026-10-31, `docs/bringup.md` §9, `tools/c6_uart.py`), and `slave_fw`
+now holds the same 2.12.8. `services/src/ble_service.cpp`
 brings up ESP-Hosted to the C6, NimBLE on core 1, and the §11.1 Dash Media
 service (Feed in, Ctrl out). The phone must bond: Feed needs an encrypted
 link, and `core/ble/` decides which phone may (first one freely, then only
