@@ -622,6 +622,11 @@ Feed lines arrived (`phone connected, waiting for encryption`, then
   solicitation), so a phone stores the bond as `CRF250F`. The app looked
   for `CRF250F-Dash` among bonded devices, missed, and fell back to a scan
   that never finished. It now matches either (`~/phone`, `DashLink.kt`).
+- **A P4 that reboots every ~14 s is a C6 that does not answer.**
+  `transport: Not able to connect with ESP-Hosted slave device`, then
+  `H_SDIO_DRV: Host is resetting itself`: ESP-Hosted restarts the whole P4,
+  so every reading on the console jumps as the filters start over. On
+  2026-10-31 it was a short from wires left dangling on the C6's pads.
 - **The phone logged `Waiting for scan response` forever**, and the laptop
   hears the dash at −90 dBm from beside it. That is a radio with no
   antenna: step 2 below.
