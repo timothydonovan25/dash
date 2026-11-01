@@ -144,6 +144,7 @@ void imu_task(void* arg) {
         // further behind with every one. Bounded: the FIFO holds 2 kB, eight
         // batches of 16, and a part that keeps saying "full" is not allowed
         // to keep this task here.
+        size_t woke_n = 0;
         for (int drain = 0; drain < kMaxBatchesPerWake; ++drain) {
             // Static, so the frame stays under 1 kB at -O2 (640 B of
             // samples since they carry the chip's timestamp); one imu task.
@@ -267,6 +268,7 @@ void imu_task(void* arg) {
                 jumps.publish_into(out);
                 out.imu_temp_c = imu_temp_c;
                 d.slots->attitude.publish(out);
+                woke_n += n;
                 if (n < kBatch) break;          // drained
             } else {
                 d.health->report_error(core::state::Dev::Imu,
@@ -274,7 +276,8 @@ void imu_task(void* arg) {
                 break;
             }
         }
-
+        if (d.system && woke_n > d.system->imu_catchup_max)
+            d.system->imu_catchup_max = static_cast<uint16_t>(woke_n);
     }
 }
 

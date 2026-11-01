@@ -223,6 +223,8 @@ void keeper_task(void* arg) {
                          static_cast<unsigned>(d.system->heap_min_b),
                          static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
                          static_cast<unsigned>(d.system->psram_free_b));
+                ESP_LOGI("imu", "most samples waiting at one wake: %u (the FIFO holds ~128)",
+                         static_cast<unsigned>(d.system->imu_catchup_max));
             }
 
             // Bus recoveries live in the driver that performs them; the
