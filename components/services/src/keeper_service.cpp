@@ -217,6 +217,12 @@ void keeper_task(void* arg) {
                          static_cast<double>(d.slots->elec.get().vbat), static_cast<double>(bt.rest_v),
                          static_cast<double>(bt.charge_v), static_cast<double>(bt.crank_min_v),
                          static_cast<unsigned>(bt.verdict));
+                // For a soak on the bench: a leak is a falling `free` here.
+                ESP_LOGI("heap", "internal free %u, lowest %u, largest %u; psram free %u",
+                         static_cast<unsigned>(d.system->heap_free_b),
+                         static_cast<unsigned>(d.system->heap_min_b),
+                         static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                         static_cast<unsigned>(d.system->psram_free_b));
             }
 
             // Bus recoveries live in the driver that performs them; the
