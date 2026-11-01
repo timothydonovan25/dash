@@ -600,7 +600,9 @@ Every build of either board is copied to `releases/` as
 The Update screen shows version and date for both slots, and an upload built
 for the other board (`demo` vs `bike`) is refused.
 
-**Wi-Fi updates are built, and have run on the demo board, not the bike.**
+**Wi-Fi updates are built, and have run on the demo board; on the bike the
+hotspot comes up and goes down cleanly (20 cycles, no leak), nothing has
+joined it.**
 An on-demand WPA2 hotspot (`CRF250F-Dash`, a new eight-digit password each
 time, shown on DIAG → Update), never a station. `http://192.168.4.1` uploads
 a `dash-*.bin` to the dev slot, downloads and deletes ride logs, downloads
