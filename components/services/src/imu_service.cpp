@@ -276,8 +276,12 @@ void imu_task(void* arg) {
                 break;
             }
         }
-        if (d.system && woke_n > d.system->imu_catchup_max)
-            d.system->imu_catchup_max = static_cast<uint16_t>(woke_n);
+        if (d.system) {
+            if (woke_n > d.system->imu_catchup_max)
+                d.system->imu_catchup_max = static_cast<uint16_t>(woke_n);
+            if (woke_n > 64) d.system->imu_catchup_over64++;
+            if (woke_n > 100) d.system->imu_catchup_over100++;
+        }
     }
 }
 

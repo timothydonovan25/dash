@@ -42,9 +42,12 @@ using core::log::kStreamCount;
 
 // 8 kB per write, as §9.2 says. An SD card charges roughly the same latency
 // for 512 bytes as for 8 kB, so the batch size is free throughput. The raw
-// IMU file is the fastest at ~12 kB/s, so its block is twice that.
+// IMU file is the fastest at ~12 kB/s. Its block was 16 kB until 1.61, but
+// the SD host holds SPI2 for a whole multi-block write, busy time included,
+// and the IMU's FIFO (~128 samples, ~680 ms) waits behind it: an hour's soak
+// at 16 kB had 4 wakes over 100 samples behind, at 8 kB none (bringup §12).
 constexpr size_t kBlockBytes = 8192;
-constexpr size_t kImuBlockBytes = 16384;
+constexpr size_t kImuBlockBytes = 8192;
 constexpr size_t kSmallBlockBytes = 4096;   // events, diag
 constexpr size_t kBatch = 64;
 

@@ -826,10 +826,20 @@ Tracks need a fix, so indoors they are safe.
 
 **The console's 10 s summary** (`keeper`) is what a soak watches: `heap`
 (internal free; a leak is it falling), `imu` (most samples found waiting at
-one wake; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
+one wake, and how many wakes found over 64 and over 100; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
 `gnss`, `power`, and `logger`'s bytes and slowest write.
 
 **What it found on the first board:** 19 min and 2337 random presses, no
 reset; Wi-Fi 20 on/off cycles with RAM back each time; Eject flushing ~20 kB
 the logger used to drop; a lost C6 no longer rebooting the dash; dev boot,
 reset and panic all falling back to stable; a 40 min soak on 1.61 with the heap flat at 306 kB free, 0 late ctrl ticks, render at 120 Hz, 76 MB to the card with 0 errors, the IMU at most 77 samples behind.
+Then 2 h clean (heap flat, ctrl late 0), but the IMU reached 116 behind after
+~1.4 h, a card write holding SPI2 near the FIFO's ~680 ms. An A/B of the raw
+IMU log's block, one hour each on the same card: 16 kB peaked at 144 (drained
+over several reads, each waiting out SD commands, so not all queued at once),
+6 wakes over 64, 4 over 100, slowest write 925 ms; 8 kB peaked at 83, 4 over
+64, none over 100, slowest 742 ms, the same bytes written. 8 kB it is. The
+FIFO is stream mode (`FIFO_CONFIG` 0x40): a full one drops whole old packets,
+and samples are dated from the newest, so an overflow is a gap in `_imu`, not
+scrambled data. One run each; the card's own garbage collection still sets
+the worst case.

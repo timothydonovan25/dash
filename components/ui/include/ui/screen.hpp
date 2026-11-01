@@ -50,6 +50,9 @@ struct SystemInfo {
     // Most samples the imu task found waiting in one wake, since boot. The
     // FIFO holds about 128; near that, an SD card stall nearly lost data.
     uint16_t imu_catchup_max = 0;
+    // Wakes that found more than 64 / more than 100 waiting, since boot.
+    uint32_t imu_catchup_over64 = 0;
+    uint32_t imu_catchup_over100 = 0;
     // When render pushed its first whole frame, 0 until then. The start-up
     // sweep is timed from it, so `ctrl`'s lamps and the screen's tach sweep
     // together even though ctrl starts first.
