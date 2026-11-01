@@ -36,7 +36,11 @@ bias in g.
 - **GPS referees the wheels.** For a second after an accepted fix, a wheel
   more than 4 mph (or a quarter of the GPS speed) from it is not believed.
   That catches a dead sensor reading 0 at speed, which the gate alone would
-  follow, because it would drag the estimate down with it.
+  follow, because it would drag the estimate down with it. **Only a fix
+  with HDOP 2.5 or better referees** (1.61): parked under a bridge, GPS
+  drifting to 6 mph at HDOP 4 was accepted (its noise scales with HDOP, so
+  the gate is wide), refereed, threw out two good wheels at 0, and the
+  filter showed 6.4 mph standing still. A poor fix is still used, weakly.
 - **Wheel split**: front and rear more than 2 mph apart means one is
   spinning or locked; only the one nearer the referee (or the filter) is
   used. That catches a spin that builds gently enough to slip through the
@@ -47,7 +51,8 @@ bias in g.
 - **GPS outvoted by wheels reading 0** (1.60). Wheels that read 0 under a
   moving bike (unfitted, unplugged) are agreed with while the filter sits
   at 0, so they are never suspect and the rule above never fires. GPS
-  suspect, above 4 mph, with every offered wheel under 1 mph: the filter
+  suspect, above 10 mph with HDOP 2.5 or better (more than any standstill
+  drift), with every offered wheel under 1 mph: the filter
   restarts on GPS, and the referee then keeps the wheels out. Without it the
   first rides (s156, s157, 2026-10-29) showed 0 at up to 50 mph.
 - **A rejected fix with no wheel accepted widens the filter** (1.60) until
@@ -57,7 +62,7 @@ bias in g.
 - With no correction for 2 s it stops claiming to be **valid**.
 
 Replayed over s156/s157 with both: the fused speed is within 3 mph of GPS
-at 87 % and 91 % of moving fixes (it read 0 throughout on the bike). What
+at 86 % and 89 % of moving fixes (it read 0 throughout on the bike). What
 is left is s156's attitude: the board was not held rigidly on those rides
 (15 g, 1100 dps, gravity 60° apart between the two parked spells), so
 `g_lon` was nonsense and the filter coasts away between fixes for up to

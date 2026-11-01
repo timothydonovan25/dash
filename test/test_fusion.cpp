@@ -241,6 +241,31 @@ int main() {
         }
     }
 
+    CASE("stopped with good wheels, GPS drifting at 6 mph: the wheels' 0 stands");
+    {
+        // The outvote rule above must not fire on a parked bike under a
+        // bridge: multipath can read a few mph for seconds, with a poor fix.
+        SpeedFilter f;
+        SpeedOutput o;
+        float worst = 0.0f;
+        for (uint32_t t = 0; t <= 20000; t += 20) {
+            const float ts = t / 1000.0f;
+            SpeedInput in = at(t);
+            in.accel_ok = true;
+            in.front_ok = in.rear_ok = true;
+            in.front_mph = in.rear_mph = 0.0f;
+            in.gps_ok = true;
+            in.gps_new = t % 100 == 0;
+            const bool drift = ts >= 5 && ts < 9;
+            in.gps_mph = drift ? 6.0f : 0.3f;
+            in.hdop = drift ? 4.0f : 1.0f;
+            o = f.step(in);
+            if (o.mph > worst) worst = o.mph;
+        }
+        CHECK(worst < 1.0f);
+        CHECK(o.resets == 0);
+    }
+
     CASE("hard braking: the wheels are judged against where GPS is now, not was");
     {
         // 0.8 g from 20 mph, GPS at 10 Hz. Between fixes the last one goes

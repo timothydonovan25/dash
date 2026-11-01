@@ -53,6 +53,14 @@ struct SpeedConfig {
     uint32_t suspect_ms = 1500;     // rejected this long straight -> suspect
     // A wheel below this is reading nothing (WheelCheckConfig::zero_mph).
     float    stopped_wheel_mph = 1.0f;
+    // Only a fix this good referees the wheels or outvotes them. A poor one
+    // is still used, with its noise scaled by HDOP, but a parked bike under
+    // a bridge had GPS drift to 6 mph at HDOP 4 throw out two good wheels
+    // reading 0, and the filter showed 6.4 mph standing still.
+    float    referee_hdop = 2.5f;
+    // GPS outvoting wheels that read nothing (see step()) only above this:
+    // more than any multipath drift at a standstill.
+    float    outvote_gps_mph = 10.0f;
     // How long the filter will coast on the accelerometer alone before it
     // stops claiming to know the speed.
     uint32_t coast_ms   = 2000;

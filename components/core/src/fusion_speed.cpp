@@ -111,7 +111,7 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
         const bool ok = correct(in.gps_mph, cfg.r_gps_mph * h, cfg.gate_sigma);
         if (!ok) gps_miss = in.gps_mph - v_;
         track(kSrcGps, ok, true, now, cfg);
-        if (ok) {
+        if (ok && in.hdop <= cfg.referee_hdop) {
             ref_mph_ = in.gps_mph;
             ref_dv_ = 0.0f;
             ref_b_ = b_;
@@ -167,7 +167,7 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
     const uint8_t offered = static_cast<uint8_t>((in.gps_ok ? kSrcGps : 0) |
                                                  (in.front_ok ? kSrcFront : 0) |
                                                  (in.rear_ok ? kSrcRear : 0));
-    // GPS suspect while it says moving and every wheel offered reads
+    // GPS suspect while it says moving fast, with a good fix, and every wheel offered reads
     // nothing: sensors reading 0 (unfitted, unplugged) that the filter has
     // grown sure of. They are never suspect, being agreed with, so the rule
     // above never fires, and without this the speedo read 0 at 50 mph
@@ -177,7 +177,8 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
         (!in.front_ok || in.front_mph < cfg.stopped_wheel_mph) &&
         (!in.rear_ok || in.rear_mph < cfg.stopped_wheel_mph);
     const bool gps_outvoted = in.gps_ok && (out_.suspect & kSrcGps) &&
-        wheels_stopped && in.gps_mph > cfg.wheel_gps_mph;
+        wheels_stopped && in.gps_mph > cfg.outvote_gps_mph &&
+        in.hdop <= cfg.referee_hdop;
     if (gps_outvoted || (offered && (out_.suspect & offered) == offered)) {
         const float v0 = in.gps_ok ? in.gps_mph : in.front_ok ? in.front_mph : in.rear_mph;
         start(v0, 4.0f);
