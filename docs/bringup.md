@@ -832,4 +832,4 @@ one wake; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
 **What it found on the first board:** 19 min and 2337 random presses, no
 reset; Wi-Fi 20 on/off cycles with RAM back each time; Eject flushing ~20 kB
 the logger used to drop; a lost C6 no longer rebooting the dash; dev boot,
-reset and panic all falling back to stable; heap flat over an hour.
+reset and panic all falling back to stable; heap flat in every run (the longest unbroken one 19 min).
