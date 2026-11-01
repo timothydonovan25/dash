@@ -1,6 +1,7 @@
 #include "drivers/sdcard.hpp"
 #include "sdcard_mount.hpp"
 
+#include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include <dirent.h>
@@ -66,6 +67,12 @@ hal::Status SdCard::init() {
         std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
         mkdir(full, 0777);
     }
+    // Nothing else says how full the card is; a full one only shows as
+    // failed writes. FSINFO's free count is trusted (sdkconfig), so no FAT scan.
+    uint64_t total = 0, free_b = 0;
+    if (esp_vfs_fat_info(kMount, &total, &free_b) == ESP_OK)
+        ESP_LOGI("sd", "mounted: %u MB, %u MB free",
+                 static_cast<unsigned>(total >> 20), static_cast<unsigned>(free_b >> 20));
     return hal::Status::Ok;
 }
 
