@@ -321,7 +321,7 @@ dependency to install; swap it for Catch2 if you want more.
 ## Current state
 
 Build-order steps 1, 3, 4 and the host-testable half of 8 are done, and
-the media half of step 9 is written. 51 host tests, all passing.
+the media half of step 9 is written. 52 host tests, all passing.
 
 **`core/`** — all host-tested:
 
