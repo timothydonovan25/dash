@@ -51,7 +51,7 @@ public:
         std::memcpy(buf, f.data() + offset, got);
         return hal::Status::Ok;
     }
-    hal::Status list(const char*, ListFn, void*) override { return hal::Status::Ok; }
+    hal::Status list(const char*, ListFn, void*, bool) override { return hal::Status::Ok; }
     hal::Status remove(const char* path) override {
         if (busy) return hal::Status::Busy;
         return files.erase(path) ? hal::Status::Ok : hal::Status::NotPresent;

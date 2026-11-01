@@ -67,9 +67,11 @@ public:
                            size_t len, size_t& got) = 0;
 
     // Calls `fn` for each plain file in `dir`, with its name and size. For
-    // the Wi-Fi page's log list.
+    // the Wi-Fi page's log list. Without `sizes` the size is 0: each one is
+    // a stat, a search of the whole directory, so a long listing with sizes
+    // goes as its length squared (the logger's session pick needs names only).
     using ListFn = void (*)(const char* name, size_t size, void* ctx);
-    virtual Status list(const char* dir, ListFn fn, void* ctx) = 0;
+    virtual Status list(const char* dir, ListFn fn, void* ctx, bool sizes = true) = 0;
 
     // Deletes one file, for the Wi-Fi page. Busy for the file `append` is
     // writing: the logger still holds it open, and FAT would lose the rows.

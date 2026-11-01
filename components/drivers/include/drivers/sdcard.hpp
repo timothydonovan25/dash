@@ -47,7 +47,7 @@ public:
 
     // Holds the lock for the whole walk. The logger's own file shows the
     // size it had at its last sync.
-    hal::Status list(const char* dir, ListFn fn, void* ctx) override;
+    hal::Status list(const char* dir, ListFn fn, void* ctx, bool sizes = true) override;
     hal::Status remove(const char* path) override;
     // Renames a file, closing it first if it is one being appended to;
     // the next append() reopens it under whatever name it is given. Fails

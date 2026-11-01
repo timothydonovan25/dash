@@ -1,6 +1,7 @@
 #include "check.hpp"
 #include "core/log/detail.hpp"
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 using namespace core::log;
@@ -68,6 +69,34 @@ int main() {
         CHECK(session_of("_imu.csv") == -1);
         CHECK(session_of("s007_imu.txt") == -1);
         CHECK(session_of(nullptr) == -1);
+    }
+
+    CASE("the next session wraps past 999 to a free number, never a taken one");
+    {
+        SessionPicker empty;
+        CHECK(empty.pick() == 0);
+
+        SessionPicker p;
+        p.take("2026-10-13_s041.csv");
+        p.take("s042_imu.csv");
+        p.take("notes.csv");
+        CHECK(p.pick() == 43);
+
+        // The old "% 1000" gave 0 here every boot, and 0 is taken.
+        SessionPicker w;
+        w.take("2026-11-01_s999.csv");
+        w.take("s000.csv");
+        w.take("2026-11-01_s000_imu.csv");
+        w.take("s001_diag.csv");
+        CHECK(w.pick() == 2);
+
+        SessionPicker full;
+        char name[16];
+        for (int i = 0; i < 1000; ++i) {
+            std::snprintf(name, sizeof name, "s%03d.csv", i);
+            full.take(name);
+        }
+        CHECK(full.pick() == -1);
     }
 
     CASE("pulse window: steady pulses give their interval and nothing odd");

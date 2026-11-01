@@ -259,15 +259,23 @@ void clear_detail_rings(Deps& d) {
 // a second ride on the same day must not land on the first one's dated name,
 // and a blackbox deleted from the Wi-Fi page may leave its detail behind.
 bool pick_session(Logger& L) {
-    int highest = -1;
+    core::log::SessionPicker picker;
     const auto take = [](const char* name, size_t, void* ctx) {
-        int& h = *static_cast<int*>(ctx);
-        const int v = core::log::session_of(name);
-        if (v > h) h = v;
+        static_cast<core::log::SessionPicker*>(ctx)->take(name);
     };
-    L.card->list("logs", take, &highest);
-    L.card->list(core::log::kDetailDir, take, &highest);
-    const int session = (highest + 1) % 1000;
+    const uint32_t t0 = now_ms(L);
+    if (!hal::ok(L.card->list("logs", take, &picker, false)) ||
+        !hal::ok(L.card->list(core::log::kDetailDir, take, &picker, false))) {
+        return false;
+    }
+    const int session = picker.pick();
+    ESP_LOGI("logger", "session %d (card scanned in %u ms)", session,
+             static_cast<unsigned>(now_ms(L) - t0));
+    if (session < 0) {
+        // All 1000 numbers are on the card. Say so where a rider looks.
+        report(L, hal::Status::IoError);
+        return false;
+    }
     for (uint8_t s = 0; s < kStreamCount; ++s) {
         Out& o = L.out[s];
         if (core::log::stream_file_name(o.path, sizeof o.path, core::log::Date{},

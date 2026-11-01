@@ -135,7 +135,7 @@ hal::Status SdCard::append(const char* path, const void* data, size_t len) {
     return hal::Status::Ok;
 }
 
-hal::Status SdCard::list(const char* dir, ListFn fn, void* ctx) {
+hal::Status SdCard::list(const char* dir, ListFn fn, void* ctx, bool sizes) {
     const Hold hold(lock_);
     if (!hold.held()) return hal::Status::Busy;
     if (!mounted_) return hal::Status::NotPresent;
@@ -145,6 +145,10 @@ hal::Status SdCard::list(const char* dir, ListFn fn, void* ctx) {
     if (!d) return hal::Status::NotPresent;
     while (const dirent* e = readdir(d)) {
         if (e->d_type != DT_REG) continue;
+        if (!sizes) {
+            fn(e->d_name, 0, ctx);
+            continue;
+        }
         char path[96 + sizeof e->d_name];
         std::snprintf(path, sizeof path, "%s/%s", full, e->d_name);
         struct stat st;

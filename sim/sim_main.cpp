@@ -234,7 +234,7 @@ public:
         std::fclose(f);
         return hal::Status::Ok;
     }
-    hal::Status list(const char*, ListFn, void*) override { return hal::Status::Ok; }
+    hal::Status list(const char*, ListFn, void*, bool) override { return hal::Status::Ok; }
     hal::Status remove(const char* path) override {
         return std::remove(full(path).c_str()) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
     }

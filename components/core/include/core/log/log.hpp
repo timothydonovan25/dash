@@ -280,4 +280,29 @@ size_t log_file_name(char* buf, size_t n, Date date, unsigned session);
 // detail file's name (core/log/detail.hpp, "s007_imu.csv") counts too.
 int session_of(const char* name);
 
+// Picks the new session's number from every name on the card (`take` each,
+// any directory): one past the highest, unless that is taken, then the next
+// free one on, wrapping at 1000. "% 1000" alone picked 0 on every boot once a
+// 999 existed, and the logger stopped for good when s000.csv was there too.
+class SessionPicker {
+public:
+    void take(const char* name) {
+        const int v = session_of(name);
+        if (v < 0) return;
+        used_[v / 8] = static_cast<uint8_t>(used_[v / 8] | (1u << (v % 8)));
+        if (v > highest_) highest_ = v;
+    }
+    // -1 when all 1000 are on the card.
+    int pick() const {
+        for (int i = 1; i <= 1000; ++i) {
+            const int v = (highest_ + i) % 1000;
+            if (!(used_[v / 8] & (1u << (v % 8)))) return v;
+        }
+        return -1;
+    }
+private:
+    uint8_t used_[125] = {};
+    int highest_ = -1;
+};
+
 }  // namespace core::log
