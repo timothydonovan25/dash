@@ -832,4 +832,4 @@ one wake; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
 **What it found on the first board:** 19 min and 2337 random presses, no
 reset; Wi-Fi 20 on/off cycles with RAM back each time; Eject flushing ~20 kB
 the logger used to drop; a lost C6 no longer rebooting the dash; dev boot,
-reset and panic all falling back to stable; heap flat in every run (the longest unbroken one 19 min).
+reset and panic all falling back to stable; a 40 min soak on 1.61 with the heap flat at 306 kB free, 0 late ctrl ticks, render at 120 Hz, 76 MB to the card with 0 errors, the IMU at most 77 samples behind.
