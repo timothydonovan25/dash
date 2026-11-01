@@ -7,7 +7,10 @@
 #include "serial_buttons.hpp"
 #include "services/services.hpp"
 
+#include "bsp/pins.hpp"
+#include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
+#include "sdkconfig.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -19,7 +22,31 @@ namespace {
 
 constexpr const char* kTag = "serial_btn";
 
+// `c6 hold` / `c6 release`: the C6 held in reset, for testing what the dash
+// does when the radio dies under it (bringup §9). ESP-Hosted owns the pin;
+// this only overrides its level until the next boot or release.
+bool c6_line(const char* line) {
+    if (std::strncmp(line, "c6 ", 3) != 0) return false;
+    // ESP-Hosted's "active" is the enable level (its reset pulse ends on
+    // it): high on this module, whose GPIO54 is the C6's EN. Held is the
+    // other one.
+#if CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH
+    constexpr int kHeld = 0;
+#else
+    constexpr int kHeld = 1;
+#endif
+    const auto pin = static_cast<gpio_num_t>(bsp::kC6Reset);
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    const bool hold = std::strcmp(line + 3, "hold") == 0;
+    if (!hold && std::strcmp(line + 3, "release") != 0) return true;
+    gpio_set_level(pin, hold ? kHeld : !kHeld);
+    ESP_LOGW(kTag, "C6 %s (GPIO%d = %d)", hold ? "held in reset" : "released",
+             bsp::kC6Reset, hold ? kHeld : !kHeld);
+    return true;
+}
+
 void handle(const char* line) {
+    if (c6_line(line)) return;
     core::nav::Press press;
     if (std::strncmp(line, "btn ", 4) == 0)       press = core::nav::Press::Short;
     else if (std::strncmp(line, "long ", 5) == 0) press = core::nav::Press::Long;

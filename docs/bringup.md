@@ -641,15 +641,20 @@ Feed lines arrived (`phone connected, waiting for encryption`, then
   `H_SDIO_DRV: Host is resetting itself`: ESP-Hosted restarts the whole P4,
   so every reading on the console jumps as the filters start over. On
   2026-10-31 it was a short from wires left dangling on the C6's pads.
-  **Open: on the bike this reboots the whole dash**, speedo and logging,
-  every 14 s for as long as the C6 is away. It is
-  `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE` (default y). Turning it
-  off alone is worse: `sdio_drv.c`'s read loop then `continue`s straight
-  back into the failed register read, a tight loop at priority 8 over
-  `render`, `keeper` and `logger`. The fix is that option off plus a
-  handler for `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` that stops the
-  transport and lets `ble` report the radio dead; it needs a C6 held in
-  reset to test.
+  **Fixed in 1.61:** that was `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE`,
+  now off, and `ble` listens for `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` (on
+  the default event loop, which it now makes: ESP-Hosted posts there but
+  never made it). Tested with the C6 held in reset from the console
+  (`c6 hold` / `c6 release`, `main/serial_buttons.cpp`): `ble: radio lost`
+  220 ms later, no reboot, the IMU stream unbroken, NimBLE's 2 s retries
+  kept off the console, DIAG's BLE a fault. Bluetooth comes back only at
+  the next power-on: released, the C6 boots but ESP-Hosted does not
+  re-initialise the SDIO card. The read loop's feared tight loop did not
+  happen; with the C6 in reset it waits on the interrupt line.
+  **A C6 dead from boot is untested.** The 2026-10-31 loop restarted from
+  the read path this setting now covers, so it should stop too, but
+  `c6 hold` cannot show it: ESP-Hosted's own reset pulse at boot lets the
+  C6 go.
 - **The phone logged `Waiting for scan response` forever**, and the laptop
   hears the dash at −90 dBm from beside it. That is a radio with no
   antenna: step 2 below.

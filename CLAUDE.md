@@ -674,7 +674,10 @@ in CONFIG's pairing window; Forget phone clears them). NimBLE's callbacks only q
 `core/media/`, host-tested. ESP-Hosted makes its SDIO/RPC tasks at
 priority 23 with no core affinity and no Kconfig for either, so `ble`
 lowers them to 8 by name. **If esp_hosted is upgraded, check the boot log
-still says it found them.** It also pushes `demo_p4/c6_cp`'s firmware to the C6
+still says it found them.** A C6 that stops answering no longer reboots the
+dash (1.61, `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n`): `ble` hears
+ESP-Hosted's transport-failure event and reports the radio lost until the
+next power-on. Console `c6 hold` / `c6 release` tests it. It also pushes `demo_p4/c6_cp`'s firmware to the C6
 from `slave_fw` when the C6 is older than 2.12; build that project first.
 **NimBLE's timers are mended at link time** (1.48): IDF v6.0.2's FreeRTOS
 callouts (`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`) never stored their event queue,

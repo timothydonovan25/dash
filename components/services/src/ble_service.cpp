@@ -40,6 +40,7 @@
 #include "core/media/feed.hpp"
 
 #include "esp_hosted.h"
+#include "esp_hosted_event.h"
 #include "esp_hosted_misc.h"
 #include "host/ble_hs.h"
 #include "host/ble_hs_mbuf.h"
@@ -189,6 +190,8 @@ const ble_uuid16_t kHrmUuid = BLE_UUID16_INIT(core::hr::kMeasurementUuid);
 struct Event {
     enum Kind : uint8_t {
         Line, Connect, Disconnect, Subscribe, Synced, Reset, Encrypted,
+        // ESP-Hosted gave up on the SDIO link: the C6 stopped answering.
+        RadioLost,
         // The watch (core/hr), each step of finding and subscribing to it.
         HrAdv, HrScanDone, HrConnect, HrConnectFail, HrDisconnect,
         HrSvc, HrChr, HrDsc, HrSubscribed, HrEnc, HrData,
@@ -730,6 +733,15 @@ int gated_store_delete(int type, const ble_store_key* key) {
     return g_ctx.store_delete(type, key);
 }
 
+// ESP-Hosted's, on the default event loop's task. With
+// CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE off it no longer restarts
+// the dash when the C6 stops answering; this is how `ble` hears of it.
+void on_transport_failure(void*, esp_event_base_t, int32_t, void*) {
+    Event e{};
+    e.kind = Event::RadioLost;
+    post(e);
+}
+
 void on_reset(int reason) {
     g_ctx.phone_links.store(0);   // every link went with the controller
     Event e{};
@@ -783,6 +795,16 @@ bool bring_up(Deps& d, char* c6_fw, size_t c6_fw_len) {
         ESP_LOGE(kTag, "no SDIO link to the C6");
         d.health->report_error(Dev::BleHost, 1, now_ms());
         return false;
+    }
+    // ESP-Hosted posts its events to the default loop but makes it only on
+    // a Wi-Fi path this firmware does not take: without it the failure was
+    // posted into nothing. `wifi` makes it too; whichever is second gets
+    // INVALID_STATE. Its task, sys_evt, is one demote_radio_tasks lowers.
+    const esp_err_t loop = esp_event_loop_create_default();
+    if ((loop != ESP_OK && loop != ESP_ERR_INVALID_STATE) ||
+        esp_event_handler_register(ESP_HOSTED_EVENT, ESP_HOSTED_EVENT_TRANSPORT_FAILURE,
+                                   on_transport_failure, nullptr) != ESP_OK) {
+        ESP_LOGW(kTag, "no event loop: a lost C6 will not be reported");
     }
     esp_hosted_coprocessor_fwver_t v;
     if (esp_hosted_get_coprocessor_fwversion(&v) == ESP_OK) {
@@ -1558,6 +1580,7 @@ void ble_task(void* arg) {
     uint16_t conn = BLE_HS_CONN_HANDLE_NONE;
     bool subscribed = false;
     bool synced = false;
+    bool radio_lost = false;   // for good: ESP-Hosted does not bring it back
     uint32_t dropped_at_disconnect_ms = 0;   // 0: nothing to clear
     uint32_t ctrl_gen = d.slots->media_ctrl.generation();
     uint32_t request_gen = d.slots->ble_request.generation();
@@ -1722,6 +1745,26 @@ void ble_task(void* arg) {
                     ESP_LOGI(kTag, "%u bonded phone(s)", static_cast<unsigned>(peers.size()));
                     d.health->report_ok(Dev::BleHost, now);
                     break;
+                case Event::RadioLost:
+                    if (radio_lost) break;      // one per failed transfer
+                    radio_lost = true;
+                    ESP_LOGE(kTag, "radio lost: the C6 stopped answering; "
+                                   "Bluetooth is off until the next power-on");
+                    // NimBLE goes on asking the dead controller every 2 s;
+                    // the console does not need to hear each one.
+                    esp_log_level_set("NimBLE", ESP_LOG_NONE);
+                    esp_log_level_set("H_SDIO_DRV", ESP_LOG_NONE);
+                    esp_log_level_set("sdmmc_io", ESP_LOG_NONE);
+                    synced = false;
+                    conn = BLE_HS_CONN_HANDLE_NONE;
+                    g_ctx.phone_links.store(0);
+                    apple.stop();
+                    subscribed = false;
+                    encrypted = false;
+                    diag.ctrl_subscribed = false;
+                    diag.encrypted = false;
+                    d.health->set_absent(Dev::Phone);
+                    break;
                 case Event::Reset:
                     // NimBLE resyncs with the controller on its own and
                     // sends Synced again when it has.
@@ -1860,6 +1903,7 @@ void ble_task(void* arg) {
                 d.health->report_ok(Dev::Phone, now);
             }
             if (synced) d.health->report_ok(Dev::BleHost, now);
+            else if (radio_lost) d.health->report_error(Dev::BleHost, 6, now);
             const uint32_t dropped = g_ctx.dropped.load();
             if (dropped != dropped_seen) {
                 ESP_LOGW(kTag, "%" PRIu32 " events lost to a full queue", dropped - dropped_seen);

@@ -171,3 +171,11 @@ CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 # ipc0's by 1.8 s after boot (watch_stacks). An overflow there is a crash on
 # either core; 1536 costs 1 kB of internal RAM.
 CONFIG_ESP_IPC_TASK_STACK_SIZE=1536
+
+# A C6 that stops answering (a short, a crash, a connector shaken loose) no
+# longer reboots the whole dash every 14 s: ESP-Hosted posts
+# ESP_HOSTED_EVENT_TRANSPORT_FAILURE and `ble` reports the radio lost.
+# Measured with the C6 held in reset (serial `c6 hold`): no reboot, the
+# IMU stream unbroken, NimBLE retrying every 2 s, Bluetooth back only at
+# the next power-on (bringup §9).
+CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n
