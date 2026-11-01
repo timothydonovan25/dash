@@ -61,6 +61,40 @@ struct Bike {
 }  // namespace
 
 int main() {
+    CASE("the detail log's row shows a fix that arrived on an Event pass");
+    {
+        // Fixes wake logic between its 50 Hz ticks; the row is written only
+        // on a tick, and showed GpsNew 0 and GPS never used for whole rides.
+        Bike b;
+        b.settings.detail_log = true;
+        static core::log::DetRing det;
+        b.deps.det_log = &det;
+        int rows = 0, with_gps = 0;
+        for (uint32_t t = 1000; t < 3000; t += 20) {
+            core::state::Motion m;
+            m.front_mph = m.rear_mph = m.best_mph = 20.0f;
+            b.slots.motion.publish(m);
+            services::logic_tick(b.deps, b.s, b.q, t);
+            if (t % 100 == 0) {
+                core::state::Gnss g;
+                g.fix = true;
+                g.hdop = 1.0f;
+                g.speed_mph = 20.0f;
+                g.utc_ms = 36000000u + t;
+                g.rx_ms = t + 7;
+                b.slots.gnss.publish(g);
+                services::logic_tick(b.deps, b.s, b.q, t + 7, services::LogicPass::Event);
+            }
+        }
+        core::log::DetRow r;
+        while (det.pop(r)) {
+            ++rows;
+            if (r.gps_new && (r.used & core::fusion::kSrcGps)) ++with_gps;
+        }
+        CHECK(rows >= 95 && rows <= 100);        // still one a tick, no more
+        CHECK(with_gps >= 18);                   // a fix every 100 ms
+    }
+
     CASE("a ride, then parked in neutral: logic publishes the minute's fall");
     {
         Bike b;

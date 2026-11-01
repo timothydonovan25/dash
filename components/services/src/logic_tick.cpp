@@ -335,6 +335,9 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
         for (size_t i = 0; i < n; ++i) d.evt_log->push(s.event_out[i]);
     }
 
+    s.det_gps_new |= fi.gps_new;
+    s.det_used |= fo.used;
+    s.det_rejected |= fo.rejected;
     if (d.det_log && scheduled) {
         core::log::DetRow& r = s.det;
         r = core::log::DetRow{};
@@ -344,12 +347,14 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
         r.rear_mph = m.rear_mph;
         r.gps_mph = g.speed_mph;
         r.hdop = g.hdop;
-        r.gps_new = fi.gps_new;
+        r.gps_new = s.det_gps_new;
         r.fused_mph = fo.mph;
         r.fused_sigma = fo.sigma_mph;
         r.fused_valid = fo.valid;
-        r.used = fo.used;
-        r.rejected = fo.rejected;
+        r.used = s.det_used;
+        r.rejected = s.det_rejected;
+        s.det_gps_new = false;
+        s.det_used = s.det_rejected = 0;
         r.suspect = fo.suspect;
         r.resets = fo.resets;
         r.accel_g = fi.accel_g;

@@ -134,6 +134,11 @@ struct LogicState {
     core::log::Watched      watched;
     core::log::EventRow     event_out[core::log::EventWatcher::kMaxPerPass];
     core::log::DetRow       det;
+    // What the passes since the last row saw, for that row: a fix wakes an
+    // Event pass, and that pass is the only one where GPS is new and used.
+    bool    det_gps_new = false;
+    uint8_t det_used = 0;
+    uint8_t det_rejected = 0;
 };
 
 // Why this pass is running. `logic` ticks on a fixed 50 Hz schedule and is
