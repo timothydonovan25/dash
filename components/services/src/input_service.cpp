@@ -62,17 +62,30 @@ void input_task(void* arg) {
         const hal::Status s = d.pod ? d.pod->read_buttons(mask)
                                     : hal::Status::NotPresent;
 
-        if (hal::ok(s)) {
-            consecutive_errors = 0;
+        // A pod that has just come back (plugged in, powered up between
+        // probes) answers with its power-on registers: no input inversion,
+        // so every released button reads pressed, and five long presses
+        // would follow. Configure it before believing it.
+        bool fresh = false;
+        if (hal::ok(s) && (consecutive_errors > 0 || failed_recoveries > 0)) {
             if (failed_recoveries >= kRecoveriesBeforeProbing)
                 ESP_LOGI("input", "pod answering again: polling at %d Hz", bsp::kPodPollHz);
+            if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) pod->refresh_config();
+            last_refresh = now;
+            decoder.reset();
+            fresh = true;
+        }
+
+        if (hal::ok(s)) {
+            consecutive_errors = 0;
             failed_recoveries = 0;
             d.health->report_ok(core::state::Dev::McpPod, now);
-
-            core::nav::InputEvent ev[core::input::kButtonCount];
-            const size_t n = decoder.update(mask, now, cfg, ev,
-                                            core::input::kButtonCount);
-            for (size_t i = 0; i < n; ++i) post_input_event(ev[i]);
+            if (!fresh) {
+                core::nav::InputEvent ev[core::input::kButtonCount];
+                const size_t n = decoder.update(mask, now, cfg, ev,
+                                                core::input::kButtonCount);
+                for (size_t i = 0; i < n; ++i) post_input_event(ev[i]);
+            }
         } else {
             ++consecutive_errors;
             d.health->report_error(core::state::Dev::McpPod,
