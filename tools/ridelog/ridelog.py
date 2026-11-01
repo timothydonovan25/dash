@@ -681,14 +681,18 @@ def section_system(r, diag, events):
     r.section("11. The machine", "heap and stacks hold, render keeps its rate, the pod bus is clean")
     if not diag or not diag.n:
         return
-    hm = vals(diag["HeapMin"])
+    # The first row can come before keeper has measured anything: all 0.
+    measured = [i for i, h in enumerate(diag["HeapFree"])
+                if isinstance(h, float) and h > 0]
+    hm = [diag["HeapMin"][i] for i in measured if isinstance(diag["HeapMin"][i], float)]
     if hm:
         r.line("internal heap low-water", f"{min(hm) / 1024:.1f} kB")
-    sl = vals(diag["StackLowFree"])
+    sl = [(diag["StackLowFree"][i], diag["StackLowTask"][i]) for i in measured
+          if isinstance(diag["StackLowFree"][i], float) and diag["StackLowTask"][i]]
     if sl:
-        i = sl.index(min(sl))
-        r.line("tightest stack", f"{diag['StackLowTask'][i]} {min(sl):.0f} B free")
-        r.verdict(min(sl) > 256, f"tightest stack has {min(sl):.0f} B left")
+        low, task = min(sl, key=lambda x: x[0])
+        r.line("tightest stack", f"{task} {low:.0f} B free")
+        r.verdict(low > 256, f"tightest stack has {low:.0f} B left")
     rh = vals(diag["RenderHz"])
     if rh:
         r.line("render rate p10 / p50", f"{pct(rh, 10):.0f} / {pct(rh, 50):.0f} Hz")

@@ -633,7 +633,12 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
     for (uint8_t d = 0; d < state::kDevCount; ++d) {
         const state::DevHealth& now = w.health.dev[d];
         const state::DevHealth& was = p.health.dev[d];
-        if (now.state != was.state || now.fault_count != was.fault_count) {
+        const bool more_faults =
+            now.fault_count != logged_faults_[d] &&
+            static_cast<int32_t>(t - faults_next_ms_[d]) >= 0;
+        if (now.state != was.state || more_faults) {
+            logged_faults_[d] = now.fault_count;
+            faults_next_ms_[d] = t + kFaultCountEveryMs;
             if (EventRow* e = emit(Ev::Health)) {
                 e->a = d;
                 e->b = static_cast<uint16_t>(now.state);

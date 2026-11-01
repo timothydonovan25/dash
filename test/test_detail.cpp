@@ -254,6 +254,20 @@ int main() {
         CHECK(contains(b, "faults=3"));
         CHECK(ew.watch(w, 120, out, EventWatcher::kMaxPerPass) == 0);
 
+        // A device failing every read: its count once a second, not a pass.
+        auto& led = w.health.dev[static_cast<int>(core::state::Dev::LedDriver)];
+        int lines = 0;
+        for (uint32_t t = 140; t < 5140; t += 20) {
+            led.fault_count = static_cast<uint16_t>(led.fault_count + 4);
+            lines += static_cast<int>(ew.watch(w, t, out, EventWatcher::kMaxPerPass));
+        }
+        CHECK(lines >= 4 && lines <= 6);
+        led.state = core::state::DevState::Ok;           // a state change: at once
+        CHECK(ew.watch(w, 5140, out, EventWatcher::kMaxPerPass) == 1);
+        led.state = core::state::DevState::Fault;
+        CHECK(ew.watch(w, 5160, out, EventWatcher::kMaxPerPass) == 1);
+        CHECK(ew.watch(w, 5180, out, EventWatcher::kMaxPerPass) == 0);
+
         w.fix = true; w.sats = 9; w.hdop = 0.9f;
         n = ew.watch(w, 140, out, EventWatcher::kMaxPerPass);
         CHECK(n == 1 && out[0].kind == Ev::Fix && out[0].a == 1 && out[0].b == 9);

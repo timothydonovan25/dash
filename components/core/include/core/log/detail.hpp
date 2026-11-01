@@ -327,10 +327,16 @@ struct Watched {
 class EventWatcher {
 public:
     static constexpr size_t kMaxPerPass = 32;
+    // A device's fault count alone is logged at most this often; its state,
+    // at once. An unplugged pod failed every 5 ms read, and was 98 % of a
+    // ride's `_evt` (s157: 6568 health lines in six minutes).
+    static constexpr uint32_t kFaultCountEveryMs = 1000;
     size_t watch(const Watched& now, uint32_t t_ms, EventRow* out, size_t max);
 
 private:
     Watched prev_;
+    uint16_t logged_faults_[state::kDevCount] = {};
+    uint32_t faults_next_ms_[state::kDevCount] = {};
 };
 
 // --- diag: 1 Hz, from logger -------------------------------------------------------
