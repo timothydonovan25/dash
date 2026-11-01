@@ -659,7 +659,15 @@ void RadioScreen::update(const Frame& f) {
     // row below. '\0' before anything has ever arrived.
     char last[2] = {f.ble_diag.last_tag, '\0'};
     table_.set_row(5, "Last tag", f.ble_diag.last_tag ? last : "--");
-    table_.set_row(6, "Ctrl", f.ble_diag.ctrl_subscribed ? "subscribed" : "--");
+    // An Android phone subscribes to Ctrl; an iPhone is driven over AMS
+    // and tells the dash about calls over ANCS instead (§11.1.1).
+    const uint8_t apple = f.ble_diag.apple;
+    table_.set_row(6, "Ctrl", f.ble_diag.ctrl_subscribed ? "subscribed"
+                              : (apple & 6) == 6        ? "AMS + ANCS"
+                              : apple & 2               ? "AMS"
+                              : apple & 4               ? "ANCS"
+                              : apple & 1               ? "iPhone?"
+                                                        : "--");
     table_.set_row(7, "TPMS front", f.tpms.front.valid ? "seen" : "--");
     table_.set_row(8, "TPMS rear", f.tpms.rear.valid ? "seen" : "--");
     table_.set_row(9, "Media", f.media.updated_ms ? f.media.title : "--");

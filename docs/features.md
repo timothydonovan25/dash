@@ -739,6 +739,13 @@ Built, and **never run on this board.** `services/src/ble_service.cpp`:
   with no core affinity, and `ble` lowers them to 8 by name.
 - The bond store writes flash only when the bike is still (§28).
 - The Android companion app is in `~/phone`, not in this repo.
+- **An iPhone needs no app** (1.59, architecture §11.1.1). Once it is let
+  in, `ble` finds its AMS and ANCS and subscribes: what is playing, the
+  transport keys (as AMS remote commands), and calls, missed calls and
+  messages. The scan response solicits ANCS so the iPhone lists the dash
+  under Settings → Bluetooth. Parsed in `core/media/apple`, which feeds the
+  same `apply_line()`/`apply_notify()` as the feed. Never run against a real
+  iPhone.
 
 ---
 

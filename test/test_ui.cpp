@@ -1684,6 +1684,14 @@ int main() {
         // the unbuilt-firmware note would otherwise still pass an ink-only
         // inequality check.
         CHECK(s.ink() > silent);
+
+        // An iPhone: no Ctrl subscription, AMS and ANCS instead.
+        f.ble_diag.ctrl_subscribed = false;
+        f.ble_diag.apple = 6;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > silent);
     }
 
     CASE("the update screen shows both slots and posts its three actions");

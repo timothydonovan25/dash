@@ -866,15 +866,53 @@ Rules the firmware side depends on:
   PHONE, with the message text only when stopped unless CONFIG → Phone →
   Text moving is on.
 
-`Media.src` records which path fed the data, so the DIAG screen can say.
-There is only one path today; the field stays because a second one would
-otherwise be indistinguishable.
+`Media.src` records which path fed the data: `kSrcPhone` for the feed,
+`kSrcAms` for an iPhone (§11.1.1).
 
-**Not doing: Apple's AMS.** An iPhone exposes track metadata natively over
-GATT (service `89D3502B-0F36-433A-8EF4-C502AD55F8DC`), needing no app —
-but it needs the dash to be a GATT *client* and a BLE *central*, which is
-a second connection path to write and debug for a phone nobody here
-carries. If that ever changes, this is the note that says where to start.
+### 11.1.1 An iPhone: AMS and ANCS, no app (1.59)
+
+An iPhone serves two GATT services of its own to any bonded accessory:
+**AMS** (Apple Media Service, `89D3502B-0F36-433A-8EF4-C502AD55F8DC`) for
+what is playing and the transport keys, and **ANCS** (Apple Notification
+Center Service, `7905F431-B5CE-4E99-A40F-4B1E122D00D0`) for calls and
+messages. So an iPhone needs no app: the dash reads both as a GATT
+*client* over the phone's own connection. It stays the peripheral; the
+iPhone connects to it. The GATT client was already on for the watch (1.48).
+
+Not a setting. The two paths share the connection, the bond and every rule
+of §11.3, and which one a phone uses is found out, not configured:
+
+1. The phone connects and encrypts, and `core::ble::judge` lets it in, as
+   for any phone.
+2. The `ble` task (`AppleLink`) looks through the phone's services. No AMS
+   or ANCS: an Android phone, which writes Feed. Otherwise it subscribes:
+   AMS's Entity Update (track title, artist, album, duration; then the
+   player's playback info), then ANCS's Data Source and Notification Source,
+   in that order, as Apple asks.
+3. `core/media/apple` turns each AMS update into the §11.1 line it amounts
+   to (`T`, `A`, `L`, `D`, `S`+`P`) and each ANCS notification into an `N`
+   line, and hands them to the feed's own `apply_line()`/`apply_notify()`.
+   The bounds, the UTF-8 cuts and the "new title restarts the clock" rule
+   are the feed's, not a second copy.
+4. A handlebar press goes to AMS's Remote Command (toggle, next, previous)
+   when the phone has AMS, and over Ctrl otherwise.
+
+ANCS says only that a notification exists. Its title and text are asked for
+on the Control Point, one at a time, in lengths `Notify` can hold, and the
+answer comes back on the Data Source, possibly in pieces;
+`core::media::ancs::Tracker` queues the asks and puts the answers together.
+The same three kinds as the Android app: an incoming call (category 1),
+rings until iOS removes it, a missed call (2), and a message (Social, 4).
+Everything iOS replays on subscribing is skipped, except a call ringing now.
+
+**Advertising.** The scan response solicits ANCS (AD type 0x15). That is
+what makes an iPhone list the dash under Settings → Bluetooth, and pairing
+from there is how it bonds. The 128-bit solicitation fills 18 of the 31
+bytes, so the scan response carries the shortened name `CRF250F`; the full
+name is in the GAP service. The advertisement itself is unchanged, so the
+Android app's service-UUID scan still finds it.
+
+DIAG → Radio's Ctrl row shows `AMS + ANCS` for an iPhone that is live.
 
 ### 11.2 TPMS
 
@@ -1477,7 +1515,8 @@ erases NVS, and NVS holds your odometer.
   breadcrumb trail? A base map means tiles on the SD card and a lot of
   work.
 - ~~Which phone do you carry?~~ **Settled: a Sonim XP3900, an Android
-  handset.** So there is no AMS path and a phone-side app is required.
+  handset**, with the app. An iPhone is served too since 1.59, with no
+  app (§11.1.1).
   The dash side is one write characteristic (§11.1); the app is a
   separate piece of work and should wait until the radio works on the
   dash, or you are debugging two unproven ends at once.

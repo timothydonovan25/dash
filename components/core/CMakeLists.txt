@@ -22,6 +22,7 @@ idf_component_register(
          "src/sun.cpp"
          "src/alert.cpp"
          "src/media.cpp"
+         "src/apple.cpp"
          "src/pairing.cpp"
          "src/ota.cpp"
          "src/wifi.cpp"

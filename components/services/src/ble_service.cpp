@@ -12,6 +12,11 @@
 // runs `core::media` over the lines and publishes. That keeps the one-writer
 // rule literal rather than "one writer, most of the time".
 //
+// An iPhone needs no app (§11.1.1): once it is let in, the dash looks
+// through its services as a GATT client, and if AMS and ANCS are there it
+// subscribes to them (AppleLink, core/media/apple). An Android phone has
+// neither and writes Feed instead; the same slots are filled either way.
+//
 // The dash is also a central, for one thing: the rider's watch's heart rate
 // over the standard Heart Rate Service (core/hr), when CONFIG -> Heart rate
 // -> Watch HR is on. It scans, connects to the sensor core::hr::Picker
@@ -31,6 +36,7 @@
 
 #include "core/ble/pairing.hpp"
 #include "core/hr/hr.hpp"
+#include "core/media/apple.hpp"
 #include "core/media/feed.hpp"
 
 #include "esp_hosted.h"
@@ -148,6 +154,33 @@ const ble_uuid128_t kCtrlUuid = BLE_UUID128_INIT(
     0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
     0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x5f, 0x6e);
 
+// An iPhone's AMS and ANCS (core/media/apple), which keeps the bytes so a
+// host test can check them against Apple's strings.
+ble_uuid128_t uuid128(const uint8_t (&le)[16]) {
+    ble_uuid128_t u{};
+    u.u.type = BLE_UUID_TYPE_128;
+    std::memcpy(u.value, le, sizeof u.value);
+    return u;
+}
+const ble_uuid128_t kAmsUuid = uuid128(core::media::ams::kService);
+const ble_uuid128_t kAmsRemoteUuid = uuid128(core::media::ams::kRemoteCommand);
+const ble_uuid128_t kAmsEntityUuid = uuid128(core::media::ams::kEntityUpdate);
+const ble_uuid128_t kAncsUuid = uuid128(core::media::ancs::kService);
+const ble_uuid128_t kAncsSourceUuid = uuid128(core::media::ancs::kNotificationSource);
+const ble_uuid128_t kAncsControlUuid = uuid128(core::media::ancs::kControlPoint);
+const ble_uuid128_t kAncsDataUuid = uuid128(core::media::ancs::kDataSource);
+
+// Which of those a discovery callback found, in Event::which.
+enum AppleId : uint8_t {
+    kAppleNone = 0, kAmsSvc, kAncsSvc,
+    kAmsRemote, kAmsEntity, kAncsSource, kAncsControl, kAncsData,
+};
+
+// The scan response's shortened name. ANCS's solicitation takes 18 of its 31
+// bytes, so "CRF250F-Dash" no longer fits beside it; a phone reads the whole
+// name from the GAP service once connected.
+constexpr char kShortName[] = "CRF250F";
+
 // The watch's (core/hr). BLE_UUID16_DECLARE is a C compound literal.
 const ble_uuid16_t kHrsUuid = BLE_UUID16_INIT(core::hr::kServiceUuid);
 const ble_uuid16_t kHrmUuid = BLE_UUID16_INIT(core::hr::kMeasurementUuid);
@@ -159,6 +192,8 @@ struct Event {
         // The watch (core/hr), each step of finding and subscribing to it.
         HrAdv, HrScanDone, HrConnect, HrConnectFail, HrDisconnect,
         HrSvc, HrChr, HrDsc, HrSubscribed, HrEnc, HrData,
+        // The iPhone's AMS and ANCS (AppleLink).
+        AppleSvc, AppleChr, AppleDsc, AppleWrite, AppleData,
     };
     Kind     kind;
     uint8_t  len;       // Line: bytes in `data`
@@ -166,12 +201,16 @@ struct Event {
     uint16_t conn;      // Connect: the handle
     int32_t  code;      // Disconnect / Reset: NimBLE's reason; Encrypted: status
     core::ble::PeerId peer;   // Encrypted: the peer's identity address; HrAdv: the advertiser
-    uint16_t h1 = 0, h2 = 0;  // Hr*: attribute handles (a service's start and end)
-    // The longest line is a notification (§11.1 `N`, 130 bytes); a media
-    // field is 61. Anything past this would be cut by core::media anyway.
-    // Sixteen of these are the queue: 2.3 kB of internal RAM, 1.1 more than
-    // when only media came this way.
-    uint8_t  data[core::media::kMaxNotifyLine];
+    uint16_t h1 = 0, h2 = 0;  // Hr*, Apple*: attribute handles (a service's start and end)
+    uint8_t  which = kAppleNone;   // Apple*: what was found
+    // The longest is a whole ANCS answer (137 bytes); then a notification
+    // line (§11.1 `N`, 130); a media field is 61. Anything past this would
+    // be cut by core::media anyway, and an ANCS answer is never longer (it
+    // is asked for in bounded lengths). Sixteen of these are the queue:
+    // 2.4 kB of internal RAM, 1.2 more than when only media came this way.
+    uint8_t  data[core::media::ancs::kMaxResponse > core::media::kMaxNotifyLine
+                      ? core::media::ancs::kMaxResponse
+                      : core::media::kMaxNotifyLine];
 };
 
 struct Ctx {
@@ -299,12 +338,23 @@ void start_advertising() {
         return;
     }
 
-    const char* name = ble_svc_gap_device_name();
-    ble_hs_adv_fields rsp{};
-    rsp.name = reinterpret_cast<const uint8_t*>(name);
-    rsp.name_len = static_cast<uint8_t>(std::strlen(name));
-    rsp.name_is_complete = 1;
-    if (ble_gap_adv_rsp_set_fields(&rsp) != 0) {
+    // The scan response, by hand: NimBLE's field builder has no service
+    // solicitation. Soliciting ANCS is what makes an iPhone list the dash
+    // under Settings -> Bluetooth, and serve it AMS and ANCS once bonded
+    // (§11.1.1). Android ignores it.
+    static_assert(2 + 16 + 2 + sizeof kShortName - 1 <= BLE_HS_ADV_MAX_SZ,
+                  "scan response over 31 bytes");
+    uint8_t rsp[BLE_HS_ADV_MAX_SZ];
+    size_t k = 0;
+    rsp[k++] = 1 + 16;
+    rsp[k++] = 0x15;   // list of 128-bit service solicitation UUIDs
+    std::memcpy(rsp + k, core::media::ancs::kService, 16);
+    k += 16;
+    rsp[k++] = 1 + sizeof kShortName - 1;
+    rsp[k++] = 0x08;   // shortened local name
+    std::memcpy(rsp + k, kShortName, sizeof kShortName - 1);
+    k += sizeof kShortName - 1;
+    if (ble_gap_adv_rsp_set_data(rsp, static_cast<int>(k)) != 0) {
         ESP_LOGE(kTag, "scan response rejected");
         return;
     }
@@ -382,6 +432,18 @@ int gap_event(ble_gap_event* ev, void*) {
                 post(e);
             }
             return 0;
+        case BLE_GAP_EVENT_NOTIFY_RX: {
+            // Only an iPhone notifies the dash: AMS and ANCS (AppleLink).
+            e.kind = Event::AppleData;
+            e.conn = ev->notify_rx.conn_handle;
+            e.h1 = ev->notify_rx.attr_handle;
+            uint16_t len = OS_MBUF_PKTLEN(ev->notify_rx.om);
+            if (len > sizeof(e.data)) len = sizeof(e.data);
+            if (ble_hs_mbuf_to_flat(ev->notify_rx.om, e.data, len, nullptr) != 0) return 0;
+            e.len = static_cast<uint8_t>(len);
+            post(e);   // the stack frees the mbuf
+            return 0;
+        }
         case BLE_GAP_EVENT_REPEAT_PAIRING: {
             // The phone forgot the bond and wants to pair again. Drop ours
             // and let it, rather than locking out the one phone this is for.
@@ -521,6 +583,67 @@ int hr_dsc_cb(uint16_t conn, const ble_gatt_error* err, uint16_t, const ble_gatt
 
 int hr_write_cb(uint16_t conn, const ble_gatt_error* err, ble_gatt_attr*, void*) {
     hr_post(Event::HrSubscribed, conn, err->status);
+    return 0;
+}
+
+// --- the iPhone, NimBLE side: same rule, copy and return -------------------
+
+void apple_post(Event::Kind k, uint16_t conn, int32_t code, uint8_t which = kAppleNone,
+                uint16_t h1 = 0, uint16_t h2 = 0) {
+    Event e{};
+    e.kind = k;
+    e.conn = conn;
+    e.code = code;
+    e.which = which;
+    e.h1 = h1;
+    e.h2 = h2;
+    post(e);
+}
+
+int apple_svc_cb(uint16_t conn, const ble_gatt_error* err, const ble_gatt_svc* svc, void*) {
+    if (err->status != 0 || !svc) {
+        apple_post(Event::AppleSvc, conn, err->status);   // BLE_HS_EDONE: the end
+        return 0;
+    }
+    const uint8_t which = ble_uuid_cmp(&svc->uuid.u, &kAmsUuid.u) == 0    ? kAmsSvc
+                          : ble_uuid_cmp(&svc->uuid.u, &kAncsUuid.u) == 0 ? kAncsSvc
+                                                                           : kAppleNone;
+    if (which != kAppleNone) {
+        apple_post(Event::AppleSvc, conn, 0, which, svc->start_handle, svc->end_handle);
+    }
+    return 0;
+}
+
+int apple_chr_cb(uint16_t conn, const ble_gatt_error* err, const ble_gatt_chr* chr, void*) {
+    if (err->status != 0 || !chr) {
+        apple_post(Event::AppleChr, conn, err->status);
+        return 0;
+    }
+    struct { const ble_uuid128_t* uuid; uint8_t id; } const kKnown[] = {
+        {&kAmsRemoteUuid, kAmsRemote},   {&kAmsEntityUuid, kAmsEntity},
+        {&kAncsSourceUuid, kAncsSource}, {&kAncsControlUuid, kAncsControl},
+        {&kAncsDataUuid, kAncsData},
+    };
+    for (const auto& k : kKnown) {
+        if (ble_uuid_cmp(&chr->uuid.u, &k.uuid->u) == 0) {
+            apple_post(Event::AppleChr, conn, 0, k.id, chr->val_handle);
+            break;
+        }
+    }
+    return 0;
+}
+
+int apple_dsc_cb(uint16_t conn, const ble_gatt_error* err, uint16_t, const ble_gatt_dsc* dsc, void*) {
+    if (err->status != 0 || !dsc) {
+        apple_post(Event::AppleDsc, conn, err->status);
+    } else if (ble_uuid_u16(&dsc->uuid.u) == core::hr::kCccdUuid) {
+        apple_post(Event::AppleDsc, conn, 0, kAppleNone, dsc->handle);
+    }
+    return 0;
+}
+
+int apple_write_cb(uint16_t conn, const ble_gatt_error* err, ble_gatt_attr*, void*) {
+    apple_post(Event::AppleWrite, conn, err->status);
     return 0;
 }
 
@@ -1154,6 +1277,263 @@ private:
     bool     dirty_ = false;
 };
 
+// The iPhone's AMS and ANCS (§11.1.1, core/media/apple), from this task's
+// side. Once a phone is let in, its services are looked through; an Android
+// phone has neither, this goes quiet, and the feed is all there is. One GATT
+// procedure at a time, each started here and answered through the queue:
+// find the services, then their characteristics, then subscribe step by
+// step, then one write at a time (a handlebar press, or ANCS asking for a
+// notification's text).
+class AppleLink {
+public:
+    // What one event moved into the media and notify slots.
+    struct Out {
+        char tag = 0;          // a media field changed: its §11.1 tag
+        bool notify = false;   // the notification changed
+    };
+
+    void start(uint16_t conn, uint32_t now) {
+        *this = AppleLink{};
+        conn_ = conn;
+        set_step(Step::Services, now);
+        if (ble_gattc_disc_all_svcs(conn_, apple_svc_cb, nullptr) != 0) {
+            give_up("service discovery would not start");
+        }
+    }
+
+    void stop() { *this = AppleLink{}; }
+
+    void on_event(const Event& e, uint32_t now, core::state::Media& media,
+                  core::state::Notify& notify, Out& out) {
+        if (conn_ == BLE_HS_CONN_HANDLE_NONE || e.conn != conn_) return;
+        switch (e.kind) {
+            case Event::AppleSvc:
+                if (step_ != Step::Services) break;
+                if (e.code == 0) {
+                    Range& r = e.which == kAmsSvc ? ams_ : ancs_;
+                    r.start = e.h1;
+                    r.end = e.h2;
+                } else if (ams_.start == 0 && ancs_.start == 0) {
+                    // An Android phone, or an iPhone that would not say.
+                    set_step(Step::Off, now);
+                } else {
+                    ESP_LOGI(kTag, "iPhone: %s%s%s", ams_.start ? "AMS" : "",
+                             ams_.start && ancs_.start ? " and " : "", ancs_.start ? "ANCS" : "");
+                    next_chars(now);
+                }
+                break;
+            case Event::AppleChr:
+                if (step_ != Step::Chars) break;
+                if (e.code == 0) {
+                    switch (e.which) {
+                        case kAmsRemote:   remote_ = e.h1; break;
+                        case kAmsEntity:   entity_ = e.h1; break;
+                        case kAncsSource:  source_ = e.h1; break;
+                        case kAncsControl: control_ = e.h1; break;
+                        case kAncsData:    data_ = e.h1; break;
+                        default: break;
+                    }
+                } else {
+                    next_chars(now);
+                }
+                break;
+            case Event::AppleDsc:
+                if (step_ != Step::Subscribing || ops_[op_].kind != Op::Cccd) break;
+                if (e.code == 0) {
+                    if (cccd_ == 0) cccd_ = e.h1;
+                } else {
+                    // None found: the CCCD is conventionally the next handle.
+                    if (cccd_ == 0) cccd_ = static_cast<uint16_t>(ops_[op_].handle + 1);
+                    static const uint8_t kOn[2] = {0x01, 0x00};   // notifications
+                    write(cccd_, kOn, sizeof kOn, now);
+                }
+                break;
+            case Event::AppleWrite:
+                if (step_ == Step::Subscribing) {
+                    if (e.code != 0) {
+                        // Usually ANCS before the rider has allowed it in the
+                        // iPhone's prompt. That service is off for this link.
+                        ESP_LOGW(kTag, "iPhone: %s refused (%" PRId32 ")",
+                                 ops_[op_].ams ? "AMS" : "ANCS", e.code);
+                        (ops_[op_].ams ? ams_ok_ : ancs_ok_) = false;
+                    }
+                    ++op_;
+                    run_op(now);
+                } else if (step_ == Step::Live) {
+                    if (e.code != 0) ESP_LOGW(kTag, "iPhone write refused (%" PRId32 ")", e.code);
+                    busy_ = false;
+                }
+                break;
+            case Event::AppleData:
+                if (e.h1 == 0) break;
+                if (e.h1 == entity_ && ams_ok_) {
+                    out.tag = core::media::ams::apply_update(media, e.data, e.len, now);
+                } else if (e.h1 == source_ && ancs_ok_) {
+                    out.notify = tracker_.on_source(notify, e.data, e.len, now);
+                } else if (e.h1 == data_ && ancs_ok_) {
+                    out.notify = tracker_.on_data(notify, e.data, e.len, now);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    // Once a loop: a step that never answered, and the next write.
+    void poll(uint32_t now) {
+        if (step_ == Step::Services || step_ == Step::Chars || step_ == Step::Subscribing) {
+            if (now - step_ms_ > kStepMs) give_up("timed out");
+            return;
+        }
+        if (step_ != Step::Live || busy_) return;
+        if (press_ != kNoPress) {
+            write(remote_, &press_, 1, now);
+            press_ = kNoPress;
+            return;
+        }
+        if (!ancs_ok_) return;
+        uint8_t req[core::media::ancs::kRequestLen];
+        const size_t n = tracker_.next_request(req, sizeof req, now);
+        if (n != 0 && !write(control_, req, n, now)) tracker_.unask();
+    }
+
+    // A handlebar press. False if the phone has no AMS, so the feed's Ctrl
+    // should carry it instead.
+    bool press(uint8_t cmd) {
+        if (step_ != Step::Live || !ams_ok_ || remote_ == 0) return false;
+        uint8_t id;
+        if (core::media::ams::remote_command(cmd, id)) press_ = id;
+        return true;
+    }
+
+    // For DIAG (BleDiag::apple): bit 0 looking, bit 1 AMS live, bit 2 ANCS live.
+    uint8_t diag() const {
+        if (step_ == Step::Live) return static_cast<uint8_t>((ams_ok_ ? 2 : 0) | (ancs_ok_ ? 4 : 0));
+        return step_ == Step::Off ? 0 : 1;
+    }
+
+private:
+    enum class Step : uint8_t { Off, Services, Chars, Subscribing, Live };
+    struct Range { uint16_t start = 0, end = 0; };
+    struct Op {
+        enum Kind : uint8_t { Cccd, Write } kind;
+        bool           ams;      // which service it belongs to
+        uint16_t       handle;   // the characteristic's value
+        const uint8_t* data;     // Write
+        uint8_t        len;
+        uint16_t       end;      // Cccd: where to stop looking for it
+    };
+    static constexpr uint32_t kStepMs = 10000;
+    static constexpr uint8_t kNoPress = 0xFF;
+
+    void set_step(Step s, uint32_t now) {
+        step_ = s;
+        step_ms_ = now;
+    }
+
+    void give_up(const char* why) {
+        ESP_LOGW(kTag, "iPhone: %s", why);
+        const uint16_t conn = conn_;
+        stop();
+        conn_ = conn;   // still the phone's link: the feed may yet come
+    }
+
+    // Each service's characteristics in turn, AMS first.
+    void next_chars(uint32_t now) {
+        Range* r = !ams_done_ && ams_.start ? &ams_ : !ancs_done_ && ancs_.start ? &ancs_ : nullptr;
+        if (r == nullptr) {
+            plan(now);
+            return;
+        }
+        (r == &ams_ ? ams_done_ : ancs_done_) = true;
+        set_step(Step::Chars, now);
+        if (ble_gattc_disc_all_chrs(conn_, r->start, r->end, apple_chr_cb, nullptr) != 0) {
+            give_up("characteristic discovery would not start");
+        }
+    }
+
+    // The subscriptions, in order. AMS: its Entity Update CCCD, then the two
+    // writes that say what to send. ANCS: Data Source before Notification
+    // Source, as Apple asks, so no answer can arrive unsubscribed.
+    void plan(uint32_t now) {
+        using core::media::ams::kSubscribePlayer;
+        using core::media::ams::kSubscribeTrack;
+        ams_ok_ = ams_.start != 0 && entity_ != 0;
+        ancs_ok_ = ancs_.start != 0 && source_ != 0 && control_ != 0 && data_ != 0;
+        n_ops_ = 0;
+        if (ams_ok_) {
+            ops_[n_ops_++] = Op{Op::Cccd, true, entity_, nullptr, 0, ams_.end};
+            ops_[n_ops_++] = Op{Op::Write, true, entity_, kSubscribeTrack, sizeof kSubscribeTrack, 0};
+            ops_[n_ops_++] = Op{Op::Write, true, entity_, kSubscribePlayer, sizeof kSubscribePlayer, 0};
+        }
+        if (ancs_ok_) {
+            ops_[n_ops_++] = Op{Op::Cccd, false, data_, nullptr, 0, ancs_.end};
+            ops_[n_ops_++] = Op{Op::Cccd, false, source_, nullptr, 0, ancs_.end};
+        }
+        if (n_ops_ == 0) {
+            ESP_LOGW(kTag, "iPhone: services without their characteristics");
+            set_step(Step::Off, now);
+            return;
+        }
+        op_ = 0;
+        set_step(Step::Subscribing, now);
+        run_op(now);
+    }
+
+    void run_op(uint32_t now) {
+        // An op whose service was refused on the way is skipped.
+        while (op_ < n_ops_ && !(ops_[op_].ams ? ams_ok_ : ancs_ok_)) ++op_;
+        if (op_ == n_ops_) {
+            if (ams_ok_ || ancs_ok_) {
+                ESP_LOGI(kTag, "iPhone live:%s%s", ams_ok_ ? " media" : "",
+                         ancs_ok_ ? " notifications" : "");
+                set_step(Step::Live, now);
+            } else {
+                set_step(Step::Off, now);
+            }
+            return;
+        }
+        step_ms_ = now;
+        const Op& op = ops_[op_];
+        if (op.kind == Op::Write) {
+            write(op.handle, op.data, op.len, now);
+            return;
+        }
+        cccd_ = 0;
+        if (op.handle >= op.end ||
+            ble_gattc_disc_all_dscs(conn_, op.handle, op.end, apple_dsc_cb, nullptr) != 0) {
+            cccd_ = static_cast<uint16_t>(op.handle + 1);
+            static const uint8_t kOn[2] = {0x01, 0x00};
+            write(cccd_, kOn, sizeof kOn, now);
+        }
+    }
+
+    bool write(uint16_t handle, const uint8_t* data, size_t len, uint32_t now) {
+        if (ble_gattc_write_flat(conn_, handle, data, static_cast<uint16_t>(len),
+                                 apple_write_cb, nullptr) != 0) {
+            if (step_ != Step::Live) give_up("write would not start");
+            return false;
+        }
+        busy_ = true;
+        step_ms_ = now;
+        return true;
+    }
+
+    uint16_t conn_ = BLE_HS_CONN_HANDLE_NONE;
+    Step     step_ = Step::Off;
+    uint32_t step_ms_ = 0;
+    Range    ams_, ancs_;
+    bool     ams_done_ = false, ancs_done_ = false;
+    bool     ams_ok_ = false, ancs_ok_ = false;
+    uint16_t remote_ = 0, entity_ = 0, source_ = 0, control_ = 0, data_ = 0;
+    Op       ops_[5] = {};
+    uint8_t  n_ops_ = 0, op_ = 0;
+    uint16_t cccd_ = 0;
+    bool     busy_ = false;
+    uint8_t  press_ = kNoPress;
+    core::media::ancs::Tracker tracker_;
+};
+
 void ble_task(void* arg) {
     using core::state::Dev;
     Deps& d = *static_cast<Deps*>(arg);
@@ -1196,6 +1576,8 @@ void ble_task(void* arg) {
     // so it lives off the task stack.
     static HrLink hr(d);
     hr.publish_initial();
+    // The iPhone's AMS and ANCS, off the stack for the same reason.
+    static AppleLink apple;
 
     d.slots->media.publish(media);
     d.slots->ble_diag.publish(diag);
@@ -1209,6 +1591,21 @@ void ble_task(void* arg) {
             wait = 0;   // drain whatever else arrived, then get on with it
             const uint32_t now = now_ms();
             hr.on_event(e, now);
+            AppleLink::Out out;
+            apple.on_event(e, now, media, notify, out);
+            if (out.tag) {
+                diag.last_tag = out.tag;
+                media_dirty = diag_dirty = true;
+                d.health->report_ok(Dev::Phone, now);
+            }
+            if (out.notify) {
+                ESP_LOGI(kTag, "notification %c from \"%s\"%s (ANCS)", notify.kind, notify.who,
+                         notify.ringing ? ", ringing" : "");
+                diag.last_tag = 'N';
+                diag_dirty = true;
+                d.slots->notify.publish(notify);
+                d.health->report_ok(Dev::Phone, now);
+            }
             switch (e.kind) {
                 case Event::Line:
                     if (const char tag = core::media::apply_line(media, e.data, e.len, now)) {
@@ -1239,6 +1636,7 @@ void ble_task(void* arg) {
                 case Event::Disconnect:
                     ESP_LOGI(kTag, "phone gone, reason %" PRId32, e.code);
                     conn = BLE_HS_CONN_HANDLE_NONE;
+                    apple.stop();
                     subscribed = false;
                     encrypted = false;
                     dropping = false;
@@ -1312,6 +1710,8 @@ void ble_task(void* arg) {
                     }
                     diag.encrypted = encrypted;
                     diag_dirty = true;
+                    // Let in: an iPhone serves AMS and ANCS from here.
+                    if (encrypted) apple.start(conn, now);
                     break;
                 }
                 case Event::Synced:
@@ -1328,6 +1728,7 @@ void ble_task(void* arg) {
                     ESP_LOGW(kTag, "host reset, reason %" PRId32, e.code);
                     synced = false;
                     conn = BLE_HS_CONN_HANDLE_NONE;
+                    apple.stop();
                     subscribed = false;
                     encrypted = false;
                     dropping = false;
@@ -1422,13 +1823,20 @@ void ble_task(void* arg) {
 
         // A handlebar transport press, posted by `logic`. The generation
         // says whether it is new; a press with no phone listening is
-        // dropped, not queued for a phone that may never come.
+        // dropped, not queued for a phone that may never come. An iPhone
+        // takes it as an AMS remote command, anything else over Ctrl.
         const uint32_t gen = d.slots->media_ctrl.generation();
         if (gen != ctrl_gen) {
             ctrl_gen = gen;
-            if (conn != BLE_HS_CONN_HANDLE_NONE && subscribed && encrypted) {
-                send_ctrl(conn, d.slots->media_ctrl.get().cmd);
+            const uint8_t cmd = d.slots->media_ctrl.get().cmd;
+            if (conn != BLE_HS_CONN_HANDLE_NONE && encrypted && !apple.press(cmd) && subscribed) {
+                send_ctrl(conn, cmd);
             }
+        }
+        apple.poll(now);
+        if (apple.diag() != diag.apple) {
+            diag.apple = apple.diag();
+            diag_dirty = true;
         }
 
         if (now - last_diag_ms >= kDiagPeriodMs) {

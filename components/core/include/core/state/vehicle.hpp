@@ -411,6 +411,9 @@ struct BleDiag {
     // a title on a diagnostics table would just be the Media row again.
     char    last_tag       = 0;
     bool    ctrl_subscribed = false;  // phone is listening for Ctrl notifies
+    // An iPhone's own services (§11.1.1): bit 0 still looking through them,
+    // bit 1 AMS live, bit 2 ANCS live. 0 for an Android phone, or none.
+    uint8_t apple          = 0;
     bool    encrypted      = false;   // the current link, if any, is bonded and encrypted
     uint8_t bonds          = 0;       // phones the dash will let back in
     uint8_t pairing_s      = 0;       // seconds left in the pairing window; 0 closed
