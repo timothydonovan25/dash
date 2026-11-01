@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -47,6 +48,12 @@ bool c6_line(const char* line) {
 
 void handle(const char* line) {
     if (c6_line(line)) return;
+    // `panic`: crash on purpose, for bring-up: the core dump, the reboot,
+    // and a dev image falling back to stable (bringup §2, §9.1 step 4).
+    if (std::strcmp(line, "panic") == 0) {
+        ESP_LOGE(kTag, "panic requested over USB");
+        abort();
+    }
     core::nav::Press press;
     if (std::strncmp(line, "btn ", 4) == 0)       press = core::nav::Press::Short;
     else if (std::strncmp(line, "long ", 5) == 0) press = core::nav::Press::Long;

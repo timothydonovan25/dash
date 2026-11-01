@@ -60,6 +60,11 @@ Syncthing, `.git` and `build/` included; that is gone.)
   installed with `idf_tools.py install-python-env`), and EIM's
   `. ~/.espressif/tools/activate_idf_v6.0.2.sh` works too.
 
+`idf.py coredump-info` needs ESP-IDF's GDB, which EIM installs but the
+laptop's `export.sh` does not put on PATH: `export PATH=~/.espressif/tools/riscv32-esp-elf-gdb/17.1_20260402/riscv32-esp-elf-gdb/bin:$PATH`.
+The USB console takes, besides the pod's `btn X` / `long X`: `c6 hold` /
+`c6 release` (the C6 in reset) and `panic` (abort(), for the crash path).
+
 The P4 module is hand-fitted after assembly, so expect `/dev/ttyACM0` only
 once U16 is on. v6 is not v5. It split the peripheral drivers into `esp_driver_*`
 components, so `REQUIRES driver` no longer brings in UART or GPIO, and it is

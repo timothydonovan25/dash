@@ -28,7 +28,7 @@ the same as correct. The places that can only be settled here are marked
 | 8.1 Power-fail | Not done | |
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
 | 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried. The Wi-Fi hotspot comes up (2026-11-01: 20 on/off cycles from CONFIG, internal RAM back to 301 kB each time, 9 kB kept by the first start; off on 10 idle minutes); no phone has joined it or uploaded |
-| 9.1 OTA slots | Not done | |
+| 9.1 OTA slots | Steps 1, 4, 5, 6 done | 2026-11-01: `flash_dev.py` to ota_1 with stable untouched; Boot dev once from DIAG → Update ran ota_1 as dev; a reset, and a panic in dev (console `panic`), both came back stable on ota_0 with no input; the panic's core dump decoded with `idf.py coredump-info` (needs GDB on PATH, Build). Not done: install from SD, the refusals, Promote, a card pulled mid-install |
 
 **The order matters more than the speed.** Each session below assumes the
 one above it works. Skipping ahead means debugging two unknowns at once,
@@ -728,7 +728,10 @@ the flash calls are not.
    chip".
 4. **Boot dev once.** The dash restarts into dev: red DEV tag, Running says
    `dev`. Power-cycle it: it must come back stable with no input. Then a
-   panic in dev (or a watchdog) must do the same.
+   panic in dev (or a watchdog) must do the same: type `panic` on the USB
+   console (`main/serial_buttons.cpp`; it calls abort()). First board,
+   2026-11-01: both came back stable. Erase the test's core dump after
+   (`esptool erase-region 0x23000 0x1d000`) or DIAG flags a crash.
 5. **No boot pause.** Power on with a dev image installed: the dash goes
    straight to stable, with nothing on screen asking for input.
 6. **USB to dev.** `python3 tools/flash_dev.py` writes the other slot and
