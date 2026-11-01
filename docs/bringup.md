@@ -789,3 +789,47 @@ Beware also that some Kconfig symbols are **derived**:
 `..._TO_CORE_0` / `..._TO_CORE_1` choice, so editing the int by hand looks
 like it worked, greps back correct, and is recomputed away on the next
 build. Set the choice.
+
+---
+
+## 12. Testing from the laptop, hands off
+
+What 2026-10-31/11-01 used to test the first board with nobody at it. All of
+it is the USB console (`main/serial_buttons.cpp`) plus esptool.
+
+**Opening the port without resetting the board.** pyserial lowers DTR before
+RTS, and DTR low with RTS high is the USB-Serial-JTAG's reset. Open with both
+`True`, then set `rts = False` before `dtr = False` (`tools/pod_keys.py`).
+The reverse order (DTR low, then RTS low) is how to reset it on purpose.
+
+**Console commands.** `btn A`..`btn E`, `long A`..`long E` (the pod, after
+debounce); `c6 hold` / `c6 release` (the C6 in reset: what a dead radio
+does); `panic` (abort(): the core dump, the reboot, dev falling back to
+stable). Send a bare newline first: half a line from an earlier session is
+dropped after 500 ms, but only if nothing follows it sooner.
+
+**Menu routes** (from anywhere; `long A` is CRUISE screen 0; presses 350 ms
+apart; the sim shows the same screens, `simshot`-style, if one stops working):
+
+| What | Presses |
+|---|---|
+| Wi-Fi on/off | `long A`, A×4, D×13, E, E — then E again toggles |
+| Eject card | `long A`, A×4, D×12, E, E |
+| DIAG → Update | `long A`, A×3, D×7, E |
+| Boot dev once | then D, E |
+
+**Before fuzzing the menus, back up NVS** (settings, the phone's bond, trip,
+waypoints): `esptool read-flash 0x11000 0x10000 nvs.bin` twice and compare;
+afterwards `esptool write-flash 0x11000 nvs.bin` and read it back. Random
+presses reach Forget phone, Calibrate level, the trip and gear resets.
+Tracks need a fix, so indoors they are safe.
+
+**The console's 10 s summary** (`keeper`) is what a soak watches: `heap`
+(internal free; a leak is it falling), `imu` (most samples found waiting at
+one wake; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
+`gnss`, `power`, and `logger`'s bytes and slowest write.
+
+**What it found on the first board:** 19 min and 2337 random presses, no
+reset; Wi-Fi 20 on/off cycles with RAM back each time; Eject flushing ~20 kB
+the logger used to drop; a lost C6 no longer rebooting the dash; dev boot,
+reset and panic all falling back to stable; heap flat over an hour.
