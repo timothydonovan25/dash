@@ -102,6 +102,17 @@ hal::Status Icm42688p::init() {
     if (!hal::ok(s)) return s;
     vTaskDelay(pdMS_TO_TICKS(2));
 
+    // FIFO count and data big-endian (0x30, the default), and UI_SIFS_CFG
+    // 11: I2C off. With CS high the part's I2C side watches SCK and MOSI as
+    // SCL and SDA, so the SD card's traffic on the shared bus (the 400 kHz
+    // init when a card goes in most of all) can look like its address and
+    // leave it in I2C mode, deaf to SPI with MISO floating: WHO_AM_I 0xFF on
+    // every retry until a power cycle (first board, 2026-10-31, after a card
+    // went in with the board on). First thing after every soft reset, which
+    // turns I2C back on.
+    s = write_reg(kIntfConfig0, 0x33);
+    if (!hal::ok(s)) return s;
+
     uint8_t who = 0;
     s = read_regs(kWhoAmI, &who, 1);
     if (!hal::ok(s)) return s;
@@ -125,8 +136,7 @@ hal::Status Icm42688p::init() {
     gyro_scale_ = 2000.0f / 32768.0f;
     accel_scale_ = 16.0f / 32768.0f;
 
-    s = write_reg(kIntfConfig0, 0x30);      // FIFO count and data big-endian
-    if (!hal::ok(s)) return s;
+
     s = write_reg(kFifoConfig, 0x40);       // stream-to-FIFO
     if (!hal::ok(s)) return s;
     s = write_reg(kFifoConfig1, 0x07);      // accel + gyro + temp in the FIFO

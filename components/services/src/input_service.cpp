@@ -13,6 +13,7 @@
 #include "bsp/pins.hpp"
 #include "drivers/pod.hpp"
 
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -26,6 +27,12 @@ constexpr uint32_t kRefreshEveryMs = 5000;
 constexpr uint32_t kRecoverAfterMs = 200;
 constexpr int      kNacksBeforeRecover =
     static_cast<int>(kRecoverAfterMs * bsp::kPodPollHz / 1000);
+// Recoveries that did not bring it back before the pod is taken as gone and
+// only probed, once a second, until a read works. An absent pod was a 10 ms
+// I2C timeout every 5 ms, the bus driver torn down five times a second, and
+// a fault on every read, for the whole ride (rule 5: no tight retry).
+constexpr int      kRecoveriesBeforeProbing = 3;
+constexpr uint32_t kProbeEveryMs = 1000;
 
 void input_task(void* arg) {
     Deps& d = *static_cast<Deps*>(arg);
@@ -33,11 +40,23 @@ void input_task(void* arg) {
     core::input::Decoder decoder;
     core::input::Config  cfg;
     int      consecutive_errors = 0;
+    int      failed_recoveries = 0;
+    uint32_t next_probe = 0;
     uint32_t last_refresh = 0;
     TickType_t next = xTaskGetTickCount();
 
+    constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
     for (;;) {
         const uint32_t now = d.clock->now_ms();
+
+        if (failed_recoveries >= kRecoveriesBeforeProbing) {
+            if (static_cast<int32_t>(now - next_probe) < 0) {
+                vTaskDelayUntil(&next, kPeriod);
+                if (xTaskGetTickCount() - next > kPeriod) next = xTaskGetTickCount();
+                continue;
+            }
+            next_probe = now + kProbeEveryMs;
+        }
 
         uint8_t mask = 0;
         const hal::Status s = d.pod ? d.pod->read_buttons(mask)
@@ -45,6 +64,9 @@ void input_task(void* arg) {
 
         if (hal::ok(s)) {
             consecutive_errors = 0;
+            if (failed_recoveries >= kRecoveriesBeforeProbing)
+                ESP_LOGI("input", "pod answering again: polling at %d Hz", bsp::kPodPollHz);
+            failed_recoveries = 0;
             d.health->report_ok(core::state::Dev::McpPod, now);
 
             core::nav::InputEvent ev[core::input::kButtonCount];
@@ -65,7 +87,14 @@ void input_task(void* arg) {
             // own run of NACKs or when `keeper` asks: recovery deletes the
             // I2C driver, and from another core it did that under a read.
             const bool asked = take_retry(d, core::state::Dev::McpPod);
-            if (consecutive_errors >= kNacksBeforeRecover || asked) {
+            // Probing, one read a second: recover on every failed probe
+            // rather than after 40 of them.
+            const bool probing = failed_recoveries >= kRecoveriesBeforeProbing;
+            if (consecutive_errors >= kNacksBeforeRecover || asked ||
+                (probing && consecutive_errors > 0)) {
+                if (consecutive_errors > 0 && failed_recoveries < kRecoveriesBeforeProbing &&
+                    ++failed_recoveries == kRecoveriesBeforeProbing)
+                    ESP_LOGW("input", "pod not answering: probing it once a second");
                 consecutive_errors = 0;
                 pod->recover_bus();
             } else if (now - last_refresh >= kRefreshEveryMs) {
@@ -85,7 +114,6 @@ void input_task(void* arg) {
         // debounce counts on reads being one period apart.
         // After an overrun (a dead pod is 10 ms of timeout per read, two periods) start
         // again from now rather than catching up with a burst of reads.
-        constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
         vTaskDelayUntil(&next, kPeriod);
         const TickType_t woke = xTaskGetTickCount();
         if (woke - next > kPeriod) next = woke;
