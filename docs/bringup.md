@@ -822,7 +822,12 @@ apart; the sim shows the same screens, `simshot`-style, if one stops working):
 waypoints): `esptool read-flash 0x11000 0x10000 nvs.bin` twice and compare;
 afterwards `esptool write-flash 0x11000 nvs.bin` and read it back. Random
 presses reach Forget phone, Calibrate level, the trip and gear resets.
-Tracks need a fix, so indoors they are safe.
+Tracks need a fix, so indoors they are safe. **They reach the slots too:**
+Boot dev once and Promote to stable each act on one short E, no confirmation,
+and a 20 min run did both (dev booted at 6 min, promoted at 14), leaving the
+older dev image as stable. Afterwards check the boot line `ota: running ...
+from ota_N` and, if it moved, `idf.py flash` (it rewrites otadata, so stable
+is `ota_0` again). Whether a rider should get a confirm step there is open.
 
 **The console's 10 s summary** (`keeper`) is what a soak watches: `heap`
 (internal free; a leak is it falling), `imu` (most samples found waiting at
