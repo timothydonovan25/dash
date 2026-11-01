@@ -22,7 +22,7 @@ the same as correct. The places that can only be settled here are marked
 | 3 Panel | Done (HT035) | IPS init, mirrored on both axes, 25 MHz write clock. The VIEWE UEED035HV probe is not run |
 | 4 DIAG → Sensors, Bus | Not done | |
 | 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet. Until it is, `tools/pod_keys.py` presses the buttons from the laptop over USB (§5) |
-| 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done. The ride logs: mount roll/pitch never set (gravity implies ~10° roll, and it differs between sessions), gaps behind SD writes, and the chip's own clock says ~213 Hz, not 200. Once (2026-10-31, after the SD card was swapped with the board powered) it answered WHO_AM_I 0xFF through every reset and retry until a full power cycle: a USB or software reset does not power the IMU down |
+| 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done. The ride logs: mount roll/pitch never set (gravity implies ~10° roll, and it differs between sessions), gaps behind SD writes, and the chip's own clock says ~213 Hz, not 200, while by the P4's clock samples arrive every 5.3 ms (~189 Hz: the part's oscillator is ~6 % slow), so `icm42688p.cpp` back-dates a batch 5 ms a sample and is up to ~5 ms out at its oldest (the report's p99 8 ms); totals stay right, as each batch is anchored at now. Once (2026-10-31, after the SD card was swapped with the board powered) it answered WHO_AM_I 0xFF through every reset and retry until a full power cycle: a USB or software reset does not power the IMU down |
 | 7 GPS | Fixes, at 1 Hz: **P4 → GPS TX dead** | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. Stuck at 1 Hz because **the receiver hears nothing the P4 sends**: it ignores even a command at the 9600 it is talking at, and keeps its default sentences. The firmware's side is proven (2026-11-01, IO dump): GPIO3 drives UART1 TX. Check U16-6 → U4-10 (§7) |
 | 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, fixed in 1.60 (`docs/fusion.md`, replayed over both rides; not yet ridden). The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. The board was also not held rigidly (up to 15 g and 1100 dps; gravity 60° apart between parked spells), so lean and pitch from those rides are meaningless |
 | 8.1 Power-fail | Not done | |
@@ -640,6 +640,15 @@ Feed lines arrived (`phone connected, waiting for encryption`, then
   `H_SDIO_DRV: Host is resetting itself`: ESP-Hosted restarts the whole P4,
   so every reading on the console jumps as the filters start over. On
   2026-10-31 it was a short from wires left dangling on the C6's pads.
+  **Open: on the bike this reboots the whole dash**, speedo and logging,
+  every 14 s for as long as the C6 is away. It is
+  `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE` (default y). Turning it
+  off alone is worse: `sdio_drv.c`'s read loop then `continue`s straight
+  back into the failed register read, a tight loop at priority 8 over
+  `render`, `keeper` and `logger`. The fix is that option off plus a
+  handler for `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` that stops the
+  transport and lets `ble` report the radio dead; it needs a C6 held in
+  reset to test.
 - **The phone logged `Waiting for scan response` forever**, and the laptop
   hears the dash at −90 dBm from beside it. That is a radio with no
   antenna: step 2 below.
