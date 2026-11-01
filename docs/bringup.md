@@ -23,8 +23,8 @@ the same as correct. The places that can only be settled here are marked
 | 4 DIAG → Sensors, Bus | Not done | |
 | 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet. Until it is, `tools/pod_keys.py` presses the buttons from the laptop over USB (§5) |
 | 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done. The ride logs: mount roll/pitch never set (gravity implies ~10° roll, and it differs between sessions), gaps behind SD writes, and the chip's own clock says ~213 Hz, not 200. Once (2026-10-31, after the SD card was swapped with the board powered) it answered WHO_AM_I 0xFF through every reset and retry until a full power cycle: a USB or software reset does not power the IMU down |
-| 7 GPS | Fixes, at 1 Hz | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. The ride logs (s156, s157) show **1 Hz**, not 10: the rate setting is not taking |
-| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, not fixed yet. The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. Until wheels are fitted, or fusion restarts on GPS when a wheel reads ~0 against a GPS well above it, the speedo is dead |
+| 7 GPS | Fixes, at 1 Hz: **P4 → GPS TX dead** | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. Stuck at 1 Hz because **the receiver hears nothing the P4 sends**: it ignores even a command at the 9600 it is talking at, and keeps its default sentences. The firmware's side is proven (2026-11-01, IO dump): GPIO3 drives UART1 TX. Check U16-6 → U4-10 (§7) |
+| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, fixed in 1.60 (`docs/fusion.md`, replayed over both rides; not yet ridden). The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. The board was also not held rigidly (up to 15 g and 1100 dps; gravity 60° apart between parked spells), so lean and pitch from those rides are meaningless |
 | 8.1 Power-fail | Not done | |
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
 | 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried |
@@ -413,6 +413,19 @@ within ~1.5 ms of its sentence. Check that bad checksums do not climb any
 faster than they did (they would if the FIFO overran), and that `ctrl`
 overruns stay at 0 with the GPS streaming: the UART interrupt is on core 0,
 a couple of hundred times a second.
+
+**First board: the receiver never hears the P4** (2026-11-01). Boot log:
+`pa1616d: stayed at 9600 after two PMTK251s; output timeout`. A timeout on
+PMTK314 *at 9600*, the rate it is talking at, means nothing arrives at its
+RX, and the ~5 sentences a second it keeps sending are its defaults (GGA,
+GSA, GSV, RMC, VTG), not RMC+GGA. On that line the driver dumps the IO
+matrix: GPIO3 is an output carrying signal 13 (`UART1_TXD_PAD_OUT`), so the
+firmware is driving the right pin. Look at the board: U16 pin 6 (GPIO3)
+soldered, the trace to U4-10, U4-10's own joint. To see the bytes, put the
+FTDI's RXD (yellow) on U4-10 and GND on GND, open it at 9600 and reset the
+P4: `$PMTK251,57600*2C` should arrive twice. If it arrives there and the
+module still ignores it, suspect the level: the P4 drives 3.3 V into a
+2.8 V module.
 
 JP1 is an optional external antenna. The PA1616D switches to it on its
 own when it draws current; nothing in firmware selects it.

@@ -105,9 +105,11 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
 
     // --- correct --------------------------------------------------------
     // GPS first: it is the referee for the wheels.
+    float gps_miss = 0.0f;                 // a rejected fix's innovation
     if (in.gps_ok && in.gps_new) {
         const float h = in.hdop < 1.0f ? 1.0f : in.hdop;
         const bool ok = correct(in.gps_mph, cfg.r_gps_mph * h, cfg.gate_sigma);
+        if (!ok) gps_miss = in.gps_mph - v_;
         track(kSrcGps, ok, true, now, cfg);
         if (ok) {
             ref_mph_ = in.gps_mph;
@@ -150,12 +152,33 @@ SpeedOutput SpeedFilter::step(const SpeedInput& in, const SpeedConfig& cfg) {
     }
     if (out_.used & (kSrcGps | kSrcFront | kSrcRear)) last_fix_t_ = now;
 
+    // GPS turned away with no wheel accepted: nothing else is checking the
+    // accelerometer, so the filter cannot claim to be surer than GPS is far
+    // off. Widen it until that fix would just have passed, and the next one
+    // is believed. With 1 Hz fixes, a tilted IMU coasted the filter from 14
+    // to 70 mph between two (s156) and every fix after was gated out.
+    if (gps_miss != 0.0f && !(out_.used & (kSrcFront | kSrcRear))) {
+        const float need = gps_miss * gps_miss / (cfg.gate_sigma * cfg.gate_sigma);
+        if (p_[0][0] < need) p_[0][0] = need;
+    }
+
     // Everything offered was rejected for a while: the filter is the one
     // that is wrong. Restart on GPS if it is there, else the front wheel.
     const uint8_t offered = static_cast<uint8_t>((in.gps_ok ? kSrcGps : 0) |
                                                  (in.front_ok ? kSrcFront : 0) |
                                                  (in.rear_ok ? kSrcRear : 0));
-    if (offered && (out_.suspect & offered) == offered) {
+    // GPS suspect while it says moving and every wheel offered reads
+    // nothing: sensors reading 0 (unfitted, unplugged) that the filter has
+    // grown sure of. They are never suspect, being agreed with, so the rule
+    // above never fires, and without this the speedo read 0 at 50 mph
+    // (s157). A wheel reads 0 under a moving bike for a second at most (a
+    // lock); GPS has been out for `suspect_ms`, so this is not a skid.
+    const bool wheels_stopped = (in.front_ok || in.rear_ok) &&
+        (!in.front_ok || in.front_mph < cfg.stopped_wheel_mph) &&
+        (!in.rear_ok || in.rear_mph < cfg.stopped_wheel_mph);
+    const bool gps_outvoted = in.gps_ok && (out_.suspect & kSrcGps) &&
+        wheels_stopped && in.gps_mph > cfg.wheel_gps_mph;
+    if (gps_outvoted || (offered && (out_.suspect & offered) == offered)) {
         const float v0 = in.gps_ok ? in.gps_mph : in.front_ok ? in.front_mph : in.rear_mph;
         start(v0, 4.0f);
         for (bool& r : rejecting_) r = false;

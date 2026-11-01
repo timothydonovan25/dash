@@ -44,7 +44,24 @@ bias in g.
 - A source rejected for 1.5 s straight is **suspect**. If every offered
   source is suspect, the filter is the one that is wrong, and it restarts
   on GPS.
+- **GPS outvoted by wheels reading 0** (1.60). Wheels that read 0 under a
+  moving bike (unfitted, unplugged) are agreed with while the filter sits
+  at 0, so they are never suspect and the rule above never fires. GPS
+  suspect, above 4 mph, with every offered wheel under 1 mph: the filter
+  restarts on GPS, and the referee then keeps the wheels out. Without it the
+  first rides (s156, s157, 2026-10-29) showed 0 at up to 50 mph.
+- **A rejected fix with no wheel accepted widens the filter** (1.60) until
+  that fix would just have passed. Nothing else is checking the
+  accelerometer then, so a coasting filter that has run away (1 Hz fixes, a
+  bad g_lon) is pulled back by the next fix instead of gating it out.
 - With no correction for 2 s it stops claiming to be **valid**.
+
+Replayed over s156/s157 with both: the fused speed is within 3 mph of GPS
+at 87 % and 91 % of moving fixes (it read 0 throughout on the bike). What
+is left is s156's attitude: the board was not held rigidly on those rides
+(15 g, 1100 dps, gravity 60° apart between the two parked spells), so
+`g_lon` was nonsense and the filter coasts away between fixes for up to
+1.5 s. A rigid mount, Calibrate level, and 10 Hz GPS fix that.
 
 On screen: DIAG → GPS shows "Fused mph" with its 1σ and which sources are
 in use (`F R G`, lower case = suspect). CONFIG → Display → Speedo picks

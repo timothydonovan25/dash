@@ -746,9 +746,10 @@ the FPC pin check and the partition table are both irreversible — and do
 1–5 (shift for long) into presses over the USB console
 (`main/serial_buttons.cpp`, after debounce). Bringup §5.
 
-**The speedo reads 0 on the bike** until fusion is fixed or wheels are
-fitted: the absent wheels read 0, are always accepted, and gate GPS out for
-good (bringup's status table, row 8). The first rides' GPS ran at 1 Hz, not 10.
+**The speedo read 0 on the first rides**: the absent wheels read 0, were
+always accepted, and gated GPS out for good. Fixed in 1.60 (`docs/fusion.md`),
+replayed over those rides, not yet ridden. GPS is stuck at 1 Hz because
+the receiver never hears the P4 (GPIO3 → U4-10; the firmware drives it, bringup §7).
 
 ## Away from the board
 

@@ -51,6 +51,8 @@ struct SpeedConfig {
     float    wheel_gps_mph = 4.0f;
     uint32_t referee_ms    = 1000;
     uint32_t suspect_ms = 1500;     // rejected this long straight -> suspect
+    // A wheel below this is reading nothing (WheelCheckConfig::zero_mph).
+    float    stopped_wheel_mph = 1.0f;
     // How long the filter will coast on the accelerometer alone before it
     // stops claiming to know the speed.
     uint32_t coast_ms   = 2000;

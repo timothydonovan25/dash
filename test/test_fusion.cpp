@@ -212,6 +212,35 @@ int main() {
         }
     }
 
+    CASE("no wheel sensors, and GPS first agrees at 20 mph: the wheels' 0 does not win");
+    {
+        // s156/s157 (2026-10-29): the fix came and went, and by the time GPS
+        // said moving the filter had sat on the wheels' 0 for long enough to
+        // gate every fix out. GPS went suspect; the wheels never did, so the
+        // all-suspect restart never came, and the speedo read 0 at 50 mph.
+        for (const uint32_t fix_ms : {1000u, 100u}) {
+            SpeedFilter f;
+            WheelCheck w;
+            SpeedOutput o;
+            for (uint32_t t = 0; t <= 40000; t += 20) {
+                const float ts = t / 1000.0f;
+                SpeedInput in = at(t);
+                in.accel_ok = true;
+                in.front_ok = in.rear_ok = true;
+                in.front_mph = in.rear_mph = 0.0f;
+                in.gps_ok = ts < 5 || ts >= 15;       // no fix from 5 s to 15 s
+                in.gps_new = in.gps_ok && t % fix_ms == 0;
+                in.gps_mph = ts < 5 ? 0.0f : 20.0f + (ts - 15) * 0.5f;
+                o = f.step(in);
+                w.update(in, o);
+            }
+            CHECK(o.valid);
+            CHECK_NEAR(o.mph, 32.5, 2.0);
+            CHECK(o.used & kSrcGps);
+            CHECK(w.front() == Wheel::Dead && w.rear() == Wheel::Dead);
+        }
+    }
+
     CASE("hard braking: the wheels are judged against where GPS is now, not was");
     {
         // 0.8 g from 20 mph, GPS at 10 Hz. Between fixes the last one goes

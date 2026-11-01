@@ -2,7 +2,9 @@
 #include "bsp/pins.hpp"
 #include "core/nmea/nmea.hpp"
 
+#include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdio>
@@ -12,6 +14,7 @@
 namespace drivers {
 namespace {
 constexpr uart_port_t kPort = UART_NUM_1;
+constexpr const char* kTag = "pa1616d";
 
 // After the baud command, before listening at the new rate.
 constexpr uint32_t kSwitchMs = 100;
@@ -70,19 +73,27 @@ hal::Status Pa1616d::init() {
             // not fit in 9600 baud. Degraded, not a fault.
             set_baud(bsp::kGpsBootBaud);
             if (!hears_nmea(kListenMs)) return hal::Status::NotPresent;
-            command(kOutputRmcGga, 314, kAckMs);
+            const hal::Status out = command(kOutputRmcGga, 314, kAckMs);
+            ESP_LOGW(kTag, "stayed at 9600 after two PMTK251s; output %s",
+                     hal::status_name(out));
+            // It talks but does not hear: is the TX pin even driving?
+            if (out == hal::Status::Timeout)
+                gpio_dump_io_configuration(stdout, (1ULL << bsp::kGpsTx) | (1ULL << bsp::kGpsRx));
             return hal::Status::Ok;
         }
     }
 
     // RMC and GGA only: everything else is bandwidth the parser throws away.
-    command(kOutputRmcGga, 314, kAckMs);
+    const hal::Status out = command(kOutputRmcGga, 314, kAckMs);
     // SBAS works only at 5 Hz or slower (PA1616D datasheet, note 1), so it
     // goes off before asking for 10 Hz.
-    command("PMTK313,0", 313, kAckMs);
+    const hal::Status sbas = command("PMTK313,0", 313, kAckMs);
     // 10 Hz, if the receiver says it is done (flag 3). If not, it stays at
     // its 1 Hz default and full_rate() says so.
-    full_rate_ = hal::ok(command("PMTK220,100", 220, kAckMs));
+    const hal::Status rate = command("PMTK220,100", 220, kAckMs);
+    full_rate_ = hal::ok(rate);
+    ESP_LOGI(kTag, "57600; output %s, sbas off %s, 10 Hz %s", hal::status_name(out),
+             hal::status_name(sbas), hal::status_name(rate));
     return hal::Status::Ok;
 }
 
