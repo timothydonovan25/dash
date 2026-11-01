@@ -166,3 +166,8 @@ CONFIG_ESP_HOSTED_CLI_ENABLED=n
 
 # Per-task stack high-water marks for DIAG -> System (services::watch_stacks).
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+# IDF's IPC tasks (one a core, priority 24) had 1024 bytes and used 624 of
+# ipc0's by 1.8 s after boot (watch_stacks). An overflow there is a crash on
+# either core; 1536 costs 1 kB of internal RAM.
+CONFIG_ESP_IPC_TASK_STACK_SIZE=1536

@@ -84,9 +84,9 @@ void bring_up(core::state::Dev dev, hal::Status s) {
 services::Deps& build() {
     // 1. Buses and safe pin levels, before any driver exists.
     const bsp::BusStatus buses = bsp::board_init();
-    ESP_LOGI(kTag, "buses: spi2=%d i2c0=%d i2c1=%d uart1=%d lcd=%d",
+    ESP_LOGI(kTag, "buses: spi2=%d i2c0=%d i2c1=%d uart1=%d lcd=%d gpio_isr=%d",
              buses.spi2, buses.i2c0 != nullptr, buses.i2c1 != nullptr, buses.uart1,
-             buses.lcd_bus != nullptr);
+             buses.lcd_bus != nullptr, buses.gpio_isr);
 
     // The panel needs the 8080 bus handle, which only exists once the bus
     // is up. A function-local static is still built exactly once and never

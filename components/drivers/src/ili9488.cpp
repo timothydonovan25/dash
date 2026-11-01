@@ -231,9 +231,7 @@ bool Ili9488::te_answers() {
     te.pull_down_en = GPIO_PULLDOWN_ENABLE;   // no edges from a floating pin
     te.intr_type = GPIO_INTR_POSEDGE;
     if (gpio_config(&te) != ESP_OK) return false;
-    // engine_sense has usually installed the service already.
-    const esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    // The ISR service is bsp's (init_buses).
     if (gpio_isr_handler_add(pin, on_te, nullptr) != ESP_OK) return false;
 
     const bool heard = xSemaphoreTake(s_te, pdMS_TO_TICKS(kTeWaitMs)) == pdTRUE;

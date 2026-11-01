@@ -18,6 +18,11 @@ struct BusStatus {
     void* i2c0 = nullptr;  // handlebar pod, 100 kHz
     void* i2c1 = nullptr;  // PCA9955B LED driver, 1 MHz
     bool uart1 = false;   // GPS
+    // The GPIO ISR service, for the tach, the IMU's INT1 and the panel's TE.
+    // Installed here, once, from main's task on core 0: the service's
+    // interrupt lands on the core that installs it, and the tach's must be
+    // core 0's (`ctrl`). The drivers only add handlers to it.
+    bool gpio_isr = false;
     // The 8080 bus for the panel, an esp_lcd_i80_bus_handle_t, with WR and
     // DC as the HT035 wants them. Creating it twice makes a second bus on
     // the same pins rather than failing, so only board_init() creates it,

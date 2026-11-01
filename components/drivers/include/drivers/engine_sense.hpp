@@ -30,7 +30,6 @@ public:
 
 private:
     uint32_t  tach_refractory_us_ = 0;
-    bool      started_ = false;
     bool      ready_ = false;     // every channel installed; read() says so
 };
 

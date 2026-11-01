@@ -118,14 +118,8 @@ void EngineSense::notify_on_tach(void* task) {
 }
 
 hal::Status EngineSense::init() {
-    if (!started_) {
-        // IRAM so an edge is still counted while flash is busy — the logger
-        // writing to the card must not cost the rider revs.
-        const esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return hal::Status::IoError;
-        started_ = true;
-    }
-
+    // The ISR service is bsp's (init_buses), in IRAM so an edge is still
+    // counted while flash is busy: the logger must not cost the rider revs.
     if (tach_refractory_us_ == 0) tach_refractory_us_ = bsp::kTachRefractoryUs;
 
     hal::Status s = install(bsp::kTachSig, g_tach, tach_refractory_us_);

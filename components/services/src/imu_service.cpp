@@ -51,11 +51,7 @@ bool attach_data_ready() {
     io.intr_type = GPIO_INTR_POSEDGE;      // matches INT1 active high
     if (gpio_config(&io) != ESP_OK) return false;
 
-    // engine_sense may already have installed it for the tach; either order
-    // has to work, so "already installed" is a success.
-    const esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
-
+    // The ISR service is bsp's (init_buses).
     return gpio_isr_handler_add(static_cast<gpio_num_t>(bsp::kImuInt1),
                                 drdy_isr, nullptr) == ESP_OK;
 }

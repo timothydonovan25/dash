@@ -127,6 +127,8 @@ BusStatus init_buses() {
     s.i2c0 = init_i2c(0, kI2cSda, kI2cScl);
     s.i2c1 = init_i2c(1, kLedSda, kLedScl);
     s.uart1 = init_uart1();
+    // IRAM so a tach edge is still counted while flash is busy.
+    s.gpio_isr = gpio_install_isr_service(ESP_INTR_FLAG_IRAM) == ESP_OK;
     return s;
 }
 
