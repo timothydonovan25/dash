@@ -41,6 +41,17 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #endif
 #endif
 
+// A C6 that stops answering must not reboot the dash every 14 s (1.61):
+// ESP-Hosted's restart is off and `ble` reports the radio lost instead.
+#if CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE
+#error "CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE must be off (a lost C6 would reboot the dash): delete sdkconfig and rebuild"
+#endif
+
+// IDF's IPC tasks had 400 bytes left of 1024 (1.61). An overflow is a crash.
+#if CONFIG_ESP_IPC_TASK_STACK_SIZE < 1536
+#error "CONFIG_ESP_IPC_TASK_STACK_SIZE must be at least 1536: delete sdkconfig and rebuild"
+#endif
+
 // ctrl, imu, logic and render join the task watchdog (services/watchdog.cpp).
 // Without panic a stuck one only prints, to a console nobody has on the bike.
 #if !CONFIG_ESP_TASK_WDT_PANIC || CONFIG_ESP_TASK_WDT_TIMEOUT_S < 2

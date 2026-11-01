@@ -50,9 +50,8 @@ Syncthing, `.git` and `build/` included; that is gone.)
 - **`sdkconfig` is per machine too, and `sdkconfig.defaults` only seeds a
   new one** (bringup §11). 1.61 changed two: `CONFIG_ESP_IPC_TASK_STACK_SIZE=1536`
   and `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE` off. On a machine whose
-  `sdkconfig` predates them, set both there (or delete `sdkconfig` and
-  rebuild), and check `build/config/sdkconfig.h`: without the second, a lost
-  C6 still reboots the dash every 14 s.
+  `sdkconfig` predates them, `main.cpp` stops the build with an `#error`
+  naming the one to fix: delete `sdkconfig` and rebuild (or set both).
 - `build/`, `build-host/` and `build-sim/` are in `.gitignore`, so each
   machine has its own. The laptop's ESP-IDF Python env is
   `idf6.0_py3.14_env`, the desktop's is `idf6.0_py3.12_env`. A build tree
