@@ -21,13 +21,13 @@ the same as correct. The places that can only be settled here are marked
 | 2 Boots | Done | P4 silicon **v3.2**, so the build is for v3.1+, at 400 MHz. Boot time and the watchdog test not done |
 | 3 Panel | Done (HT035) | IPS init, mirrored on both axes, 25 MHz write clock. The VIEWE UEED035HV probe is not run |
 | 4 DIAG → Sensors, Bus | Not done | |
-| 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet |
-| 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done |
-| 7 GPS | Fixes | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. 10 Hz not confirmed |
-| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first ride the speedo read 0; its logs on the card are unread |
+| 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet. Until it is, `tools/pod_keys.py` presses the buttons from the laptop over USB (§5) |
+| 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done. The ride logs: mount roll/pitch never set (gravity implies ~10° roll, and it differs between sessions), gaps behind SD writes, and the chip's own clock says ~213 Hz, not 200. Once (2026-10-31, after the SD card was swapped with the board powered) it answered WHO_AM_I 0xFF through every reset and retry until a full power cycle: a USB or software reset does not power the IMU down |
+| 7 GPS | Fixes, at 1 Hz | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. The ride logs (s156, s157) show **1 Hz**, not 10: the rate setting is not taking |
+| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, not fixed yet. The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. Until wheels are fitted, or fusion restarts on GPS when a wheel reads ~0 against a GPS well above it, the speedo is dead |
 | 8.1 Power-fail | Not done | |
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
-| 9 Radio | Link up, advertising | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. No phone or watch has connected; antenna range not checked |
+| 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried |
 | 9.1 OTA slots | Not done | |
 
 **The order matters more than the speed.** Each session below assumes the
@@ -271,6 +271,14 @@ Two rows on that screen only matter once something has gone wrong:
 
 **Status:** the pod works on the demo board; on the bike board it is
 untested, as its GH1.25 connector is not fitted to the pod's cable yet.
+
+**Without the pod**, press the buttons from the laptop:
+`python3 ~/dash/tools/pod_keys.py` (after `export.sh`, for pyserial). Keys
+1–5 are a short A–E, shift+1–5 a long one, q quits; the board's log scrolls
+alongside. It sends `btn X` / `long X` lines over the USB console to
+`main/serial_buttons.cpp`, which posts them into the input queue after
+debounce, so the screens cannot tell them from the pod, but debounce, hold
+timing and repeat are not exercised.
 
 **100 kHz, not 400.** Already set in `bsp/buses.cpp` with the reason in a
 comment. 4.7 k pull-ups (R35/R36) over half a metre give ~470 ns of rise
@@ -605,8 +613,18 @@ whether it was built for SDIO or SPI.
    then says `c6_fw: C6 runs 2.12.8 #…, slave_fw has 2.12.8 #…: current`.
 
 The `ble` service is built in (`services/src/ble_service.cpp`) and starts
-last at boot. It has not run on this board. The same GATT code advertised
-as "CRF250F-Dash" on `demo_p4/`, and nothing has connected to either yet.
+last at boot. On the first board (2026-10-31) the Android app bonded and its
+Feed lines arrived (`phone connected, waiting for encryption`, then
+`bonded phone back`). Two things found on the way:
+
+- **The bonded name is the short one.** The scan response carries
+  `CRF250F` (the full `CRF250F-Dash` no longer fits beside the ANCS
+  solicitation), so a phone stores the bond as `CRF250F`. The app looked
+  for `CRF250F-Dash` among bonded devices, missed, and fell back to a scan
+  that never finished. It now matches either (`~/phone`, `DashLink.kt`).
+- **The phone logged `Waiting for scan response` forever**, and the laptop
+  hears the dash at −90 dBm from beside it. That is a radio with no
+  antenna: step 2 below.
 
 1. **Build the C6's firmware first**:
    `idf.py -C demo_p4/c6_cp set-target esp32c6 build`. `idf.py flash` writes

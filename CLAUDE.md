@@ -19,7 +19,7 @@ deliberately.
 top side assembled) **and arrived on 2026-10-28; bring-up is under way.**
 `docs/bringup.md` opens with what has run on it and what has not. Rails,
 boot, the panel, the SD card on 12 V, GPS, the IMU on the bench and the
-C6's SDIO link (advertising, nothing connected) have run; the shift lamps,
+C6's SDIO link (the Android app has bonded and sent Feed lines) have run; the shift lamps,
 the pod on this board, tach, wheels, power-fail and the OTA slots have not. Treat a driver as unproven until
 that table says otherwise. The audit is `docs/p4-board-pin-map.md` §6. The earlier ESP32-S3
 board is superseded; its reviews stay in `docs/` as history.
@@ -656,8 +656,11 @@ shows "safe to pull" until the card comes out. One lock in
 `drivers/sdcard` guards every card call from `logger`, `ota`, `storage` and
 `wifi`.
 
-**BLE media is built; on this board the radio advertises and nothing has
-connected.** The first board's C6 came with **blank flash**, so the SDIO
+**BLE media is built, and the Android app has bonded to this board and
+sent Feed lines** (2026-10-31); no watch or iPhone has tried. The signal is
+weak (−90 dBm beside it, the phone never gets the scan response): check the
+C6's antenna. A phone stores the bond under the scan response's short name
+`CRF250F`, so the app matches that as well as `CRF250F-Dash`. The first board's C6 came with **blank flash**, so the SDIO
 push could not reach it; it was flashed over its own UART once
 (2026-10-31, `docs/bringup.md` §9, `tools/c6_uart.py`), and `slave_fw`
 now holds the same 2.12.8. `services/src/ble_service.cpp`
@@ -708,8 +711,8 @@ pins, touch zones and decoded presses for 30 s.
   The *phone* half is written, in its own repo at
   `~/phone` — along with `tools/dash_media_peripheral.py`, which stayed
   here: a laptop peripheral speaking §11.1 so the app has a working
-  counterpart and the dash will later have a known-good client. Neither end
-  has talked to the other.
+  counterpart and the dash will later have a known-good client. The app
+  and the bike board have talked over Feed (2026-10-31).
 - **CAN / `engine_service`** — the board has no transceiver (§10.1).
   `NullEngine` is wired in and every screen renders `--` for the ECU.
 - **USB mass storage** (§9.3) — the ownership seam is in
@@ -738,6 +741,14 @@ is the semantic layer over the palette in `geometry.hpp`.
 should see, and what each failure means. Read §0 before applying power —
 the FPC pin check and the partition table are both irreversible — and do
 §1's rail check before hand-fitting U16 and U4. F1 needs its 1 A fuse.
+
+**No pod on the bike board yet**: `tools/pod_keys.py` turns laptop keys
+1–5 (shift for long) into presses over the USB console
+(`main/serial_buttons.cpp`, after debounce). Bringup §5.
+
+**The speedo reads 0 on the bike** until fusion is fixed or wheels are
+fitted: the absent wheels read 0, are always accepted, and gate GPS out for
+good (bringup's status table, row 8). The first rides' GPS ran at 1 Hz, not 10.
 
 ## Away from the board
 

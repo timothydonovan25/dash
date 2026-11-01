@@ -3,6 +3,7 @@
 #include "bsp/pins.hpp"
 
 #include "driver/spi_master.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -108,6 +109,8 @@ hal::Status Icm42688p::init() {
     if (!identified_) {
         // Answered, but not as this part. On a fresh board this is almost
         // always MISO shorted or swapped rather than a wrong chip.
+        // 0x00: MISO held low or the chip unpowered; 0xFF: MISO floating.
+        ESP_LOGW("icm42688p", "WHO_AM_I 0x%02x, want 0x%02x", who, kWhoAmIValue);
         return hal::Status::BadReply;
     }
 

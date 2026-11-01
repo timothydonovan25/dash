@@ -2,7 +2,7 @@
 """The handlebar pod from the laptop keyboard, over the board's USB serial.
 
     . ~/.espressif/v6.0.2/esp-idf/export.sh     # for pyserial
-    python3 tools/pod_keys.py [-p /dev/ttyACM0]
+    python3 tools/pod_keys.py [-p /dev/ttyACMn]   # default: the first Espressif USB port
 
 1 2 3 4 5   short press of A..E
 ! @ # $ %   (shift+1..5) long press
@@ -21,15 +21,25 @@ import threading
 import tty
 
 import serial
+from serial.tools import list_ports
 
 SHORT = "12345"
 LONG = "!@#$%"      # shift+1..5 on a US layout
 
 
+def find_port():
+    # A board that resets while its port is held open comes back as ttyACM1, 2...
+    for p in list_ports.comports():
+        if p.vid == 0x303A:
+            return p.device
+    return "/dev/ttyACM0"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("-p", "--port", default="/dev/ttyACM0")
+    ap.add_argument("-p", "--port", default=None)
     a = ap.parse_args()
+    a.port = a.port or find_port()
 
     s = serial.Serial()
     s.port, s.baudrate, s.timeout = a.port, 115200, 0.2
