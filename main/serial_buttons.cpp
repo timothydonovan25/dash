@@ -63,7 +63,13 @@ void serial_task(void*) {
     size_t n = 0;
     for (;;) {
         uint8_t ch;
-        if (usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY) != 1) continue;
+        // A line is typed or sent whole; half of one, left by a sender that
+        // stopped mid-write, would otherwise be glued onto the next
+        // session's first command and spoil it. So silence drops it.
+        if (usb_serial_jtag_read_bytes(&ch, 1, n ? pdMS_TO_TICKS(500) : portMAX_DELAY) != 1) {
+            n = 0;
+            continue;
+        }
         if (ch == '\r') continue;
         if (ch == '\n') {
             line[n] = '\0';
