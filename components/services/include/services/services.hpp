@@ -244,6 +244,9 @@ void start_wifi(Deps& d);
 // merging them would put UI navigation on the logic task's critical path.
 bool post_input_event(const core::nav::InputEvent& e);
 bool take_input_event(core::nav::InputEvent& out);
+// Console `pod trace`: for this long `input` logs every raw pod change,
+// every decoded press and, once a second, its reads and failed reads.
+void trace_pod(uint32_t ms);
 
 // Blocks until a button event arrives or `timeout_ms` passes. This is what
 // the render task waits on instead of a plain periodic delay: a press wakes

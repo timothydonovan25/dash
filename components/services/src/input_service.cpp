@@ -14,11 +14,17 @@
 #include "drivers/pod.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "hal/status.hpp"
+#include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 namespace services {
 namespace {
+
+// Written by the console task, read here; until when to trace (0 = off).
+std::atomic<uint32_t> g_trace_ms{0};
 
 constexpr uint32_t kRefreshEveryMs = 5000;
 // A run of failed reads this long, in time rather than in reads, before the
@@ -43,6 +49,9 @@ void input_task(void* arg) {
     int      failed_recoveries = 0;
     uint32_t next_probe = 0;
     uint32_t last_refresh = 0;
+    uint32_t tr_reads = 0, tr_errors = 0, tr_next_ms = 0;
+    uint8_t  tr_gpa = 0;
+    hal::Status tr_last_err = hal::Status::Ok;
     TickType_t next = xTaskGetTickCount();
 
     constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
@@ -61,6 +70,35 @@ void input_task(void* arg) {
         uint8_t mask = 0;
         const hal::Status s = d.pod ? d.pod->read_buttons(mask)
                                     : hal::Status::NotPresent;
+
+        const uint32_t trace_until = g_trace_ms.load(std::memory_order_relaxed);
+        const bool tracing = trace_until && static_cast<int32_t>(trace_until - now) > 0;
+        if (tracing) {
+            ++tr_reads;
+            if (!hal::ok(s)) {
+                ++tr_errors;
+                tr_last_err = s;
+            } else if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod);
+                       pod && pod->last_gpa() != tr_gpa) {
+                tr_gpa = pod->last_gpa();
+                ESP_LOGI("pod", "%u ms: raw %c%c%c%c%c  GPA7..0 %c%c%c%c%c%c%c%c",
+                         static_cast<unsigned>(now),
+                         mask & 1 ? 'A' : '-', mask & 2 ? 'B' : '-', mask & 4 ? 'C' : '-',
+                         mask & 8 ? 'D' : '-', mask & 16 ? 'E' : '-',
+                         tr_gpa & 0x80 ? '1' : '0', tr_gpa & 0x40 ? '1' : '0',
+                         tr_gpa & 0x20 ? '1' : '0', tr_gpa & 0x10 ? '1' : '0',
+                         tr_gpa & 0x08 ? '1' : '0', tr_gpa & 0x04 ? '1' : '0',
+                         tr_gpa & 0x02 ? '1' : '0', tr_gpa & 0x01 ? '1' : '0');
+            }
+            if (static_cast<int32_t>(now - tr_next_ms) >= 0) {
+                if (tr_errors)
+                    ESP_LOGW("pod", "%u reads, %u failed (last: %s)",
+                             static_cast<unsigned>(tr_reads), static_cast<unsigned>(tr_errors),
+                             hal::status_name(tr_last_err));
+                tr_reads = tr_errors = 0;
+                tr_next_ms = now + 1000;
+            }
+        }
 
         // A pod that has just come back (plugged in, powered up between
         // probes) answers with its power-on registers: no input inversion,
@@ -84,7 +122,13 @@ void input_task(void* arg) {
                 core::nav::InputEvent ev[core::input::kButtonCount];
                 const size_t n = decoder.update(mask, now, cfg, ev,
                                                 core::input::kButtonCount);
-                for (size_t i = 0; i < n; ++i) post_input_event(ev[i]);
+                for (size_t i = 0; i < n; ++i) {
+                    post_input_event(ev[i]);
+                    if (tracing)
+                        ESP_LOGI("pod", "%u ms: %s %c", static_cast<unsigned>(now),
+                                 ev[i].press == core::nav::Press::Long ? "long" : "short",
+                                 static_cast<char>('A' + static_cast<int>(ev[i].button)));
+                }
             }
         } else {
             ++consecutive_errors;
@@ -137,6 +181,11 @@ void input_task(void* arg) {
 
 void start_input(Deps& d, CommandQueue&) {
     xTaskCreatePinnedToCore(input_task, "input", 3072, &d, 9, nullptr, 0);
+}
+
+void trace_pod(uint32_t ms) {
+    const uint32_t until = static_cast<uint32_t>(esp_timer_get_time() / 1000) + ms;
+    g_trace_ms.store(until ? until : 1, std::memory_order_relaxed);
 }
 
 }  // namespace services

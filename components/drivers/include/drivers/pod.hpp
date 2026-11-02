@@ -39,6 +39,8 @@ public:
     uint16_t recoveries() const { return recoveries_; }
     uint16_t stuck() const { return stuck_; }
     uint8_t  last_clocks() const { return last_clocks_; }
+    // GPIOA as last read, all eight pins (pressed = 1): the console's pod trace.
+    uint8_t  last_gpa() const { return last_gpa_; }
 
 private:
     hal::Status write_reg(uint8_t reg, uint8_t value);
@@ -49,6 +51,7 @@ private:
     uint16_t recoveries_ = 0;
     uint16_t stuck_ = 0;
     uint8_t  last_clocks_ = 0;
+    uint8_t  last_gpa_ = 0;
 };
 
 }  // namespace drivers

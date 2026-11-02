@@ -54,6 +54,11 @@ void handle(const char* line) {
         ESP_LOGE(kTag, "panic requested over USB");
         abort();
     }
+    if (std::strcmp(line, "pod trace") == 0) {
+        ESP_LOGI(kTag, "tracing the pod for 30 s");
+        services::trace_pod(30000);
+        return;
+    }
     core::nav::Press press;
     if (std::strncmp(line, "btn ", 4) == 0)       press = core::nav::Press::Short;
     else if (std::strncmp(line, "long ", 5) == 0) press = core::nav::Press::Long;

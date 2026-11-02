@@ -84,6 +84,7 @@ hal::Status ButtonPod::read_buttons(uint8_t& pressed_mask) {
     uint8_t v = 0;
     const hal::Status s = read_reg(kGpioA, v);
     if (!hal::ok(s)) return s;
+    last_gpa_ = v;
     pressed_mask = core::input::pod_pins_to_buttons(v);   // bit 0 = A
     return hal::Status::Ok;
 }
