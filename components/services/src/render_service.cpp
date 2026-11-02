@@ -235,6 +235,12 @@ void render_task(void* arg) {
         if (left > 0 && wait_input_event(ev, static_cast<uint32_t>(left))) {
             app.on_input(ev, canvas);
             while (take_input_event(ev)) app.on_input(ev, canvas);
+        } else if (left > 0 &&
+                   static_cast<int32_t>(deadline_ms() - d.clock->now_ms()) > 0) {
+            // Timed out in whole ticks, a fraction of a millisecond short of
+            // the deadline by esp_timer: wait the rest. Counted as a frame,
+            // the same deadline was counted again next pass (DIAG up to 129 Hz).
+            continue;
         } else {
             // The period ran out: one frame. A pass woken early by a button
             // is not one, and a deadline skipped below is one missed, so
