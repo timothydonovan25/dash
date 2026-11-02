@@ -9,6 +9,7 @@ constexpr float kDeg2Rad = 0.017453293f;
 constexpr float kRad2Deg = 57.29578f;
 constexpr float kG = 9.80665f;
 constexpr float kMpsPerMph = 0.44704f;
+constexpr float kFtPerSPerMph = 1.4666667f;
 // A pass further apart than this is a gap, not a step: start the clock and
 // the climb filter over rather than integrate across it.
 constexpr uint32_t kMaxStepMs = 200;
@@ -157,6 +158,7 @@ void Scorer::finalize(const Config& c) {
     o.grade = grade_for(kind_, ms);
     o.landing = landing;
     o.ms = ms;
+    o.ft = ft_;
     o.peak_deg = peak_deg_;
     o.points = pts;
     o.mult_x10 = static_cast<uint8_t>(mult * 10.0f + 0.5f);
@@ -165,6 +167,7 @@ void Scorer::finalize(const Config& c) {
     if (o.tricks < UINT16_MAX) ++o.tricks;
     if (pts > o.best_points) o.best_points = pts;
     if (ms > o.longest_ms) o.longest_ms = ms;
+    if (ft_ > o.longest_ft) o.longest_ft = ft_;
     if (kind_ == Wheelie && peak_deg_ > o.highest_deg) o.highest_deg = peak_deg_;
     if (combo_ > o.best_combo) o.best_combo = combo_;
     o.done_ms = now_ms_ != 0 ? now_ms_ : 1;
@@ -207,6 +210,7 @@ void Scorer::update(const Input& in, const Config& c) {
                 phase_ = Phase::Candidate;
                 start_ms_ = in.t_ms;
                 points_ = 0.0f;
+                ft_ = 0.0f;
                 peak_deg_ = fabsf_(lift_deg_);
                 balance_ = false;
                 below_ = false;
@@ -228,6 +232,7 @@ void Scorer::update(const Input& in, const Config& c) {
                 o.grade = 0;
                 o.landing = Plain;
                 o.ms = in.t_ms - start_ms_;
+                o.ft = ft_;
                 o.peak_deg = signed_lift;
                 o.points = 0;
                 o.mult_x10 = 10;
@@ -264,6 +269,7 @@ void Scorer::update(const Input& in, const Config& c) {
             balance_ = kind_ == Wheelie && signed_lift >= c.balance_lo_deg &&
                        signed_lift <= c.balance_hi_deg;
             points_ += rate(signed_lift, in.mph, balance_, c) * dt;
+            ft_ += in.mph * kFtPerSPerMph * dt;
             if (phase_ == Phase::Candidate && in.t_ms - start_ms_ >= c.confirm_ms) {
                 phase_ = Phase::Active;
             }
@@ -283,6 +289,7 @@ state::Stunt Scorer::publish() const {
     const bool live = phase_ == Phase::Active;
     o.live_kind = live ? kind_ : static_cast<uint8_t>(None);
     o.live_ms = live ? live_ms_ : 0;
+    o.live_ft = live ? ft_ : 0.0f;
     o.live_deg = lift_deg_;
     o.live_points = live ? points_ : 0.0f;
     o.live_balance = live && balance_;

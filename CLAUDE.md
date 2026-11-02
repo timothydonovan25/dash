@@ -502,6 +502,8 @@ the media half of step 9 is written. 52 host tests, all passing.
   Points run up with angle and speed, 1.5x in the 30-50° balance band;
   landings are smooth (+20 %) or slammed (-30 %) by vertical g; tricks
   within 4 s chain into a combo, +0.5x each to 4x; grades POP … LEGENDARY.
+  A trick's length is its time up and the road it covered up (`ft`,
+  integrated from the fused speed), on STUNT, the toast and `_evt`.
   Every threshold is a guess that has never seen a real wheelie. Session
   only, nothing saved. STAT → STUNT (E: new session) and the toast
 - `hr/` (1.48) heart rate from the rider's watch over the standard Heart

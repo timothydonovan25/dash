@@ -100,6 +100,9 @@ int main() {
         CHECK(std::strcmp(st::grade_name(o.kind, o.grade), "NICE ONE") == 0);
         CHECK_NEAR(o.peak_deg, 30.0, 0.5);
         CHECK(o.points > 300);
+        // And by road distance: 20 mph is 29.3 ft/s, over the same time up.
+        CHECK_NEAR(o.ft, o.ms / 1000.0 * 20.0 * 1.46667, 1.5);
+        CHECK(o.longest_ft == o.ft);
         CHECK(o.total == o.points);
         CHECK(o.tricks == 1);
         CHECK(o.record);
@@ -287,6 +290,7 @@ int main() {
         const auto live = r.out();
         CHECK(live.live_kind == st::Wheelie);
         CHECK(live.live_ms > 1000);
+        CHECK_NEAR(live.live_ft, live.live_ms / 1000.0 * 20.0 * 1.46667, 1.5);
         CHECK(live.live_points > 0.0f);
         CHECK_NEAR(live.live_deg, 30.0, 0.5);
         CHECK(live.live_balance);

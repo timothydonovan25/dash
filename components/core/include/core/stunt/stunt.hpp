@@ -17,6 +17,9 @@
 // stoppie; it ends when the lift comes back under `end_deg`. Airborne is a
 // jump (core::jump), not a trick, and below `min_mph` is not riding.
 //
+// Length is both time and road distance up, the distance integrated from
+// the fused speed over the same passes that score points.
+//
 // Scoring. Points run up while the trick lasts, faster the higher it is,
 // faster still at speed, and half again in the balance-point band. A trick
 // shorter than `min_scored_ms` is a twitch, not a trick, and scores nothing.
@@ -120,6 +123,7 @@ private:
     uint32_t below_since_ = 0;
     bool     below_ = false;
     float    points_ = 0.0f;
+    float    ft_ = 0.0f;           // road distance while up, from fused speed
     float    peak_deg_ = 0.0f;
     bool     balance_ = false;
     uint32_t live_ms_ = 0;

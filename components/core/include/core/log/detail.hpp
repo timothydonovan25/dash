@@ -259,6 +259,7 @@ struct EventRow {
     int32_t  i = 0;
     float    x = 0.0f;
     float    y = 0.0f;
+    float    z = 0.0f;
 };
 
 EventRow command_event(uint32_t t_ms, const state::Command& c);
@@ -294,6 +295,7 @@ struct Watched {
     uint8_t  stunt_kind = 0, stunt_grade = 0;
     uint32_t stunt_ms = 0;
     float    stunt_peak_deg = 0.0f;
+    float    stunt_ft = 0.0f;
     uint32_t stunt_points = 0;
     uint16_t perf_seq = 0;
     uint8_t  perf_event = 0;

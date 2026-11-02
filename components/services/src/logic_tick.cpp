@@ -292,6 +292,7 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
         w.stunt_grade = st.grade;
         w.stunt_ms = st.ms;
         w.stunt_peak_deg = st.peak_deg;
+        w.stunt_ft = st.ft;
         w.stunt_points = st.points;
         w.perf_seq = pf.seq;
         w.perf_event = pf.event;

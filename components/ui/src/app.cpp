@@ -475,7 +475,8 @@ void App::update_toast(const core::state::Frame& f) {
                           static_cast<unsigned>(s.points));
             fmt_secs(a, sizeof a, s.ms, 1);
             const char* land = st::landing_name(s.landing);
-            int k = std::snprintf(small, sizeof small, "%ss %d deg", a,
+            core::units::fmt_float(b, sizeof b, metric ? s.ft * 0.3048f : s.ft, 0);
+            int k = std::snprintf(small, sizeof small, "%ss %s%s %d deg", a, b, metric ? "m" : "ft",
                                   static_cast<int>(s.peak_deg + 0.5f));
             if (land[0] && k < static_cast<int>(sizeof small)) {
                 k += std::snprintf(small + k, sizeof small - k, "  %s", land);
@@ -547,7 +548,8 @@ void App::update_toast(const core::state::Frame& f) {
         const core::state::Stunt& s = f.stunt;
         fmt_secs(a, sizeof a, s.live_ms, 1);
         std::snprintf(big, sizeof big, "%s %ss", s.live_kind == st::Stoppie ? "STOPPIE" : "WHEELIE", a);
-        int k = std::snprintf(small, sizeof small, "%d deg  +%u",
+        core::units::fmt_float(b, sizeof b, metric ? s.live_ft * 0.3048f : s.live_ft, 0);
+        int k = std::snprintf(small, sizeof small, "%s%s  %d deg  +%u", b, metric ? "m" : "ft",
                               static_cast<int>((s.live_kind == st::Stoppie ? -s.live_deg : s.live_deg) + 0.5f),
                               static_cast<unsigned>(s.live_points * s.combo_x10 / 10.0f));
         if (s.combo_x10 > 10 && k < static_cast<int>(sizeof small)) {

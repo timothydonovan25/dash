@@ -229,6 +229,7 @@ struct Stunt {
     // The trick under way: 0 none, 1 wheelie, 2 stoppie.
     uint8_t  live_kind   = 0;
     uint32_t live_ms     = 0;
+    float    live_ft     = 0.0f;   // ground covered since it went up
     float    live_deg    = 0.0f;   // now, + nose up
     float    live_points = 0.0f;   // before the combo multiplier
     bool     live_balance = false; // in the balance-point band right now
@@ -242,6 +243,7 @@ struct Stunt {
     uint8_t  grade       = 0;      // core::stunt::grade_name()
     uint8_t  landing     = 0;      // 0 plain, 1 smooth, 2 slammed
     uint32_t ms          = 0;
+    float    ft          = 0.0f;   // ground covered while it was up
     float    peak_deg    = 0.0f;
     uint32_t points      = 0;      // with the multiplier
     uint8_t  mult_x10    = 10;
@@ -254,6 +256,7 @@ struct Stunt {
     uint16_t tricks      = 0;
     uint32_t best_points = 0;
     uint32_t longest_ms  = 0;
+    float    longest_ft  = 0.0f;   // by distance; may be another trick than longest_ms
     float    highest_deg = 0.0f;
     uint8_t  best_combo  = 0;
 };

@@ -553,6 +553,7 @@ size_t format_event(char* buf, size_t n, const EventRow& e) {
             o.kv("ms"); o.i(e.i);
             o.kv("peak_deg"); o.f(e.x, 1);
             o.kv("points"); o.f(e.y, 0);
+            o.kv("ft"); o.f(e.z, 0);
             break;
         case Ev::Perf:
             o.kv("run"); o.s(perf_name(e.a));
@@ -693,6 +694,7 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
             e->i = static_cast<int32_t>(w.stunt_ms);
             e->x = w.stunt_peak_deg;
             e->y = static_cast<float>(w.stunt_points);
+            e->z = w.stunt_ft;
         }
     }
     if (w.perf_seq != p.perf_seq) {

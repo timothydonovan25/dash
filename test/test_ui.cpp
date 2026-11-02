@@ -258,6 +258,7 @@ Frame busy_frame() {
     f.stunt.kind = 1;
     f.stunt.grade = 2;
     f.stunt.ms = 4120;
+    f.stunt.ft = 121.0f;
     f.stunt.peak_deg = 38.0f;
     f.stunt.points = 1210;
     f.stunt.mult_x10 = 15;
@@ -265,6 +266,7 @@ Frame busy_frame() {
     f.stunt.tricks = 4;
     f.stunt.best_points = 1210;
     f.stunt.longest_ms = 4120;
+    f.stunt.longest_ft = 121.0f;
     f.stunt.highest_deg = 41.0f;
     f.stunt.best_combo = 2;
     f.stunt.live_deg = 2.0f;

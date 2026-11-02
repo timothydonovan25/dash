@@ -23,6 +23,12 @@ void fmt_s(char* buf, size_t n, uint32_t ms, int places) {
     const size_t k = u::fmt_float(buf, n, ms / 1000.0f, places);
     if (k + 1 < n) { buf[k] = 's'; buf[k + 1] = '\0'; }
 }
+
+// A trick's road distance, "120ft" or "37m".
+void fmt_dist(char* buf, size_t n, float ft, bool metric) {
+    const size_t k = u::fmt_float(buf, n, metric ? ft * 0.3048f : ft, 0);
+    std::snprintf(buf + k, n - k, "%s", metric ? "m" : "ft");
+}
 }  // namespace
 
 const char* perf_metric_name(uint8_t m, bool metric) {
@@ -189,14 +195,16 @@ void StuntScreen::enter(Canvas&) {
 void StuntScreen::update(const Frame& f) {
     namespace st = core::stunt;
     const core::state::Stunt& s = f.stunt;
-    char buf[48], t[12];
+    const bool metric = metric_units(units());
+    char buf[48], t[12], d[12];
 
     if (s.live_kind != st::None) {
         head_.configure(s.live_kind == st::Stoppie ? "STOPPIE" : "WHEELIE",
                         s.live_balance ? color::kWarn : color::kAccent, 3, Align::Left);
         fmt_s(t, sizeof t, s.live_ms, 1);
         time_.configure(t, theme::primary, 6, Align::Left);
-        std::snprintf(buf, sizeof buf, "%d deg  +%u%s",
+        fmt_dist(d, sizeof d, s.live_ft, metric);
+        std::snprintf(buf, sizeof buf, "%s  %d deg  +%u%s", d,
                       static_cast<int>((s.live_kind == st::Stoppie ? -s.live_deg : s.live_deg) + 0.5f),
                       static_cast<unsigned>(s.live_points * s.combo_x10 / 10.0f),
                       s.live_balance ? "  BALANCE POINT" : "");
@@ -208,7 +216,8 @@ void StuntScreen::update(const Frame& f) {
         std::snprintf(buf, sizeof buf, "+%u", static_cast<unsigned>(s.points));
         time_.configure(buf, theme::primary, 6, Align::Left);
         fmt_s(t, sizeof t, s.ms, 1);
-        std::snprintf(buf, sizeof buf, "%s  %d deg  x%u.%u%s", t, static_cast<int>(s.peak_deg + 0.5f),
+        fmt_dist(d, sizeof d, s.ft, metric);
+        std::snprintf(buf, sizeof buf, "%s %s  %d deg  x%u.%u%s", t, d, static_cast<int>(s.peak_deg + 0.5f),
                       s.mult_x10 / 10u, s.mult_x10 % 10u, s.record ? "  RECORD" : "");
         detail_.configure(buf, theme::secondary, 2, Align::Left);
     } else {
@@ -241,7 +250,9 @@ void StuntScreen::update(const Frame& f) {
     std::snprintf(buf, sizeof buf, "%u", static_cast<unsigned>(s.best_combo));
     tile(2, s.best_combo ? buf : "--", s.best_combo > 0);
     fmt_s(t, sizeof t, s.longest_ms, 1);
-    tile(3, s.longest_ms ? t : "--", s.longest_ms > 0);
+    fmt_dist(d, sizeof d, s.longest_ft, metric);
+    std::snprintf(buf, sizeof buf, "%s %s", t, d);
+    tile(3, s.longest_ms ? buf : "--", s.longest_ms > 0);
     std::snprintf(buf, sizeof buf, "%d deg", static_cast<int>(s.highest_deg + 0.5f));
     tile(4, s.highest_deg > 0.0f ? buf : "--", s.highest_deg > 0.0f);
     const char* land = s.seq ? st::landing_name(s.landing) : "";
