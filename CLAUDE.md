@@ -509,7 +509,7 @@ the media half of step 9 is written. 52 host tests, all passing.
 - `hr/` (1.48) heart rate from the rider's watch over the standard Heart
   Rate Service, as a Garmin sends it with Broadcast Heart Rate on: the
   0x2A37 parser, the advert parser, `Picker` (the strongest advertiser above
-  -85 dBm once a scan has heard them all, then only that one, by address or
+  -95 dBm once a scan has heard them all, then only that one, by address or
   name, for the power-on; turning the setting off and on forgets it),
   `Session` (average, highest, lowest) and zones by percent of CONFIG's Max
   HR. `ble` is the central (DIAG → Radio shows the link); CONFIG → Heart

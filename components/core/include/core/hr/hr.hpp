@@ -29,8 +29,9 @@ inline constexpr uint16_t kCccdUuid = 0x2902;
 inline constexpr uint32_t kScanMs = 3000;
 inline constexpr uint32_t kRescanMs = 5000;
 // Below this a sensor is someone else's. A wrist at arm's length reads
-// about -50 to -70 dBm, through a jacket sleeve worse.
-inline constexpr int8_t kRssiFloorDbm = -85;
+// about -50 to -70 dBm, through a jacket sleeve worse. -95, not -85: the
+// first board's C6 hears the watch near -90 until its antenna is fitted.
+inline constexpr int8_t kRssiFloorDbm = -95;
 // A reading older than this is not shown or logged. A watch sends about one
 // a second.
 inline constexpr uint32_t kStaleMs = 5000;

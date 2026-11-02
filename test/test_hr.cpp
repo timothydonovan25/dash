@@ -127,7 +127,7 @@ int main() {
         p.begin_scan();
         p.heard(addr(1), -78, "Strap");
         p.heard(addr(2), -55, "D2 Air X10");
-        p.heard(addr(3), -95, "Close but no");     // under the floor
+        p.heard(addr(3), -100, "Close but no");     // under the floor
         Addr out;
         CHECK(p.choice(out));
         CHECK(same(out, addr(2)));
@@ -137,7 +137,7 @@ int main() {
     {
         Picker p;
         p.begin_scan();
-        p.heard(addr(3), -95, "Far");
+        p.heard(addr(3), -100, "Far");
         Addr out;
         CHECK(!p.choice(out));
     }
@@ -153,7 +153,7 @@ int main() {
 
         p.begin_scan();
         p.heard(addr(1), -40, "Strap");            // stronger, someone else's
-        p.heard(addr(2), -92, "D2 Air X10");       // below the floor, still ours
+        p.heard(addr(2), -100, "D2 Air X10");       // below the floor, still ours
         Addr out;
         CHECK(p.choice(out));
         CHECK(same(out, addr(2)));

@@ -957,7 +957,7 @@ The dash needs these BLE roles at once:
 - **Observer** — passive scan for TPMS advertisements.
 - **Central and GATT client** (1.48) — the rider's watch. With CONFIG →
   Heart rate → Watch HR on, `ble` scans for the standard Heart Rate Service
-  (0x180D), connects to the strongest advertiser above -85 dBm (then only
+  (0x180D), connects to the strongest advertiser above -95 dBm (then only
   to that one, by address or name, for the power-on), and subscribes to
   Heart Rate Measurement (0x2A37). A Garmin does this with Broadcast Heart
   Rate on. `core/hr` is the decision side and is host-tested. The watch is
