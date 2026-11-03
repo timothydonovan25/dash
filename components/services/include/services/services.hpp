@@ -67,9 +67,11 @@ struct Deps {
     hal::IEngine*      engine  = nullptr;      // NullEngine today
     hal::IStorage*     storage = nullptr;
     hal::ICard*        card    = nullptr;
-    // A build that runs a game off the card (the demo board's Doom): the
-    // Wi-Fi page then lists, uploads and deletes .wad files in games/.
+    // A build that runs a game off the card (DIAG -> Doom): the Wi-Fi page
+    // then lists, uploads and deletes .wad files in games/.
     bool               games   = false;
+    // DIAG -> Doom's menu row (doom::Program), or null for none.
+    ui::IProgram*      program = nullptr;
     hal::IRailSense*   rails   = nullptr;
 
     core::state::Slots*     slots    = nullptr;
@@ -146,6 +148,10 @@ struct Deps {
     // the LED driver, so a core-1 write can never hold I2C1 while the lamps
     // are waiting for it.
     std::atomic<uint8_t> backlight_pct{20};
+
+    // The pod's buttons as held right now, bit 0 = A, before debounce: for
+    // Doom, which wants held state, not presses. `input` is the one writer.
+    std::atomic<uint8_t> buttons_held{0};
 
     // The `logic` task, once it is running; TaskHandle_t. See wake_logic.
     std::atomic<void*> logic_task{nullptr};
@@ -247,6 +253,11 @@ bool take_input_event(core::nav::InputEvent& out);
 // Console `pod trace`: for this long `input` logs every raw pod change,
 // every decoded press and, once a second, its reads and failed reads.
 void trace_pod(uint32_t ms);
+// Console `hold <mask>`: buttons held on the laptop (tools/pod_keys.py),
+// bit 0 = A. `input` ORs them into the pod's before debounce, so they are
+// decoded, and reach Doom, exactly as the pod's would. A mask not repeated
+// within a second is let go: a laptop unplugged mid-hold does not stick.
+void set_console_buttons(uint8_t mask);
 
 // Blocks until a button event arrives or `timeout_ms` passes. This is what
 // the render task waits on instead of a plain periodic delay: a press wakes

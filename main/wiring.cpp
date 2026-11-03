@@ -9,6 +9,7 @@
 // externs; the replacement is not "no state", it is "all the state in one
 // function, handed out by reference".
 #include "wiring.hpp"
+#include "doom_board.hpp"
 #include "services/settings_store.hpp"
 
 #include "bsp/buses.hpp"
@@ -62,6 +63,10 @@ hal::NullEngine      g_engine;   // the ECU is unreachable on this board (§10.1
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
+// DIAG -> Doom, parked only. Core 1 at priority 1, under every task there:
+// Doom's renderer takes all the CPU it is given.
+DoomBoard              g_doom_board(g_deps);
+doom::Program          g_doom(g_card, g_doom_board, 1, 1);
 drivers::Ili9488*      g_panel = nullptr;   // built in build(), probed in finish_panel()
 
 // Bring one device up and record what happened. Nothing here fails the boot:
@@ -155,6 +160,8 @@ services::Deps& build() {
     g_deps.lap_history= &g_lap_history;
     g_deps.tracks     = &g_tracks;
     g_deps.commands   = &g_commands;
+    g_deps.games      = true;
+    g_deps.program    = &g_doom;
 
     // States are derived on a tick, which is keeper's job once it runs;
     // until start_keeper() this boot thread is the only one ticking.

@@ -2161,6 +2161,7 @@ int main() {
             const char* name() const override { return "Doom"; }
             const char* state() const override { return "ready"; }
             bool launch() override { ++launches; return runnable; }
+            bool active() const override { return false; }
         } prog;
         // Without one: eight rows, C from the top wraps to Update.
         {

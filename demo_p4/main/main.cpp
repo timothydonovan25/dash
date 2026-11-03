@@ -76,7 +76,10 @@ hal::NullEngine   g_engine;
 drivers::NvsStorage g_storage;   // the real driver: settings and BLE bonds   // no ECU here, same as the real board (§10.1)
 drivers::SdCard     g_card;      // the bike's driver, over this board's SDMMC slot
 demo::RawButtons    g_raw_buttons;   // touch task -> Doom
-demo::DoomProgram   g_doom(g_card, g_panel, g_raw_buttons);   // DIAG -> Doom
+demo::DoomBoard     g_doom_board(g_panel, g_raw_buttons);
+// DIAG -> Doom, on core 0 at render's priority: this board has nothing
+// there with a deadline.
+doom::Program       g_doom(g_card, g_doom_board, 0, 6);
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
@@ -186,6 +189,7 @@ extern "C" void app_main(void) {
     // from the card. Present or not: every user asks present() first.
     g_deps.card     = &g_card;
     g_deps.games    = true;
+    g_deps.program  = &g_doom;
     g_deps.system   = &g_system;
     g_deps.lap_history = &g_lap_history;
     g_deps.delta       = &g_delta;
@@ -204,7 +208,7 @@ extern "C" void app_main(void) {
     // (about 160 ms of them). demo_render ticks the health table, so what
     // they report below still reaches the screen.
     demo::start_ctrl_probe(g_deps);
-    demo::start_demo_render(g_deps, g_commands, g_state_request, &g_doom);
+    demo::start_demo_render(g_deps, g_commands, g_state_request);
 
     // The microSD slot. After ESP-Hosted's constructor, which owns the SDMMC
     // controller this adds a slot to (sdcard_sdmmc.cpp). Once, at boot:

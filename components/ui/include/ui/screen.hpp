@@ -79,18 +79,20 @@ struct SystemInfo {
 
 // A program DIAG's menu can start that is not a screen: it takes the panel
 // over from the render task, so nothing about it is drawn from a Frame. Only
-// a build that has one sets Context::program (the demo board's Doom); the
-// bike's menu is the eight pages and nothing else.
+// a build that has one sets Context::program (Doom, doom/doom.hpp).
 class IProgram {
 public:
     virtual ~IProgram() = default;
     // The menu row's label, and its one-word reading ("ready", "no WAD").
     virtual const char* name() const = 0;
     virtual const char* state() const = 0;
-    // Asked from render's on_input. The render task looks for the request
-    // after it and hands the panel over; false if it cannot start (nothing
-    // to run), and the menu stays as it was.
+    // Asked from render's on_input, between frames: the program has the
+    // panel from here. False if it cannot start (nothing to run, not
+    // parked), and the menu stays as it was.
     virtual bool launch() = 0;
+    // While true the panel is the program's: render draws nothing and drops
+    // presses. When it turns false the glass is unknown and render repaints.
+    virtual bool active() const = 0;
 };
 
 struct Context {

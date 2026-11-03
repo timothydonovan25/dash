@@ -9,17 +9,15 @@
 #pragma once
 #include "services/services.hpp"
 #include "state_request.hpp"
-#include "doom_program.hpp"
 
 namespace demo {
 
 // Starts the render task pinned to core 0 — this board has one thing to
 // do. Reuses ui::App and core::nav::InputEvent exactly as the real render
 // task does; runs until the demo is powered off. Answers `state` requests
-// from the serial console through `req`. DIAG -> Doom is `doom` (null for
-// none): once it is asked for, this task stops drawing, hands the panel to
-// it and ends.
+// from the serial console through `req`. While DIAG -> Doom
+// (Deps::program) has the panel, it draws nothing.
 void start_demo_render(services::Deps& d, services::CommandQueue& q,
-                       StateRequest& req, DoomProgram* doom);
+                       StateRequest& req);
 
 }  // namespace demo

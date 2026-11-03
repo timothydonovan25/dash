@@ -44,7 +44,6 @@ struct RenderArg {
     services::Deps*         deps;
     services::CommandQueue* commands;
     StateRequest*           state_req;
-    DoomProgram*            doom;
 };
 
 // The answer to `state`, as key=value so a script can parse it. Screen and
@@ -74,7 +73,10 @@ void render_task_impl(void* arg) {
     ctx.settings = d.settings;
     ctx.commands = &q;
     ctx.system = d.system;
-    ctx.program = ra->doom;
+    ctx.program = d.program;
+    // While DIAG -> Doom has the panel, presses are its and nothing is drawn.
+    auto program_active = [&] { return ctx.program && ctx.program->active(); };
+    bool program_had_panel = false;
 
     ui::App app(ctx);
     app.bind_settings(d.settings);
@@ -144,18 +146,22 @@ void render_task_impl(void* arg) {
             // A screen change lays the new screen out against the canvas, so
             // give it the whole one, not the last damaged rectangle.
             canvas.set_window(0, 0, ui::kScreenW, ui::kScreenH);
-            app.on_input(ev, canvas);
-            while (services::take_input_event(ev)) app.on_input(ev, canvas);
+            if (!program_active()) app.on_input(ev, canvas);
+            while (services::take_input_event(ev)) {
+                if (!program_active()) app.on_input(ev, canvas);
+            }
         }
 
-        // DIAG -> Doom: the panel is Doom's from here until a reset. Nothing
-        // is drawn after this, so nothing of the dash's is left mid-write.
-        if (ra->doom && ra->doom->requested()) {
-            ESP_LOGI("render", "handing the panel to Doom");
-            heap_caps_free(glass);
-            heap_caps_free(buf);
-            ra->doom->start();
-            vTaskDelete(nullptr);
+        // DIAG -> Doom has the panel: nothing is drawn until it gives it
+        // back, and then the glass is Doom's last picture, so all of it goes.
+        if (program_active()) {
+            program_had_panel = true;
+            continue;
+        }
+        if (program_had_panel) {
+            program_had_panel = false;
+            app.invalidate();
+            shadow.invalidate();
         }
 
         if (d.lap_history) {
@@ -300,8 +306,8 @@ RenderArg g_render_arg;
 }  // namespace
 
 void start_demo_render(services::Deps& d, services::CommandQueue& q,
-                       StateRequest& req, DoomProgram* doom) {
-    g_render_arg = {&d, &q, &req, doom};
+                       StateRequest& req) {
+    g_render_arg = {&d, &q, &req};
     // ui::App lives on this task's stack, so the stack is sized from it, as
     // the real render task's is. A fixed 16384 overflowed in 1.16, when the
     // App still held every screen and grew from 11.4 to 13.2 kB; it holds

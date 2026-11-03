@@ -40,6 +40,10 @@ SLOTS = ("ota_0", "ota_1")
 def slot_offsets():
     """ota_0 and ota_1's offsets, from partitions.csv (both boards share it),
     so a moved table cannot leave this reading the wrong place."""
+    return tuple(partition_offset(s) for s in SLOTS)
+
+
+def partition_offset(name):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "partitions.csv")
     found = {}
     with open(path) as f:
@@ -48,11 +52,9 @@ def slot_offsets():
             if not line:
                 continue
             cols = [c.strip() for c in line.split(",")]
-            if len(cols) >= 4 and cols[0] in SLOTS:
-                found[cols[0]] = int(cols[3], 0)
-    if set(found) != set(SLOTS):
-        sys.exit(f"{path}: no offsets for {', '.join(sorted(set(SLOTS) - set(found)))}")
-    return tuple(found[s] for s in SLOTS)
+            if len(cols) >= 4 and cols[0] == name:
+                return int(cols[3], 0)
+    sys.exit(f"{path}: no offset for {name}")
 
 def table_offset():
     """Where the partition table is, from sdkconfig.defaults (both boards
@@ -151,25 +153,56 @@ def stable_slot(otadata):
     return best[1] if best else 0
 
 
+def boot_once_entry(otadata, dev):
+    """What esp_ota_set_boot_partition() writes with rollback on, as
+    (sector, 4 kB): an entry for `dev` in state new, a sequence number past
+    every valid one, in the copy that does not hold the newest. The next
+    boot marks it pending and runs dev; the one after falls back to stable."""
+    best_seq, best_i = 0, 1
+    for i in range(2):
+        e = otadata[i * OTADATA_SECTOR:i * OTADATA_SECTOR + 32]
+        seq, crc = struct.unpack_from("<I", e, 0)[0], struct.unpack_from("<I", e, CRC_OFFSET)[0]
+        if seq != 0xFFFFFFFF and crc == binascii.crc32(struct.pack("<I", seq), 0xFFFFFFFF) \
+                and seq > best_seq:
+            best_seq, best_i = seq, i
+    seq = best_seq + 1
+    if (seq - 1) % len(SLOTS) != dev:
+        seq += 1
+    entry = struct.pack("<I", seq) + b"\xff" * 20 + struct.pack("<I", 0) + \
+        struct.pack("<I", binascii.crc32(struct.pack("<I", seq), 0xFFFFFFFF))
+    return 1 - best_i, entry + b"\xff" * (OTADATA_SECTOR - len(entry))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("-p", "--port", default="/dev/ttyACM0")
     ap.add_argument("image", nargs="?", default="build/dash.bin")
     ap.add_argument("--any-board", action="store_true",
                     help="write the image even if it is for the other board")
+    ap.add_argument("--boot", action="store_true",
+                    help="then boot dev once, as DIAG -> Update -> Boot dev once does")
     args = ap.parse_args()
 
     version = check_image(args.image)
     print(f"{args.image}: dash {version}")
     print("reading otadata from the dash")
-    stable = stable_slot(read_otadata(args.port))
+    otadata = read_otadata(args.port)
+    stable = stable_slot(otadata)
     dev = 1 - stable
     running = read_slot_version(args.port, stable)
     print(f"stable {SLOTS[stable]}: {running or 'no dash image'}")
     if running and board_of(running) != board_of(version) and not args.any_board:
         sys.exit(f"refusing: this is a {board_of(version)} image and the dash runs "
                  f"{board_of(running)} firmware (--any-board to write it anyway)")
-    print(f"stable is {SLOTS[stable]}; writing {SLOTS[dev]}, otadata untouched")
+    print(f"stable is {SLOTS[stable]}; writing {SLOTS[dev]}"
+          + (", and booting it once" if args.boot else ", otadata untouched"))
+    extra = []
+    if args.boot:
+        sector, data = boot_once_entry(otadata, dev)
+        tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        tmp.write(data)
+        tmp.close()
+        extra = [hex(partition_offset("otadata") + sector * OTADATA_SECTOR), tmp.name]
     # One esptool session, at the slot's offset from partitions.csv. Not
     # parttool's write_partition: that is three esptool runs (read the table,
     # erase, write), each ending in a reset, and the next one found the port
@@ -179,9 +212,13 @@ def main():
     # unplugged; the RTC watchdog reset is deeper.
     subprocess.run([sys.executable, "-m", "esptool", "--chip", "esp32p4", "--port", args.port,
                     "-b", "460800", "--before", "default-reset", "--after", "watchdog-reset",
-                    "write-flash", hex(slot_offsets()[dev]), args.image], check=True)
-    print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
-          "DIAG -> Update -> Boot dev once to run it.")
+                    "write-flash", hex(slot_offsets()[dev]), args.image, *extra], check=True)
+    if args.boot:
+        print(f"done: {SLOTS[dev]} holds {version} and is running; the next reset "
+              "goes back to stable.")
+    else:
+        print(f"done: {SLOTS[dev]} holds {version}. The dash still boots stable; "
+              "DIAG -> Update -> Boot dev once (or --boot) to run it.")
 
 
 if __name__ == "__main__":

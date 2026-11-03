@@ -1,6 +1,6 @@
 idf_component_register(
-    SRCS "main.cpp" "wiring.cpp" "serial_buttons.cpp"
-    REQUIRES bsp core dash_hal ui drivers services p4_restart_fix
+    SRCS "main.cpp" "wiring.cpp" "serial_buttons.cpp" "doom_board.cpp"
+    REQUIRES bsp core dash_hal ui drivers services doom p4_restart_fix
              esp_driver_usb_serial_jtag freertos)
 
 # The C6's ESP-Hosted firmware, written into the `slave_fw` partition by

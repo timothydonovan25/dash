@@ -1,6 +1,8 @@
 // The five buttons over the USB serial port, as on the demo
 // (demo_p4/main/serial_buttons.cpp): one line per press, `btn A`..`btn E`
-// short, `long A`..`long E` long. For the bench while the pod is not fitted;
+// short, `long A`..`long E` long; or, from a terminal that reports key
+// releases, `hold <mask>`, the buttons held, which `input` debounces and
+// decodes like the pod's and which can play Doom. For the bench while the pod is not fitted;
 // tools/pod_keys.py turns laptop keys into these lines. Presses go into the
 // queue the pod feeds, after debounce, so nothing downstream can tell them
 // apart. With no laptop on USB the task just waits.
@@ -57,6 +59,14 @@ void handle(const char* line) {
     if (std::strcmp(line, "pod trace") == 0) {
         ESP_LOGI(kTag, "tracing the pod for 30 s");
         services::trace_pod(30000);
+        return;
+    }
+    // `hold <0-31>`: the buttons held on the laptop, bit 0 = A, sent on
+    // every change and repeated while any is down (pod_keys.py on a
+    // terminal that reports key releases). Decoded as the pod's are.
+    if (std::strncmp(line, "hold ", 5) == 0) {
+        const long m = std::strtol(line + 5, nullptr, 10);
+        if (m >= 0 && m < 32) services::set_console_buttons(static_cast<uint8_t>(m));
         return;
     }
     core::nav::Press press;

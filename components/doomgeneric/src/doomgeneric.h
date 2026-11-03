@@ -42,6 +42,12 @@ uint32_t DG_GetTicksMs();
 int DG_GetKey(int* pressed, unsigned char* key);
 void DG_SetWindowTitle(const char * title);
 
+// dash: Quit Game (I_Quit) pauses here until DIAG -> Doom resumes it; and
+// every exit() in Doom is DG_Exit (dg_dash.h), which gives the panel back
+// and never returns.
+void DG_Quit(void);
+void DG_Exit(int status) __attribute__((noreturn));
+
 #ifdef __cplusplus
 }
 #endif

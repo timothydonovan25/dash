@@ -247,6 +247,13 @@ void I_Quit (void)
 {
     atexit_listentry_t *entry;
 
+    // dash: Quit Game hands the panel back and Doom waits, paused, for
+    // DIAG -> Doom to resume it. Its exit functions would tear down what a
+    // resume needs, so only the one that keeps the options runs.
+    M_SaveDefaults();
+    DG_Quit();
+    return;
+
     // Run through all exit functions
  
     entry = exit_funcs; 

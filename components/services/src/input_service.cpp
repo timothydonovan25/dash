@@ -25,6 +25,17 @@ namespace {
 
 // Written by the console task, read here; until when to trace (0 = off).
 std::atomic<uint32_t> g_trace_ms{0};
+// Written by the console task, read here: `hold`'s mask and when it came.
+std::atomic<uint8_t>  g_console_mask{0};
+std::atomic<uint32_t> g_console_ms{0};
+constexpr uint32_t kConsoleHoldMs = 1000;
+
+uint32_t clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+uint8_t console_buttons(uint32_t now) {
+    const uint8_t m = g_console_mask.load(std::memory_order_relaxed);
+    return m && now - g_console_ms.load(std::memory_order_relaxed) < kConsoleHoldMs ? m : 0;
+}
 
 constexpr uint32_t kRefreshEveryMs = 5000;
 // A run of failed reads this long, in time rather than in reads, before the
@@ -54,12 +65,32 @@ void input_task(void* arg) {
     hal::Status tr_last_err = hal::Status::Ok;
     TickType_t next = xTaskGetTickCount();
 
+    // One pass of buttons, the pod's and the console's together: decoded,
+    // posted, and held state for Doom.
+    auto feed = [&](uint8_t held, uint32_t now, bool tracing) {
+        d.buttons_held.store(held, std::memory_order_relaxed);
+        core::nav::InputEvent ev[core::input::kButtonCount];
+        const size_t n = decoder.update(held, now, cfg, ev, core::input::kButtonCount);
+        for (size_t i = 0; i < n; ++i) {
+            post_input_event(ev[i]);
+            if (tracing)
+                ESP_LOGI("pod", "%u ms: %s %c", static_cast<unsigned>(now),
+                         ev[i].press == core::nav::Press::Long ? "long" : "short",
+                         static_cast<char>('A' + static_cast<int>(ev[i].button)));
+        }
+    };
+
     constexpr TickType_t kPeriod = pdMS_TO_TICKS(1000 / bsp::kPodPollHz);
     for (;;) {
         const uint32_t now = d.clock->now_ms();
+        // esp_timer's clock, the one set_console_buttons stamps with.
+        const uint8_t console = console_buttons(clock_ms());
 
         if (failed_recoveries >= kRecoveriesBeforeProbing) {
             if (static_cast<int32_t>(now - next_probe) < 0) {
+                // No pod to read this pass, but the console's buttons
+                // still go at the full rate.
+                feed(console, now, false);
                 vTaskDelayUntil(&next, kPeriod);
                 if (xTaskGetTickCount() - next > kPeriod) next = xTaskGetTickCount();
                 continue;
@@ -118,25 +149,21 @@ void input_task(void* arg) {
             consecutive_errors = 0;
             failed_recoveries = 0;
             d.health->report_ok(core::state::Dev::McpPod, now);
-            if (!fresh) {
-                core::nav::InputEvent ev[core::input::kButtonCount];
-                const size_t n = decoder.update(mask, now, cfg, ev,
-                                                core::input::kButtonCount);
-                for (size_t i = 0; i < n; ++i) {
-                    post_input_event(ev[i]);
-                    if (tracing)
-                        ESP_LOGI("pod", "%u ms: %s %c", static_cast<unsigned>(now),
-                                 ev[i].press == core::nav::Press::Long ? "long" : "short",
-                                 static_cast<char>('A' + static_cast<int>(ev[i].button)));
-                }
-            }
+            // A pod's first read after coming back is its power-on
+            // registers, not buttons: the console's alone this once.
+            feed(fresh ? console : static_cast<uint8_t>(mask | console), now, tracing);
         } else {
             ++consecutive_errors;
             d.health->report_error(core::state::Dev::McpPod,
                                    static_cast<int32_t>(s), now);
             // A button stuck down while the cable is unplugged would repeat
-            // forever otherwise.
-            decoder.reset();
+            // forever otherwise. The console's go on without the pod.
+            if (console) {
+                feed(console, now, tracing);
+            } else {
+                decoder.reset();
+                d.buttons_held.store(0, std::memory_order_relaxed);
+            }
         }
 
         if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) {
@@ -181,6 +208,11 @@ void input_task(void* arg) {
 
 void start_input(Deps& d, CommandQueue&) {
     xTaskCreatePinnedToCore(input_task, "input", 3072, &d, 9, nullptr, 0);
+}
+
+void set_console_buttons(uint8_t mask) {
+    g_console_ms.store(clock_ms(), std::memory_order_relaxed);
+    g_console_mask.store(mask, std::memory_order_relaxed);
 }
 
 void trace_pod(uint32_t ms) {

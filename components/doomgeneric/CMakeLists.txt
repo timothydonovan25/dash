@@ -1,7 +1,7 @@
 # Doom, as doomgeneric (github.com/ozkl/doomgeneric, e257a09), the engine
 # only: its platform files (doomgeneric_*.c, the SDL and Allegro ones) are
-# left out, and the demo's own is demo_p4/main/doom_program.cpp. GPL-2.0
-# (LICENSE), unlike the rest of this repo, and in the demo build only.
+# left out, and the dash's own is components/doom. GPL-2.0 (LICENSE),
+# unlike the rest of this repo; both boards link it.
 #
 # Not our code, so none of our rules apply inside it: it is all globals,
 # it mallocs, and its frames are its own (dash_frame_limit() is applied to
@@ -13,10 +13,12 @@
 #     NimBLE share;
 #   - its zone (6 MB) and its WAD directory are mallocs well over
 #     CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL, so PSRAM too;
-#   - it runs only after DIAG -> Doom, and the board is reset to leave.
+#   - it runs only after DIAG -> Doom, and on the bike only parked.
 # Changes to its source: m_config.c's GetDefaultConfigDir() takes
 # DOOMGENERIC_CONFIG_DIR, for default.cfg and saves on the card; eleven
-# array definitions in r_*.c, d_loop.c and statdump.c carry DG_EXTRAM.
+# array definitions in r_*.c, d_loop.c and statdump.c carry DG_EXTRAM;
+# I_Quit pauses in DG_Quit instead of exiting, and dg_dash.h turns every
+# exit() into DG_Exit (doomgeneric.h), so leaving never resets the board.
 file(GLOB srcs "${CMAKE_CURRENT_LIST_DIR}/src/*.c")
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "src"

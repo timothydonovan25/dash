@@ -9,3 +9,11 @@
 // lwIP's own mapping as much as for this one.)
 #pragma once
 #define DG_EXTRAM __attribute__((section(".ext_ram.bss.doom")))
+
+// Doom's exit() calls (I_Error's above all: a bad WAD, a card pulled
+// mid-read) would end the whole firmware. Here they end only Doom: the
+// dash's DG_Exit hands the panel back and stops Doom's task for good.
+// I_Quit's pause, as doomgeneric.h declares it for the port.
+void DG_Quit(void);
+void DG_Exit(int status) __attribute__((noreturn));
+#define exit DG_Exit

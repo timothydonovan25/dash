@@ -365,8 +365,8 @@ Five screens: **ALL, ENGINE, IMU, PERF, STUNT.**
 **DIAG's screen 0 is a menu** (1.29). It lists the eight pages, each with a
 one-word reading of how it stands. C and D move the cursor, E opens a page,
 and B on a page returns to the menu with the cursor where it was. The menu
-flags a core dump left in flash. On the demo board a ninth row starts Doom
-(§31).
+flags a core dump left in flash. A ninth row starts Doom (§31): on the
+bike only while it is still, reading "parked only" otherwise.
 
 | Page | Shows |
 |---|---|
@@ -894,10 +894,14 @@ and still can away from it.
   task.
 - Its SD card is the Guition's microSD on 4-bit SDMMC slot 0. ESP-Hosted
   owns the SDMMC host, so the card only adds slot 0.
-- **Doom** (1.32). DIAG's menu has a ninth row (`ui::IProgram`). E hands the
-  panel to doomgeneric (GPL-2.0, vendored). The WAD is the first `.wad` in
-  `games/`. Controls: A/B forward/back, C/D turn, E fire/select, A+B menu,
-  C+D use. Reset the board to leave. The big arrays are in PSRAM.
+- **Doom** (1.32; on the bike too since 1.62, parked only). DIAG's menu has
+  a ninth row (`doom::Program`, `components/doom`). E hands the panel to
+  doomgeneric (GPL-2.0, vendored). The WAD is the first `.wad` in `games/`.
+  Controls: A/B forward/back, C/D turn, E fire/select, A+B menu, C+D use.
+  Quit Game in Doom's menu returns to the dash, and DIAG -> Doom resumes the
+  game where it was; on the bike, moving does the same. A Doom error ends it
+  until the next power-on ("error"), without a reset. The big arrays are in
+  PSRAM.
 - The serial command `inputs` traces raw pod pins, touch zones and decoded
   presses for 30 s.
 - `c6_cp/` is the C6 co-processor firmware pushed to the C6 when it is out

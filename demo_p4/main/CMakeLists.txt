@@ -42,7 +42,7 @@ idf_component_register(
              esp_hosted bt esp_partition bootloader_support
              app_update esp_app_format nvs_flash
              esp_wifi esp_wifi_remote esp_netif esp_event esp_http_server
-             fatfs vfs sdmmc esp_driver_sdmmc esp_hw_support doomgeneric)
+             fatfs vfs sdmmc esp_driver_sdmmc esp_hw_support doom)
 
 # Pushes demo_p4/c6_cp's built firmware into the slave_fw data partition
 # (see ../partitions.csv) with `idf.py c6-flash`, so the production

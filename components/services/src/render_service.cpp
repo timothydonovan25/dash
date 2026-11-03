@@ -162,6 +162,10 @@ void render_task(void* arg) {
     ctx.settings = d.settings;
     ctx.commands = &q;
     ctx.system = d.system;
+    ctx.program = d.program;
+    // While DIAG -> Doom has the panel, presses are its and nothing is drawn.
+    auto program_active = [&] { return ctx.program && ctx.program->active(); };
+    bool program_had_panel = false;
 
     // On this task's stack, which start_render sizes for it: App is about
     // 1.9 kB, the one live screen plus the overlays (it held all 21 screens,
@@ -233,8 +237,10 @@ void render_task(void* arg) {
         const int32_t left = static_cast<int32_t>(deadline_ms() - before);
         core::nav::InputEvent ev;
         if (left > 0 && wait_input_event(ev, static_cast<uint32_t>(left))) {
-            app.on_input(ev, canvas);
-            while (take_input_event(ev)) app.on_input(ev, canvas);
+            if (!program_active()) app.on_input(ev, canvas);
+            while (take_input_event(ev)) {
+                if (!program_active()) app.on_input(ev, canvas);
+            }
         } else if (left > 0 &&
                    static_cast<int32_t>(deadline_ms() - d.clock->now_ms()) > 0) {
             // Timed out in whole ticks, a fraction of a millisecond short of
@@ -259,6 +265,19 @@ void render_task(void* arg) {
             }
         }
         const uint32_t now = d.clock->now_ms();
+
+        // The panel is the program's: draw nothing, and leave a re-init
+        // `keeper` asked for until it is back. When it comes back the glass
+        // is whatever the program left, so the next frame goes out whole.
+        if (program_active()) {
+            program_had_panel = true;
+            continue;
+        }
+        if (program_had_panel) {
+            program_had_panel = false;
+            app.invalidate();
+            shadow.invalidate();
+        }
 
         // A re-init `keeper` asked for after the panel faulted. Here, between
         // frames: from keeper it reset the panel under a transfer. Whatever

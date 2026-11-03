@@ -637,7 +637,7 @@ in PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`; measured on the demo,
 131 kB free). ESP-Hosted falls back to internal RAM silently if PSRAM
 fails, so if this ever boot-loops again, check that first. Check
 `nm build/dash.elf | grep _heap_start` after adding statics; the bike is at
-0x4FF20A60 and the demo at 0x4FF2A640 (1.40; the splits' path buffer is most
+0x4FF51240 (1.62, Doom is ~64 kB of it; 0x4FF41540 before) and the demo at 0x4FF2A680 (1.40; the splits' path buffer is most
 of `logic`'s 5.8 kB). Big buffers go on a task stack (allocated later) or in PSRAM
 with `EXT_RAM_BSS_ATTR`, never in a plain static.
 
@@ -705,15 +705,24 @@ messages, forwarded by the phone app's `NotifListener` (its `NotifyFilter`
 is JVM-tested) and shown as a toast and on CRUISE → PHONE. Neither end has
 talked to the other over this tag.
 
-**Doom on the demo board** (1.32, `demo_p4/` only). DIAG's menu has a
-ninth row from `ui::IProgram`, which only the demo sets; E on it hands the
-panel to doomgeneric (`demo_p4/components/doomgeneric`, GPL-2.0, vendored)
-and the board is reset to leave. The WAD is the first `.wad` in `games/` on
-the card, uploaded from the Wi-Fi page's Games section (`Deps::games`).
-Buttons are raw held state: A/B forward/back, C/D turn, E fire/select/yes,
-A+B menu, C+D use. Doom's big arrays are in PSRAM by `DG_EXTRAM`
-(src/dg_dash.h: IDF v6.0.2's ldgen emits nothing for a `* (extram_bss)`
-mapping) and `states` is read from flash; it costs ~64 kB of internal RAM.
+**Doom, on both boards** (1.32 on the demo; the bike, parked only, since
+1.62). DIAG's menu has a ninth row, `doom::Program` (`components/doom`, a
+`ui::IProgram`), over doomgeneric (`components/doomgeneric`, GPL-2.0,
+vendored); each board's main supplies a `doom::Board` (how a picture
+reaches its panel, held buttons, parked). E starts it on render's task and
+render draws nothing while `active()`. **Leaving needs no reset**: Quit Game
+pauses it (I_Quit -> `DG_Quit`) and DIAG -> Doom resumes where it was; on
+the bike so does moving (`core::flash::still` false; it starts only still);
+every `exit()` in Doom is `DG_Exit` (dg_dash.h), which stops Doom for the
+power-on and gives the panel back. The bike shows 320x200 at 1.5x, 480x300,
+from `Deps::buttons_held` (the pod, before debounce: `pod_keys.py` cannot
+play it); its Doom task is core 1, priority 1. The WAD is the first `.wad`
+in `games/` on the card, uploaded from the Wi-Fi page's Games section
+(`Deps::games`). Buttons are raw held state: A/B forward/back, C/D turn, E
+fire/select/yes, A+B menu, C+D use. Doom's big arrays are in PSRAM by
+`DG_EXTRAM` (src/dg_dash.h: IDF v6.0.2's ldgen emits nothing for a
+`* (extram_bss)` mapping) and `states` is read from flash; it costs ~64 kB of
+internal RAM on either board.
 The demo's SD card is the Guition's microSD, 4-bit SDMMC slot 0 (CLK 43,
 CMD 44, D0-3 39-42) powered from LDO VO4: `demo_p4/main/sdcard_sdmmc.cpp`
 is the mount, everything else is the bike's `drivers::SdCard` (its mount
