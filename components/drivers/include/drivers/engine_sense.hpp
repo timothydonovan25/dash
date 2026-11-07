@@ -1,9 +1,9 @@
 // Tach, wheel sensors and the neutral switch.
 //
 // The tach is an inductive pickup wrapped around the ignition lead through a
-// 100k series resistor, a 1M bias and a BAT54S clamp. **There is no filter
-// capacitor on this revision**, so one spark produces a burst of edges, not
-// one edge. The refractory window below is what turns that burst back into a
+// 10k series resistor (R34), a 1M bias to GND, a BAT54S clamp and 47 pF (C19,
+// a ~0.5 µs filter: too fast to stop ringing), so one spark produces a burst
+// of edges, not one edge. The refractory window below is what turns that burst back into a
 // single count, and it is the single most important number in this file.
 //
 // Each channel's ISR timestamps its edge. core/tach needs that: at 500 Hz

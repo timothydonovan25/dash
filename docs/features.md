@@ -97,7 +97,7 @@ The firmware targets one custom PCB, built around the Guition
 | GPS | PA1616D | UART1 | NMEA; baud negotiated to 57600 |
 | SD card | microSD in SPI mode | SPI2 (own clock) | Shares the bus with the IMU |
 | Handlebar button pod | I/O expander over cable | I2C0 at 100 kHz | No interrupt line; polled at 200 Hz |
-| Tachometer | Inductive wrap on the plug lead | capture input | 5–10 V signal; R34/C19 may filter it |
+| Tachometer | Inductive wrap on the plug lead | capture input | 5–10 V signal; R34/C19 reworked to 10 kΩ / 47 pF |
 | Wheel speed | Hall sensors, front and rear | capture inputs | Same counter block as the tach |
 | Neutral switch | Opto-isolated (U6) | GPIO12 | Reads LOW in neutral |
 | VIN sense | R17/R18 divider | GPIO20 | Tells bike power from USB and sees key-off |
@@ -546,8 +546,9 @@ holds at its peak for 0.7 s. CONFIG → Display → Slip bar turns it off.
   refreshes the config once a second.
 - The on-screen ShiftStrip and RACE's RevBar mirror the lamp colour.
 - **Bike board:** the backlight lights, so the PCA9955B answers; the lamps
-  and the tach are untested (the tach wrap gave no signal, the R34/C19
-  filter is the suspect: bringup §8).
+  are untested. The tach wrap gave no signal through the as-built R34/C19
+  filter; reworked to 10 kΩ / 47 pF, it reads a signal generator on the
+  bench, not yet the bike (bringup §8).
 
 ---
 

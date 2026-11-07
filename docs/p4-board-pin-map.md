@@ -450,24 +450,28 @@ The pickup is an **inductive wrap on the spark plug lead, 5–10 V at
 most**, not the coil primary, so there is no high-voltage hazard on
 `R34_1` or U11.
 
-The risk runs the other way: **the input filter may hide the pulse.**
-R34 (100 kΩ) with C19 (470 pF) is a 47 µs time constant, and a wrap
+The risk ran the other way: **the input filter hid the pulse.** As
+built, R34 (100 kΩ) with C19 (470 pF) is a 47 µs time constant, and a wrap
 around the lead gives a spike of a few µs or less. A 1 µs, 10 V spike
 charges C19 to about 0.2 V, far below the P4's ~2.5 V input threshold.
 
 **First board (2026-10-28):** the wrap was fitted on the first ride and
-there was no tach signal. Not scoped yet; this filter is the suspect.
+there was no tach signal.
 
-Both parts are 0805, so this is a bench fix, not a respin:
+**Reworked (2026-11-07): R34 is 10 kΩ, C19 is 47 pF** (both 0805), a
+~0.5 µs time constant: a 1 µs, 10 V spike reaches ~8–9 V and D2 clamps
+it. R43 (1 MΩ) is a pull-down to GND and stays. At 10 V into 10 kΩ, D2
+clamps about 0.65 mA. A signal generator into `TACH_SIG` made the dash
+show rpm. **Not yet run on the bike, and the pickup is still not scoped**:
 
 1. Scope the pickup on the running bike, at idle and at high rpm. Note
-   peak voltage and pulse width.
-2. Start with C19 at 47 pF (about 5 µs) or not fitted.
-3. If the pulse is still too small, drop R34 to 10–22 kΩ. At 10 V into
-   10 kΩ the BAT54S (D2) clamps about 1 mA.
-4. Ringing still gives several edges per spark. The PCNT glitch filter
-   plus `bsp::kTachRefractoryUs` handle that. At 13 500 rpm, one spark
-   per revolution is a 4.4 ms period.
+   peak voltage, pulse width and polarity (a negative-going pulse is
+   clamped to GND and gives no edge: flip the wrap).
+2. Check the reading against a known idle: the firmware assumes one spark
+   per revolution; a wasted-spark-free ignition reads double.
+3. Ringing gives several edges per spark, and 47 pF no longer filters it.
+   The PCNT glitch filter plus `bsp::kTachRefractoryUs` handle that. At
+   13 500 rpm, one spark per revolution is a 4.4 ms period.
 
 ### 6.4 Numbers from the audit
 

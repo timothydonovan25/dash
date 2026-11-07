@@ -912,7 +912,8 @@ Notes that change firmware:
   20 MHz; the bus is about 90 mm long with no source termination, so drop
   toward 10 MHz if either faults.
 - **The tach is an inductive wrap on the plug lead, 5–10 V.** The
-  R34/C19 filter may swallow its spike; `p4-board-pin-map.md` §6.3.
+  as-built R34/C19 filter swallowed its spike; reworked to 10 kΩ / 47 pF,
+  `p4-board-pin-map.md` §6.3.
 
 ### 16.1 Two hardware limits the firmware must live with
 

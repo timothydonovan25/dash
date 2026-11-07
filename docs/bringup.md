@@ -30,7 +30,7 @@ slots · 10 BRINGUP markers · 11 `sdkconfig` traps. Elsewhere:
 | 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet. Until it is, `tools/pod_keys.py` presses the buttons from the laptop over USB (§5) |
 | 6 IMU | Bench only | SPI2 deadlock with the SD card found and fixed; axes remapped for the upright board, checked with `tools/imu_view.py`. The riding check (step 7) is not done. The ride logs: mount roll/pitch never set (gravity implies ~10° roll, and it differs between sessions), gaps behind SD writes, and the chip's own clock says ~213 Hz, not 200, while by the P4's clock samples arrive every 5.3 ms (~189 Hz: the part's oscillator is ~6 % slow), so `icm42688p.cpp` back-dates a batch 5 ms a sample and is up to ~5 ms out at its oldest (the report's p99 8 ms); totals stay right, as each batch is anchored at now. Once (2026-10-31, after the SD card was swapped with the board powered) it answered WHO_AM_I 0xFF through every reset and retry until a full power cycle: a USB or software reset does not power the IMU down. Likely its I2C side, on by default, latching onto the card's traffic on the shared SCK/MOSI; 1.60 turns I2C off first thing after the soft reset (`INTF_CONFIG0` = 0x33). Not yet re-tested with a hot-plugged card |
 | 7 GPS | Fixes, at 1 Hz: **P4 → GPS TX dead** | 9–13 satellites on the first ride. A cold receiver's placeholder date is now ignored. Stuck at 1 Hz because **the receiver hears nothing the P4 sends**: it ignores even a command at the 9600 it is talking at, and keeps its default sentences. The firmware's side is proven (2026-11-01, IO dump): GPIO3 drives UART1 TX. Check U16-6 → U4-10 (§7) |
-| 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, fixed in 1.60 (`docs/fusion.md`, replayed over both rides; not yet ridden). The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. The board was also not held rigidly (up to 15 g and 1100 dps; gravity 60° apart between parked spells), so lean and pitch from those rides are meaningless |
+| 8 Tach, wheels, lamps | Tach on the bench; rest not done | Tach wrap gave **no signal** on the first ride (the filter, §8); R34/C19 reworked to 10 kΩ / 47 pF 2026-11-07, and a signal generator on `TACH_SIG` shows rpm on the dash. Not yet run on the bike. Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, fixed in 1.60 (`docs/fusion.md`, replayed over both rides; not yet ridden). The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. The board was also not held rigidly (up to 15 g and 1100 dps; gravity 60° apart between parked spells), so lean and pitch from those rides are meaningless |
 | 8.1 Power-fail | Not done | |
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
 | — Screen over USB, SD as USB drive (2.6) | Bench: works | Console `screen` (tools/dash_screen.py, pod_keys.py --screen): a whole frame in 0.22 s. **USB drive** (CONFIG → SD card → USB drive, console `usb drive`): the laptop mounts the card ("Dash SD card") and reads ~620 KB/s. Found on the bike: (1) a port powered off by the laptop (udisksctl power-off) suspends the bus instead of disconnecting, and the dash stayed in drive mode; suspend now counts as let go (seen working). (2) OTG's pads stayed on when it went back to PHY 1, the panel's D6/D7: now switched off first. (3) With `auto_mount_off`, esp_tinyusb ignores the laptop's Eject and says nothing; with it on, an Eject is seen and the console comes back 5 s later. (4) That console came back enumerated but silent (the USB serial driver does not survive its pads going off and on), so the dash now restarts after a drive session. **Verified 2026-11-05:** drive on, the laptop mounts and reads it, Eject, and 3.7 s later the dash has rebooted with the console, its card (new log session) and the phone's BLE link back. **Screen garbled while flashing** (top-left quarter, the moving widgets showing through, clears when the new image boots): the P4 sits in the ROM loader ~25 s with the panel's CS and WR undriven, and the panel takes noise as writes. Harmless; a pull-up on CS (GPIO50) would stop it (board item) |
@@ -451,21 +451,21 @@ Build-order step 7, and last on purpose: it is the latency-critical path
 and you want the diag screens working before you touch it.
 
 **First board (2026-10-28):** the tach wrap was fitted and gave **no
-signal**; the R34/C19 filter below is the suspect, a hardware fix still to
-make. No wheel sensors were fitted. The backlight lights, so the PCA9955B
+signal**: the R34/C19 filter below swallowed it. **Reworked 2026-11-07**
+to R34 10 kΩ, C19 47 pF; a signal generator on `TACH_SIG` then showed rpm
+on the dash. Not yet on the bike. No wheel sensors were fitted. The backlight lights, so the PCA9955B
 answers on I2C1; the lamps are untested. On those rides the speedo read 0
 with 9–13 satellites: the fusion deadlock in the status table, fixed in
 1.60 (`fusion.md`) and replayed over both rides, not yet ridden.
 
 **Scope the tach before trusting the reading.** The pickup is an
-inductive wrap on the spark plug lead, 5–10 V at most. It goes through
-R34 (100 kΩ) with C19 (470 pF) to GND and D2 clamping to the rails — a
-47 µs filter, and the spike from a wrap is a few µs or less. A 1 µs, 10 V
-spike charges C19 to about 0.2 V, far below the input threshold, so **a
-dead tach may be the filter, not the code** (`p4-board-pin-map.md` §6.3).
-On the running bike, scope `TACH_SIG` at idle and at high rpm. If it does
-not cross 2.5 V, fit C19 at 47 pF or leave it off; if that is still not
-enough, drop R34 to 10–22 kΩ. Both are 0805.
+inductive wrap on the spark plug lead, 5–10 V at most. As built it went
+through R34 (100 kΩ) with C19 (470 pF) to GND and D2 clamping to the
+rails — a 47 µs filter, and the spike from a wrap is a few µs or less, so
+it never crossed the threshold. Now R34 is 10 kΩ and C19 47 pF, about
+0.5 µs (`p4-board-pin-map.md` §6.3). On the running bike, scope `TACH_SIG`
+at idle and at high rpm: it should cross 2.5 V. If nothing arrives, the
+pulse may be negative-going (D2 clamps it to GND): flip the wrap.
 
 With an edge arriving, the ringing after each spark still gives several
 edges. The firmware has a refractory window after each accepted edge —
@@ -711,7 +711,8 @@ table names the file and the thing.
 | `sdkconfig.defaults` `BT_NIMBLE_USE_ESP_TIMER=n` | NimBLE on FreeRTOS timers: bond, reconnect, encrypt deadline (§9) |
 
 And the hardware values to settle on the bench, from
-`p4-board-pin-map.md` §6: C19 and R34 (tach), R6 (neutral pull-up), and
+`p4-board-pin-map.md` §6: C19 and R34 (tach, reworked to 47 pF / 10 kΩ;
+confirm on the bike), R6 (neutral pull-up), and
 whether SW2 holds up at the board's input current.
 
 ---

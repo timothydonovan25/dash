@@ -92,9 +92,9 @@ inline constexpr int kImuInt1        = 13;   // U16-20
 
 // ── Vehicle inputs ───────────────────────────────────────────────────
 // Tach is an inductive wrap around the spark plug lead, 5-10 V at most,
-// via 100k series (R34) / 1M bias (R43) / BAT54S clamp (D2) / 470 pF (C19).
-// That RC may swallow a short spike; see p4-board-pin-map.md §6.3. Expect
-// ringing too: enforce a refractory window in firmware.
+// via 10k series (R34) / 1M bias to GND (R43) / BAT54S clamp (D2) / 47 pF (C19).
+// Reworked from 100k / 470 pF, which swallowed the spike (p4-board-pin-map.md
+// §6.3). Expect ringing: enforce a refractory window in firmware.
 inline constexpr int kTachSig        = 21;   // U16-22
 inline constexpr int kTachRefractoryUs = 1500;   // tune on the bench
 inline constexpr int kWheelHallFront = 22;   // U16-23

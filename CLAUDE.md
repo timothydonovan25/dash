@@ -21,7 +21,7 @@ changes.
 `docs/bringup.md`'s status table says otherwise. In short: rails, boot,
 panel, SD on 12 V, GPS (stuck at 1 Hz), IMU on the bench, and the C6's SDIO
 link (the Android app has bonded) have run; the shift lamps, the pod on this
-board, tach, wheels, power-fail and SD-card OTA installs have not. Current
+board, tach (bench only), wheels, power-fail and SD-card OTA installs have not. Current
 firmware: `firmware.txt` (2.0, `fps-counter`).
 
 ## Doc map
@@ -167,9 +167,10 @@ build dies in `espcoredump`). Include prefix and namespace are still `hal`.
   for a whole SD command, busy time included; the IMU's FIFO absorbs it.
   **Every IMU transaction is polling**: a queued transmit beside the SD host
   deadlocked both and the watchdog rebooted the board.
-- **The tach is an inductive wrap, 5–10 V**, and R34/C19 may filter its
-  spike away; no signal on the first ride. The fix is on the board
-  (pin-map §6.3), not in firmware.
+- **The tach is an inductive wrap, 5–10 V.** The as-built R34/C19
+  (100 kΩ / 470 pF) filtered its spike away; reworked by hand to 10 kΩ /
+  47 pF, which reads on the bench (pin-map §6.3). A new board needs the
+  same values.
 - **VIN sense** (GPIO20) tells bike from USB; `ctrl` caps lamp duty on USB.
   **Test the SD card on 12 V**: on USB alone it did not mount.
 - **The P4 has no radio.** BLE and Wi-Fi are the C6's, over internal SDIO
