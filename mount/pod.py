@@ -70,12 +70,34 @@ TRAY_T = 4.0
 TRAY_W = 7.0         # tray ring width, over the board's edge
 PILOT_M25 = 2.2      # M2.5 self-tapping pilot (PETG), screws in from the rider side
 DAMP = [(22.0, 30.0), (22.0, 64.0), (112.0, 30.0), (112.0, 64.0)]  # clear of parts > 6 mm
+# Balls bought 2026-11-07: FOYTOKI "heavy duty" 10-pack. The listing's only size is
+# 9 x 5 x 5 mm, which is not a gimbal ball: measure one before printing.
 DAMP_HOLE = 6.5      # MEASURE: the hole your balls snap into
 DAMP_GAP = 10.0      # MEASURE: plate face to plate face across a seated ball
 DAMP_PLATE = 2.0     # plate thickness at the ball hole (the ball's neck length)
 DAMP_CB = 12.0       # counterbore that thins a plate down to DAMP_PLATE
 FRAME_T = 6.0        # H-frame thickness; ball holes are thinned to DAMP_PLATE
 FRAME_W = 16.0       # H-frame leg width
+# C6 antenna: RP-SMA female bulkhead (IPEX pigtail) through a flange on a riser above the
+# board's top edge, axis +Y, so the thumb antenna stands up clear of the bar. Rigid side:
+# the coax's slack loop crosses the isolation, like every other cable.
+ANT_X = CX           # over U16's IPEX, between the clamp's lugs (x CX +-8.5)
+ANT_Y1 = BY1 + 6.0   # flange top
+ANT_T = 3.0          # MEASURE: flange thickness the bulkhead's thread takes with nut + washer
+ANT_HOLE = 6.6       # 1/4"-36 thread
+ANT_W = 16.0         # flange width, x
+ANT_DEPTH = 18.0     # flange depth, z from the frame's front face
+ANT_Z = FRAME_T + 6.0   # hole axis behind the frame's front face: the body clears the riser
+ANT_BODY_D, ANT_BODY_L = 10.0, 12.0   # MEASURE: bulkhead body and crimp below the flange
+# Sunshade: part of the tray, so it floats with the screen. A visor off the board's top
+# edge, tilted up so the top rows stay visible from above, and two 45-degree cheeks that
+# brace it. The tray prints back face down: the visor is a wall growing up, the cheeks'
+# lower edges rise at 45 degrees, no supports. Tilt the dash on the bar to look at it square.
+HOOD_L = 22.0        # visor length from the board's face toward the rider
+HOOD_TILT = 20.0     # degrees up from the screen's normal
+HOOD_T = 2.0         # wall thickness
+HOOD_CHEEK = 16.0    # cheek reach down the sides: stops above FPC1's fold round the right edge (y < 61)
+TIE = (32.5, 28.5, 4.5, 2.5)   # zip-tie slot x, y, w, h: ties U11/CN1-CN3's wires to the frame's bottom edge
 
 BAR_D = 28.6         # MEASURE: handlebar diameter at the clamp (7/8" bar = 22.2)
 BAR_RUBBER = 1.0     # inner-tube strip in the bore, compressed, per side: grip + no slip
@@ -123,6 +145,49 @@ def ball_heads():
     return [_cyl(x, y, Z_TRAY1 - DAMP_PLATE - BALL_HEAD_L, Z_TRAY1 - DAMP_PLATE, BALL_HEAD_D) for x, y in DAMP]
 
 
+def _ycyl(x, z, y0, y1, d):
+    return cq.Workplane("XY").add(cq.Solid.makeCylinder(d / 2, y1 - y0, cq.Vector(x, y0, z), cq.Vector(0, 1, 0)))
+
+
+def ant_body():
+    """The bulkhead below the flange, toward the board: a keep-out, not a print."""
+    y = ANT_Y1 - ANT_T
+    return _ycyl(ANT_X, Z_BACK_IN + ANT_Z, y - ANT_BODY_L, y, ANT_BODY_D)
+
+
+def ant_mount():
+    """Riser off the cross bar, a flange standing back from it, two side webs. Prints with no supports."""
+    zi, za = Z_BACK_IN, Z_BACK_IN + ANT_Z
+    y0 = CY + BASE_D / 2 - 6          # riser starts inside the cross bar
+    m = _box(ANT_X - ANT_W / 2, ANT_X + ANT_W / 2, y0, ANT_Y1, zi, zi + FRAME_T)
+    m = m.union(_box(ANT_X - ANT_W / 2, ANT_X + ANT_W / 2, ANT_Y1 - ANT_T, ANT_Y1, zi, zi + ANT_DEPTH))
+    for sx in (-1, 1):                # webs outside the bulkhead's hex
+        x = ANT_X + sx * (ANT_W / 2 - 1.5)
+        web = (cq.Workplane("YZ").workplane(offset=x - 1.5)
+               .polyline([(ANT_Y1 - 12, zi + FRAME_T), (ANT_Y1, zi + FRAME_T), (ANT_Y1, zi + ANT_DEPTH)])
+               .close().extrude(3.0))
+        m = m.union(web)
+    return m.cut(_ycyl(ANT_X, za, ANT_Y1 - ANT_T - 1, ANT_Y1 + 1, ANT_HOLE)).cut(ant_body())
+
+
+def hood():
+    """Visor from the tray's back face to HOOD_L in front of the board, and the two cheeks."""
+    import math
+    t = math.radians(HOOD_TILT)
+    tip_y, tip_z = BY1 + HOOD_L * math.sin(t), -HOOD_L * math.cos(t)
+    x0, x1 = BX0 - HOOD_T, BX1 + HOOD_T
+    v = _box(x0, x1, BY1, BY1 + HOOD_T, 0, Z_TRAY1)          # beside the board, joined to the tray
+    v = v.union(cq.Workplane("YZ").workplane(offset=x0)        # tilted visor in front of it
+                .polyline([(BY1, 0), (BY1 + HOOD_T, 0), (tip_y + HOOD_T, tip_z), (tip_y, tip_z)])
+                .close().extrude(x1 - x0))
+    c = HOOD_CHEEK
+    for xa in (x0, BX1):
+        v = v.union(cq.Workplane("YZ").workplane(offset=xa)
+                    .polyline([(BY1 + 0.3, 0), (BY1 + 0.3 + c * math.tan(t), -c), (BY1 + 0.3 - c, -c)]).close()
+                    .extrude(HOOD_T))
+    return v
+
+
 def tray():
     """Rigid ring the PCB screws to, with two cross bars carrying the ball plates."""
     ring = (_box(BX0, BX1, BY0, BY1, Z_TRAY0, Z_TRAY1)
@@ -141,6 +206,7 @@ def tray():
                 .cut(_cyl(x, y, Z_TRAY0 - 1, Z_TRAY1 - DAMP_PLATE, DAMP_CB)))
     ring = ring.intersect(_box(BX0, BX1, BY0, BY1, 0, 99))   # flares stay inside the board outline
     ring = ring.cut(_box(WIRE_WINDOW[0], WIRE_WINDOW[1], BY0 - 1, WIRE_WINDOW[2], 0, 99))
+    ring = ring.union(hood())
     return ring.cut(chips(KEEP))   # posts next to a part become D-shaped; check() guards their walls
 
 
@@ -154,6 +220,9 @@ def frame():
     for x, y in DAMP:
         f = f.union(_cyl(x, y, Z_BACK_IN, Z_BACK_OUT, FRAME_W))
     f = f.edges("|Z").fillet(3)
+    f = f.union(ant_mount())
+    tx, ty, tw, th = TIE
+    f = f.cut(_box(tx - tw / 2, tx + tw / 2, ty - th / 2, ty + th / 2, Z_BACK_IN - 1, Z_BACK_OUT + 1))
     for x, y in DAMP:   # ball holes; counterbore from the back leaves a DAMP_PLATE web
         f = (f.cut(_cyl(x, y, Z_BACK_IN - 1, Z_BACK_OUT + 1, DAMP_HOLE))
              .cut(_cyl(x, y, Z_BACK_IN + DAMP_PLATE, Z_BACK_OUT + 1, DAMP_CB)))
@@ -216,12 +285,12 @@ def check(parts):
     tr, fr, cap = parts
     pcb, panel, leds = ghost()
     board = tr.union(pcb).union(panel).union(leds)
-    rigid = fr.union(cap)
+    rigid = fr.union(cap).union(ant_body())
     # 1. the view: extrude the panel and every LED toward the rider, through everything
     for name, g in (("panel", panel), ("leds", leds)):
         bb = g.val().BoundingBox()
         ray = _box(bb.xmin, bb.xmax, bb.ymin, bb.ymax, bb.zmin - 50, bb.zmin)
-        v = _vol(ray, rigid)
+        v = _vol(ray, rigid.union(tr))
         assert v < 1e-3, f"{name} is obscured: {v:.1f} mm^3 in its line of sight"
     # 2. the chips: the tray's cuts keep KEEP by construction; the ball heads must too,
     #    and a post cut D-shaped must still hold its screw with >= 1 mm of wall

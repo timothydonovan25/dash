@@ -1105,7 +1105,7 @@ python3 sim/dash_sim.py
 | **`tools/make_album_art.py`** | Converts album art into a UI image |
 | **`tools/dash_media_peripheral.py`** | A laptop BLE peripheral speaking §11.1, so the phone app has a counterpart |
 | **`tools/replay/plot.py`** | Draws a `replay --out` CSV as an SVG (`docs/fusion.md`) |
-| **`mount/`** (CadQuery) | `pod.py`: the isolated mount — tray on four silicone damping balls in front of an H-frame clamp, three prints, tuned for fn ≈ 15–20 Hz (`docs/imu-vibration.md` §6). `mount.py`: the earlier rigid carrier. `cd mount && python pod.py` writes `mount/out/pod_*.stl`, `*.step` |
+| **`mount/`** (CadQuery) | `pod.py`: the isolated mount — tray on four silicone damping balls in front of an H-frame clamp, three prints, tuned for fn ≈ 15–20 Hz; the frame holds the C6's RP-SMA antenna bulkhead and a zip-tie slot; the tray carries a sunshade visor over the screen (`docs/imu-vibration.md` §6). `mount.py`: the earlier rigid carrier. `cd mount && python pod.py` writes `mount/out/pod_*.stl`, `*.step` |
 | **`kline-adapter/gen_sch.py`, `pcb_drc.py`** | Generate the K-line adapter's EasyEDA schematic/netlist from LCSC parts; check its PCB's connectivity and clearances (`kline-adapter/review.md`) |
 
 ---

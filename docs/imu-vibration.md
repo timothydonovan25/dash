@@ -128,7 +128,15 @@ the effect is visible in the lean readout.
 
 `mount/pod.py` (2026-10-28) is the isolated design, open, no housing: the
 board on a tray floating on four silicone gimbal damping balls in front of an
-H-frame on the bar clamp. Nothing limits its travel but the balls. `mount/mount.py` is the earlier rigid carrier. What
+H-frame on the bar clamp. Nothing limits its travel but the balls. The
+frame also carries the C6's antenna: an RP-SMA bulkhead in a flange above
+the board's top edge, antenna standing up (`ANT_*`), and a zip-tie slot
+that anchors the connector wires to the frame's bottom edge (`TIE`). The
+tray carries a sunshade (`HOOD_*`): a 22 mm visor off the board's top edge,
+tilted up 20°, braced by two 45° cheeks. It floats with the screen and adds
+about 14 g (solid) to the floating mass, lowering fn by roughly 5 %. The
+balls bought 2026-11-07 (FOYTOKI 10-pack, listed only as 9 × 5 × 5 mm) set
+`DAMP_HOLE` and `DAMP_GAP`, both still to measure. `mount/mount.py` is the earlier rigid carrier. What
 the isolation must do:
 
 - **Revise the target frequency.** I said ~30 Hz earlier. That was wrong
