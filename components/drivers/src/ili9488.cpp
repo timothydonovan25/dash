@@ -203,8 +203,10 @@ hal::Status Ili9488::start() {
     // The first board's HT035, as fitted, needs both mirrors (2026-10-28).
     // A panel fitted another way changes only these two lines; panel_test's
     // corners screen shows which.
+    // The UEED035HV came up mirrored left to right with both (2026-11-06).
+    // With MV set, MY orders the row address, which is the screen's x.
     esp_lcd_panel_swap_xy(panel, true);
-    esp_lcd_panel_mirror(panel, true, true);
+    esp_lcd_panel_mirror(panel, true, model_ != PanelModel::Ueed035);
     // No esp_lcd_panel_disp_on_off(panel, true) here: init() above already
     // sent DISPON, and the call sends it again and waits another 100 ms,
     // all of it before the first frame.
