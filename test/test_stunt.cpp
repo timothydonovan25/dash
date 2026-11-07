@@ -95,8 +95,8 @@ int main() {
         const auto o = r.out();
         CHECK(o.seq == 1);
         CHECK(o.kind == st::Wheelie);
-        // From 10 degrees up to 4 degrees down, on 0.2 s ramps to 30.
-        CHECK_NEAR(o.ms / 1000.0, 3.5 - 0.2 * 10.0 / 30.0 - 0.2 * 4.0 / 30.0, 0.06);
+        // From 20 degrees up to 4 degrees down, on 0.2 s ramps to 30.
+        CHECK_NEAR(o.ms / 1000.0, 3.5 - 0.2 * 20.0 / 30.0 - 0.2 * 4.0 / 30.0, 0.06);
         CHECK(std::strcmp(st::grade_name(o.kind, o.grade), "NICE ONE") == 0);
         CHECK_NEAR(o.peak_deg, 30.0, 0.5);
         CHECK(o.points > 300);
@@ -199,7 +199,7 @@ int main() {
             Moment m;
             m.mph = 12.0;
             m.accel_g = -0.8;
-            m.pitch_deg = s < 0.1 ? -150.0 * s : s > 1.3 ? -150.0 * (1.4 - s) : -15.0;
+            m.pitch_deg = s < 0.1 ? -250.0 * s : s > 1.3 ? -250.0 * (1.4 - s) : -25.0;
             return m;
         });
         r.cruise(1000);
@@ -207,7 +207,7 @@ int main() {
         CHECK(o.seq == 1);
         CHECK(o.kind == st::Stoppie);
         CHECK(std::strcmp(st::grade_name(o.kind, o.grade), "BIG STOPPIE") == 0);
-        CHECK_NEAR(o.peak_deg, 15.0, 0.5);
+        CHECK_NEAR(o.peak_deg, 25.0, 0.5);
     }
 
     CASE("tricks within four seconds chain; a gap starts over");

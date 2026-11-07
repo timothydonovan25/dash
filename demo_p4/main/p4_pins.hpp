@@ -6,7 +6,7 @@
 // MIPI-DSI + I2C touch layout that boards in this class commonly use.
 // Confirm each one against the real board (continuity from the module's
 // pins to the display FPC / touch header) before trusting it — see
-// docs/bringup-p4-demo.md.
+// demo_p4/README.md.
 #pragma once
 #include <cstdint>
 

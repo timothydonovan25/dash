@@ -58,7 +58,8 @@ void Scorer::reset_session() {
 
 float Scorer::rate(float lift_abs, float mph, bool balance, const Config& c) const {
     const float base = kind_ == Stoppie ? c.stoppie_pts_per_s : c.wheelie_pts_per_s;
-    float angle = 1.0f + (lift_abs - c.start_deg) / 20.0f;
+    // From 10°, not start_deg: raising the detection threshold must not cheapen points.
+    float angle = 1.0f + (lift_abs - 10.0f) / 20.0f;
     if (angle < 1.0f) angle = 1.0f;
     return base * angle * (1.0f + mph / 40.0f) * (balance ? 1.5f : 1.0f);
 }

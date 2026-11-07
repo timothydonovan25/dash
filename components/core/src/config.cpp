@@ -7,6 +7,10 @@ namespace {
 
 const char* const kUnitOptions[] = {"Imperial", "Metric"};
 const char* const kSpeedoOptions[] = {"Wheels", "Fused"};
+// In kFrameRateHz's order (config.hpp).
+const char* const kFrameRateOptions[] = {"10 Hz", "20 Hz", "30 Hz", "60 Hz", "120 Hz", "Unlimited"};
+static_assert(sizeof(kFrameRateOptions) / sizeof(kFrameRateOptions[0]) == kFrameRateCount,
+              "a frame-rate label per kFrameRateHz entry");
 
 constexpr uint16_t kNoOffset = 0xFFFF;
 
@@ -146,16 +150,28 @@ const ConfigItem kItems[] = {
     // is reading.
     boolean(0x0A03,"Notifications", "Phone", FIELD(notify_on)),
     boolean(0x0A04,"Text moving",   "Phone", FIELD(notify_text_moving)),
+    // A crash (core::crash) counts down 30 s, then asks the phone to text
+    // for help. The phone has its own switch and holds the number.
+    boolean(0x0A05,"Crash SOS",     "Phone", FIELD(crash_sos)),
+    // The countdown now, as a crash would start it: the whole path to the
+    // text, on the bench. Any button cancels it.
+    action(0x0A06, "Test crash", "Phone", state::CommandId::CrashTest),
 
     // Heart rate (core/hr): the watch's own broadcast, shown on STAT ->
     // HEART and logged. Turning it off and on forgets which watch it was.
     boolean(0x0F01,"Watch HR",  "Heart rate", FIELD(hr_on)),
     num   (0x0F02, "Max HR",    "Heart rate", Kind::Int, 120, 230, 1, "bpm", FIELD(hr_max_bpm)),
 
+    // Routing (core::route, docs/navigation.md): keep routes off dirt.
+    boolean(kKeyNavAvoidDirt,"Avoid dirt", "Nav", FIELD(nav_avoid_dirt)),
+
     // SD card. Eject flushes the log and unmounts, so the card can come out
     // without a write in flight. Nothing remounts it until it has been
     // pulled and put back.
     action(0x0C01, "Eject card", "SD card", state::CommandId::StorageEject),
+    // The card as a drive on a laptop over the USB-C, parked; again (or
+    // unplugging) gives it back (drivers::UsbDrive).
+    action(0x0C02, "USB drive",  "SD card", state::CommandId::StorageToHost),
 
     // Wi-Fi (§11.7): the update hotspot, on or off. DIAG -> Update shows
     // the password and has the same switch.
@@ -174,6 +190,11 @@ const ConfigItem kItems[] = {
     // raw IMU at 200 Hz, the tach and wheel pulses, the filters' insides,
     // events, the machine's health. About 130 MB an hour.
     boolean(0x0902, "Detail log", "Log", FIELD(detail_log)),
+
+    // Diag: aids for bring-up and tuning, shown over every screen. Last, so
+    // the submenus above keep their places (docs/console.md's routes).
+    boolean(0x1001, "FPS counter", "Diag", FIELD(show_fps)),
+    choice(0x1002, "Frame rate",   "Diag", FIELD(frame_rate), kFrameRateOptions, 6),
 };
 
 #undef FIELD

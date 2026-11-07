@@ -1,7 +1,7 @@
 // Wiring for the ESP32-P4 demo — the same job main/wiring.cpp does for the
 // real dash (build every long-lived object once, hand out references, no
 // globals.h), trimmed to what a screen-only demo needs. See
-// docs/bringup-p4-demo.md for what's unverified about the hardware side of
+// demo_p4/README.md for what's unverified about the hardware side of
 // this, and the plan behind this folder for what's deliberately not here.
 #include "services/services.hpp"
 #include "services/logic_tick.hpp"
@@ -147,7 +147,7 @@ void touch_input_task(void*) {
 
 extern "C" void app_main(void) {
     // Backlight on first, before anything that can hang (panel init still
-    // can, on this board — see docs/bringup-p4-demo.md). A lit backlight
+    // can, on this board — see demo_p4/README.md). A lit backlight
     // that never gets a picture at least confirms the FPC and backlight
     // circuit are alive independent of whatever the DSI link is doing.
     const auto bl_gpio = static_cast<gpio_num_t>(p4pins::kPanelBacklight);

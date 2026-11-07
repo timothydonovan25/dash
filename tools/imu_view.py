@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Watch the board's attitude in 3D, live from its USB console.
 
-The firmware prints `IMU lean pitch heading g_lon g_lat g_vert yaw temp timeouts`
+Since 2.8 the firmware no longer prints these lines (keeper prints a 5 s status block
+instead, docs/console.md); this needs an image that does.
+The firmware printed `IMU lean pitch heading g_lon g_lat g_vert yaw temp timeouts`
 at 20 Hz while a USB host is connected (keeper_service.cpp). This draws the
 board turned by the firmware's own lean, pitch and heading, so a sign or axis
 error shows as the drawing moving the wrong way.

@@ -53,7 +53,15 @@ add_library(core STATIC
     ${CORE}/src/session.cpp
     ${CORE}/src/perf.cpp
     ${CORE}/src/stunt.cpp
-    ${CORE}/src/hr.cpp)
+    ${CORE}/src/hr.cpp
+    ${CORE}/src/crash.cpp
+    ${CORE}/src/route_graph.cpp
+    ${CORE}/src/route_query.cpp
+    ${CORE}/src/route_follow.cpp
+    ${CORE}/src/route_navigator.cpp
+    ${CORE}/src/route_dest.cpp
+    ${CORE}/src/route_search.cpp
+    ${CORE}/src/route_pace.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -85,7 +93,8 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log detail delta gear gearcal c6 power media apple pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt hr)
+          attitude jump nmea input tach log detail delta gear gearcal c6 power media apple pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt hr crash
+          route_follow route_navigator route_dest route_pace)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -150,3 +159,34 @@ add_test(NAME fusion COMMAND test_fusion)
 
 add_executable(replay ${REPLAY}/replay.cpp)
 target_link_libraries(replay PRIVATE core)
+
+# Map building (docs/navigation.md §3): the contraction and the .rgf
+# writer, and the test that holds the dash's query against plain Dijkstra
+# on a town the real builder made.
+set(ROUTEGRAPH ${CMAKE_CURRENT_SOURCE_DIR}/../tools/routegraph)
+add_library(routegraph STATIC ${ROUTEGRAPH}/rgf_build.cpp ${ROUTEGRAPH}/search_build.cpp)
+target_include_directories(routegraph PUBLIC ${ROUTEGRAPH})
+target_link_libraries(routegraph PUBLIC core)
+add_executable(rgf_build ${ROUTEGRAPH}/rgf_main.cpp)
+target_link_libraries(rgf_build PRIVATE routegraph)
+add_executable(test_route test_route.cpp)
+target_link_libraries(test_route PRIVATE routegraph)
+target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME route COMMAND test_route)
+add_executable(test_route_search test_route_search.cpp)
+target_link_libraries(test_route_search PRIVATE routegraph)
+target_include_directories(test_route_search PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME route_search COMMAND test_route_search)
+
+# `storage`'s half of routing, against a card in RAM.
+add_executable(test_route_store test_route_store.cpp ${SVC}/src/route_store.cpp)
+target_include_directories(test_route_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_route_store PRIVATE routegraph hal ui)
+add_test(NAME route_store COMMAND test_route_store)
+
+# `logic`'s half of routing, end to end through logic_tick and serve_route.
+add_executable(test_logic_route test_logic_route.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp
+               ${SVC}/src/route_store.cpp)
+target_include_directories(test_logic_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_logic_route PRIVATE routegraph core ui hal)
+add_test(NAME logic_route COMMAND test_logic_route)

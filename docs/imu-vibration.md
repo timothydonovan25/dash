@@ -1,8 +1,14 @@
 # IMU vibration plan — ICM-42688-P (U1)
 
-**Status.** A plan, not built. Nothing here has run on the board (it
-arrived on 2026-10-28; the IMU has run on the bench only). Every number marked *estimate* is arithmetic from assumptions, not
-a measurement; Phase 0 exists to replace them with data.
+**Status (2026-11-02).** A plan; §4 and §5 are not built. Phase 0 is
+mostly covered another way: the detail log's `_imu` file records every raw
+200 Hz sample with rpm beside it in `_tach` (features §23.2), and
+`tools/ridelog` prints a vibration spectrum (numpy) from it. That sees up
+to 100 Hz only; a ≥1 kHz `vibcap` and `tools/vib_spectrum.py` were never
+written. The IMU has run on the bench and on two rides whose board was not
+held rigidly (up to 15 g and 1100 dps), so those rides say nothing about
+the mount. `mount/pod.py` is the isolated pod mount (§6). Every number
+marked *estimate* is arithmetic from assumptions, not a measurement.
 
 ## 1. The problem, precisely
 
@@ -178,6 +184,10 @@ Pass criteria are first guesses; tighten them on the first real data.
 
 - Real idle rpm and redline (the 1×/2× arithmetic depends on them).
 - Board + panel mass.
-- Whether the P4's SPI2 sharing with the SD card allows a 10 ms FIFO cadence
-  during card writes (`logger` blocks on the card lock).
+- ~~Whether SPI2 sharing with the SD card allows a 10 ms FIFO cadence.~~
+  Answered: no. The IDF's SD host holds SPI2 for a whole SD command,
+  busy time included, so the IMU waits out card writes of up to ~900 ms
+  (`docs/console.md`, the A/B). The FIFO's ~680 ms at 200 Hz absorbs most;
+  at 1 kHz it would hold ~128 ms, so a 1 kHz ODR needs the card off SPI2 or
+  shorter card holds first.
 - How much steering coupling the bar mount really adds.

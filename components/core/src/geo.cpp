@@ -37,15 +37,6 @@ double heading_delta_deg(double from_deg, double to_deg) {
     return d;
 }
 
-Guide guide(LatLon from, float course_deg, float speed_mph, LatLon to) {
-    Guide g;
-    g.dist_ft = distance_ft(from, to);
-    g.bearing_deg = bearing_deg(from, to);
-    g.heading_up = speed_mph >= kGuideMinMph;
-    g.rel_deg = heading_delta_deg(g.heading_up ? course_deg : 0.0, g.bearing_deg);
-    return g;
-}
-
 Crossing crosses_line(LatLon prev, LatLon cur, LatLon line,
                       double line_heading_deg, double half_width_ft) {
     Crossing out;

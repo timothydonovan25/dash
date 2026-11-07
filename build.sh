@@ -5,14 +5,15 @@
 #   ./build.sh fw -b demo    firmware for the demo board (-b bike for the PCB)
 #   ./build.sh flash -b demo build, flash it as stable, open the monitor
 #
-# The port defaults to /dev/ttyACM0; override with -p PORT or PORT=...
+# The port is found by itself (the Espressif board in /dev/serial/by-id);
+# override with -p PORT or PORT=...
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 IDF_EXPORT="$HOME/.espressif/v6.0.2/esp-idf/export.sh"
-PORT="${PORT:-/dev/ttyACM0}"
+PORT="${PORT:-}"     # empty: find_port picks the board
 BOARD=""            # bike | demo, from -b; firmware commands require it
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
@@ -50,7 +51,8 @@ Firmware (ESP-IDF v6.0.2, sourced for you). Each needs -b:
 Housekeeping:
   clean       delete the host, sim and bike build trees
 
-Port: $PORT  (change with -p PORT or PORT=...)
+Port: ${PORT:-found by itself: the Espressif board in /dev/serial/by-id}
+      (change with -p PORT or PORT=...)
 EOF
 }
 
@@ -102,7 +104,25 @@ fix_foreign_build() {
     fi
 }
 
+# The board's port. /dev/ttyACM0 is only the usual name: a board that resets
+# while something (pod_keys.py, a monitor) holds its port comes back as
+# ttyACM1. The by-id link names the board, whatever number it got.
+find_port() {
+    local ports=() p
+    for p in /dev/serial/by-id/*Espressif*; do [[ -e "$p" ]] && ports+=("$p"); done
+    if [[ ${#ports[@]} -eq 0 ]]; then
+        for p in /dev/ttyACM*; do [[ -e "$p" ]] && ports+=("$p"); done
+    fi
+    case ${#ports[@]} in
+        0) die "no board found (no Espressif port in /dev/serial/by-id, no /dev/ttyACM*). Is it plugged in, with a data cable?" ;;
+        1) PORT="${ports[0]}" ;;
+        *) die "more than one board: ${ports[*]}. Pick one with -p PORT" ;;
+    esac
+    say "Port: $PORT -> $(readlink -f "$PORT")"
+}
+
 need_port() {
+    [[ -n "$PORT" ]] || find_port
     [[ -e "$PORT" ]] || die "$PORT not found. Is the board plugged in?"
 }
 

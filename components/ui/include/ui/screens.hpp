@@ -130,33 +130,88 @@ private:
     Widget*   list_[2] = {};
 };
 
-// Find your way back: an arrow, the distance and the bearing to one of the
-// named waypoints (core::waypoint). The list has START, which sets itself at
-// the start of a ride, then TRUCK, CAMP, FUEL and MARK; the row the cursor
-// is on is the one the arrow points at, and it opens on START. Short E puts
-// that waypoint here, long E clears it.
+// Turn-by-turn routing on the map from the card (core::route,
+// docs/navigation.md). Two views. The picker lists where to go: the
+// waypoints that are set, the card's favourites, the nearest fuel and food,
+// and a last row for dirt roads; E goes, and on a waypoint row hold E drops
+// it here. Guidance shows the next turn as an arrow, its distance and road,
+// what is left, and the road's posted limit; hold E stops. When a route
+// uses 65 mph roads the rider is asked: E avoids them, hold E keeps them.
 class NavScreen final : public Screen {
 public:
     const char* name() const override { return "NAV"; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
-    void draw_background(Canvas& c) override;
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
-    uint8_t focus_count() const override { return kActions; }
-    void set_focus(uint8_t f) override { focus_ = f; }
+    uint8_t focus_count() const override;
+    // nav moved the cursor: any reset still waiting is out of date.
+    void set_focus(uint8_t f) override { focus_ = f; reset_focus_ = -1; }
+    int focus_now() const override {
+        const int f = reset_focus_;
+        reset_focus_ = -1;
+        return f;
+    }
+    // The route view's map: the bike's trace and the planned route.
+    void set_source(const IPointSource* src) { map_.set_source(src); }
+    void set_route(const IPointSource* route) { map_.set_route(route); }
 
 private:
-    static constexpr uint8_t kActions = 5;
-    NavArrow arrow_;
-    Label    dist_;
-    Label    dist_unit_;
-    Label    bearing_;
-    Label    dropped_;
-    Label    status_;
-    Table    actions_;
-    Widget*  list_[7] = {};
-    uint8_t  focus_ = 0;
+    enum class View : uint8_t { Picker, Search, Guide };
+    void lay_out(View v);
+    void update_picker(const core::state::Frame& f);
+    void update_search(const core::state::Frame& f);
+    void update_guide(const core::state::Frame& f);
+    bool handle_search(const core::nav::InputEvent& e);
+    void place_cursor();              // cursor_ onto an enabled key, as near as it can
+
+    Blank     gut_l_;
+    Blank     gut_r_;
+    Blank     gut_m_;               // guidance only: between the arrow and the numbers
+    // The picker.
+    Label     head_;
+    Table     table_;               // the picker's list, and the search's results
+    Label     phint_;
+    // "Where to?"
+    Label     squery_;
+    Label     sstatus_;
+    KeyGrid   keys_;
+    // Guidance.
+    TurnArrow arrow_;
+    Label     dist_;
+    Label     dist_unit_;
+    Label     road_;
+    Label     limit_cap_;
+    Label     limit_;
+    Label     remain_;
+    Label     status_;
+    Label     hint_;
+    // The route view, in place of the arrow and the numbers: on its own at
+    // the 65 mph question, and E while guiding.
+    MapView   map_;
+    bool      show_map_ = false;    // laid out with the map
+    bool      want_map_ = false;    // the rider's E while guiding
+    Widget*   list_[12] = {};
+    uint8_t   n_list_ = 0;
+    View      view_ = View::Picker;
+    bool      laid_out_ = false;
+    uint8_t   phase_ = 0;
+    uint8_t   focus_ = 0;
+    mutable int reset_focus_ = -1;  // where to put nav's cursor after a handled press
+    uint8_t   rows_ = 0;            // "Where to?" + destinations + the dirt row
+    uint8_t   n_dest_ = 0;
+    bool      avoid_dirt_ = false;
+    uint8_t   kind_[core::state::Nav::kMaxDest] = {};
+    uint8_t   waypoint_[core::state::Nav::kMaxDest] = {};
+    // The search.
+    uint8_t   search_ = 0;          // core::state::Nav::Search
+    bool      in_list_ = false;     // the cursor is on the results, not the keys
+    uint64_t  enabled_ = 0;         // KeyGrid keys that can be pressed
+    // The keyboard's cursor, a KeyGrid key (-1: put it on the first
+    // letter). The screen moves it itself on C/D, so after a key it stays
+    // where it was, or goes to the nearest key still on offer.
+    int       cursor_ = -1;
+    uint8_t   n_hits_ = 0;
 };
 
 class TripScreen final : public Screen {
@@ -182,6 +237,7 @@ public:
     void draw_background(Canvas& c) override;
     WidgetList widgets() override;
     void set_source(const IPointSource* src) { map_.set_source(src); }
+    void set_route(const IPointSource* route) { map_.set_route(route); }
 
 private:
     MapView  map_;

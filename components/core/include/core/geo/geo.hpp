@@ -1,4 +1,5 @@
-// Geodesy for the lap timer and the map screens. Pure logic.
+// Geodesy for the lap timer and the map screens. Pure logic. (Routing has
+// its own, on the map's integer coordinates: core/route/route.hpp.)
 #pragma once
 
 namespace core::geo {
@@ -16,21 +17,6 @@ double bearing_deg(LatLon from, LatLon to);
 
 // Smallest signed difference between two headings, -180..180.
 double heading_delta_deg(double from_deg, double to_deg);
-
-// Where a waypoint is from here, for the NAV screen's arrow. `rel_deg` is
-// the waypoint's bearing measured from the direction of travel, -180..180,
-// positive to the right; with no usable course (parked, or creeping along
-// slower than the GPS can tell a heading) it is measured from true north
-// and `heading_up` is false, so the screen can say which it is drawing.
-struct Guide {
-    double dist_ft     = 0.0;
-    double bearing_deg = 0.0;   // true, 0..360
-    double rel_deg     = 0.0;
-    bool   heading_up  = false;
-};
-// Below this the GPS course is noise.
-inline constexpr float kGuideMinMph = 3.0f;
-Guide guide(LatLon from, float course_deg, float speed_mph, LatLon to);
 
 struct Crossing {
     bool   crossed  = false;

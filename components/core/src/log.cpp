@@ -63,7 +63,7 @@ size_t terminate(char* buf, size_t n, size_t k) {
 struct RateRow { const char* label; uint32_t interval_ms; };
 
 constexpr RateRow kRates[kRateCount] = {
-    {"Off",    0},
+    {"No log", 0},
     {"1 Hz",   1000},
     {"5 Hz",   200},
     {"10 Hz",  100},
@@ -115,7 +115,8 @@ size_t csv_header(char* buf, size_t n) {
         "# RaceRender Data\n"
         "Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,"
         "Lean,Pitch,GVert,LapTime,Sats,Flags,"
-        "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR\n";
+        "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,"
+        "NavTurnFt,NavDestMi,LimitMPH\n";
     return terminate(buf, n, put_str(buf, n, 0, h));
 }
 
@@ -202,6 +203,12 @@ size_t format_csv(char* buf, size_t n, const Record& r) {
     k = put_num(buf, n, k, r.alt_ft, 0);
     k = put(buf, n, k, ',');
     k = put_num(buf, n, k, static_cast<float>(r.hr_bpm), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.nav_turn_ft, 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, r.nav_dest_mi, 2);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.limit_mph), 0);
     k = put(buf, n, k, '\n');
     return terminate(buf, n, k);
 }

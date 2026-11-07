@@ -23,12 +23,14 @@ const uint16_t kShippedKeys[] = {
     0x0808, 0x0809, 0x080A,
     0x0811, 0x0812, 0x0813, 0x0814, 0x0815, 0x0816,
     0x0901, 0x0902,
-    0x0A01, 0x0A02, 0x0A03, 0x0A04,
+    0x0A01, 0x0A02, 0x0A03, 0x0A04, 0x0A05, 0x0A06,
     0x0B01, 0x0B02, 0x0B03,
     0x0C01,
     0x0D01,
     0x0E01,
     0x0F01, 0x0F02,
+    0x1001, 0x1002,
+    0x1101, 0x0C02,
 };
 }  // namespace
 
@@ -51,6 +53,21 @@ int main() {
         }
         CHECK(item_count() == sizeof(kShippedKeys) / sizeof(kShippedKeys[0]));
         CHECK(find(0xDEAD) == nullptr);      // a key from a newer firmware
+    }
+
+    CASE("frame rate: 120 Hz by default, each option its rate, Unlimited 0");
+    {
+        Settings s;
+        CHECK(frame_rate_hz(s) == 120);
+        const ConfigItem* it = find(0x1002);
+        CHECK(it != nullptr && it->kind == Kind::Enum && it->option_count == kFrameRateCount);
+        const uint16_t want[] = {10, 20, 30, 60, 120, 0};
+        for (uint8_t i = 0; i < kFrameRateCount; ++i) {
+            set(s, *it, i);
+            CHECK(frame_rate_hz(s) == want[i]);
+        }
+        s.frame_rate = 200;                 // a value no menu could set
+        CHECK(frame_rate_hz(s) == 120);
     }
 
     CASE("every item round-trips through its own range");

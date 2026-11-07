@@ -16,6 +16,10 @@ played:
 1 2 3 4 5   short press of A..E
 ! @ # $ %   (shift+1..5) long press
 
+--screen SECS also asks for the screen every SECS seconds and keeps it in
+--shot (screen.png): the buttons and what they did, on one port
+(tools/dash_screen.py, console `screen`).
+
 q / Ctrl-C quits. Prints the board's log alongside. Opens the port without
 resetting the board (RTS is lowered before DTR). `hold` is the bike's
 (main/serial_buttons.cpp); the demo has its touch zones.
@@ -106,6 +110,8 @@ def find_port():
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("-p", "--port", default=None)
+    ap.add_argument("--screen", type=float, default=0, help="seconds between screenshots; 0 for none")
+    ap.add_argument("--shot", default="screen.png", help="where the screenshot goes")
     a = ap.parse_args()
     a.port = a.port or find_port()
 
@@ -119,18 +125,50 @@ def main():
     s.rts = False
     s.dtr = False
 
+    scr = None
+    if a.screen:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from dash_screen import Screen
+        scr = Screen()
+
     def echo():
+        buf = b""
         while s.is_open:
             try:
                 d = s.read(4096)
             except (serial.SerialException, TypeError):
                 return
-            if d:
+            if not d:
+                continue
+            if scr is None:
                 # the terminal is raw: give each \n its \r back
                 sys.stdout.write(d.decode("utf-8", "replace").replace("\r", "").replace("\n", "\r\n"))
                 sys.stdout.flush()
+                continue
+            # Line by line, so the screen's lines go to the decoder, not the terminal.
+            buf += d
+            *lines, buf = buf.split(b"\n")
+            for raw in lines:
+                line = raw.decode("utf-8", "replace").rstrip("\r")
+                before = scr.frames
+                if scr.feed(line):
+                    if scr.frames != before:
+                        scr.save(a.shot)
+                    continue
+                sys.stdout.write(line + "\r\n")
+            sys.stdout.flush()
+
+    def ask():
+        while s.is_open:
+            try:
+                s.write(b"screen\n")
+            except (serial.SerialException, OSError, TypeError):
+                return
+            time.sleep(a.screen)
 
     threading.Thread(target=echo, daemon=True).start()
+    if scr is not None:
+        threading.Thread(target=ask, daemon=True).start()
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     tty.setraw(fd)

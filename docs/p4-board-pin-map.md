@@ -38,7 +38,7 @@ matched; WR is the timing-critical line and sits next to them on the top
 edge.
 
 **Firmware note:** the display leaves SPI altogether
-(`esp_lcd_new_i80_bus()`, RGB565, see `s3-parallel-respin.md` §6). The
+(`esp_lcd_new_i80_bus()`, RGB565, see `history/s3-parallel-respin.md` §6). The
 shared sensor bus stays on SPI2, as in today's `bsp/buses.cpp`, through
 the GPIO matrix. At 24 MHz or less that is comfortable.
 
@@ -253,7 +253,7 @@ that at 20 mA, and about 60 % of what 50 mA would give.
 
 Add a clamp to 3.3 V on `VIN_SENSE`: the BAT54S pattern used on the tach
 input works. USB and bike power read 1.5 V apart, which is the
-power-source test `dash-v1-netlist-review.md` §3 asked for.
+power-source test `history/dash-v1-netlist-review.md` §3 asked for.
 
 ---
 
@@ -319,7 +319,7 @@ Still open from the netlist review: VCC has no source until
 
 ## 5. Module risks
 
-- **−20 to +70 °C.** `p4-platform-selection.md` §7 expects a dark dash in
+- **−20 to +70 °C.** `history/p4-platform-selection.md` §7 expects a dark dash in
   sun to reach 70–80 °C before the backlight. That is at or above this
   module's rating. The panel is rated the same: −20 to +70 °C operating,
   −30 to +80 °C storage.
@@ -434,6 +434,10 @@ clears it.
 - **USB-only power is marginal.** VIN is about 4.3–4.6 V after D5, at the
   LMR51430's 4.5 V minimum, and the backlight LDO is in dropout. On the
   first board the SD card did not mount on USB alone and did on 12 V.
+- **The GPS never hears the P4** (first board, 2026-11-01). GPIO3 drives
+  UART1 TX (IO-matrix dump), yet the PA1616D ignores every command, even at
+  9600, so it stays at 1 Hz. Check U16-6 (GPIO3), the trace to U4-10 and
+  U4-10's joint; then the level (3.3 V into a 2.8 V module). `bringup.md` §7.
 - **GPS VBACKUP (U4-4) is tied to VCC**, so every power-up is a cold
   start. A supercap or coin cell through a diode buys hot starts.
 - **Mechanical.** Four 3.0 mm corner holes, about 112 mm apart, nothing in
@@ -467,6 +471,10 @@ Both parts are 0805, so this is a bench fix, not a respin:
 
 ### 6.4 Numbers from the audit
 
+Figures as of the audit; the firmware has since moved on (render at
+120 Hz, the pod polled at 200 Hz, the panel at a 25 MHz write clock:
+`CLAUDE.md`).
+
 | Quantity | Value |
 |---|---|
 | VCC load, idle / typical / worst | 165 / 380 / 1050 mA |
@@ -483,3 +491,10 @@ Both parts are 0805, so this is a bench fix, not a respin:
 | Parts | 123: 115 top, 8 bottom (LED0–LED7), 3 through-hole |
 | BOM, qty 1, without U4/U16 | about $32, of which the IMU is $19.64 |
 
+### Panel chip-select during flashing (found 2026-11-05)
+
+While esptool flashes, the P4 sits in its ROM loader for ~25 s with the
+panel's CS (GPIO50) and WR (GPIO52) undriven, and the panel takes noise as
+writes: the top-left of the screen garbles until the new image boots and
+repaints. Harmless, but a pull-up on CS (10 k to 3V3) on the next board
+would hold the panel deselected whenever the P4 is not driving it.

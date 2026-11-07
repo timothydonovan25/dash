@@ -37,6 +37,8 @@ constexpr uint32_t kLineToastMs = 3000;
 constexpr float kMovingMph = 3.0f;
 // Top-right corner: small, but on every screen.
 constexpr Rect kDevTag{448, 0, 32, 11};
+// Top-left corner, three digits at scale 1 (CONFIG -> Diag -> FPS counter).
+constexpr Rect kFpsTag{0, 0, 44, 11};   // "999/999" at 6 px a character
 // The splash's progress bar: a track that fills over kSplashMs.
 constexpr int16_t kSplashBarW = 300, kSplashBarH = 8, kSplashBarY = 220;
 constexpr Rect kSplashBar{static_cast<int16_t>(kScreenW / 2 - kSplashBarW / 2), kSplashBarY,
@@ -50,6 +52,7 @@ App::App(const Context& ctx) : ctx_(ctx) {
     slip_bar_.set_bounds(kSlipBar);
     toast_.set_bounds(kToastBox);
     dev_tag_.set_bounds(kDevTag);
+    fps_tag_.set_bounds(kFpsTag);
 }
 
 App::~App() { destroy_active(); }
@@ -132,10 +135,17 @@ void App::build(ScreenId id) {
         case ScreenId::TripMap: {
             auto* t = make<TripMapScreen>(slot_);
             t->set_source(trip_src_);
+            t->set_route(route_src_);
             s = t;
             break;
         }
-        case ScreenId::Nav:        s = make<NavScreen>(slot_); break;
+        case ScreenId::Nav: {
+            auto* n = make<NavScreen>(slot_);
+            n->set_source(trip_src_);
+            n->set_route(route_src_);
+            s = n;
+            break;
+        }
         case ScreenId::Minimal:    s = make<MinimalScreen>(slot_); break;
         case ScreenId::Phone:      s = make<PhoneScreen>(slot_); break;
         case ScreenId::Race:       s = make<RaceScreen>(slot_); break;
@@ -234,6 +244,19 @@ void App::begin(Canvas& c) {
 void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     if (!active_) return;
 
+    // A crash countdown takes any button, and cancels: whatever the press
+    // was meant for, a rider who can press one is not hurt badly enough to
+    // text anyone. Once the SOS is out, E says "I'm OK" and the rest work.
+    {
+        using core::crash::Phase;
+        const bool cancel = crash_phase_ == Phase::Countdown ||
+                            (crash_phase_ == Phase::Sent && e.button == Button::E);
+        if (cancel) {
+            if (ctx_.commands) ctx_.commands->post(core::state::Command(core::state::CommandId::CrashCancel));
+            return;
+        }
+    }
+
     // The alert owns E while it is up. A warning the rider has not seen must
     // not be dismissed by a press meant for something else, and a warning
     // they have seen must go away on the first press they make.
@@ -307,6 +330,38 @@ void App::go_screen(uint8_t screen, uint8_t focus, Canvas& c) {
     current().set_focus(focus);
 }
 
+bool App::update_crash(const core::state::Frame& f) {
+    using core::crash::Phase;
+    using core::crash::Ack;
+    const core::crash::State& cr = f.crash;
+    const Phase was = crash_phase_;
+    crash_phase_ = cr.phase;
+    if (cr.phase == Phase::Idle) {
+        if (was != Phase::Idle) {
+            alert_.dismiss();
+            restore(kAlertBox);
+            alert_kind_ = core::alert::Kind::None;   // an alert under it comes back
+        }
+        return false;
+    }
+    char big[28];
+    const char* hint = "E: I'm OK (texts them that too)";
+    if (cr.phase == Phase::Countdown) {
+        std::snprintf(big, sizeof big, "CRASH? SOS IN %us", static_cast<unsigned>(cr.countdown_s));
+        hint = "Any button cancels";
+    } else {
+        const bool answered = f.ble_diag.sos_ack_id == cr.sos_id;
+        const auto ack = static_cast<Ack>(answered ? f.ble_diag.sos_ack : 0);
+        const char* what = ack == Ack::Texted ? "SOS TEXTED"
+                         : ack == Ack::Off    ? "SOS OFF ON PHONE"
+                         : ack == Ack::Failed ? "SOS FAILED, RETRY"
+                         : f.ble_diag.ctrl_subscribed ? "SOS SENDING" : "SOS: NO PHONE";
+        std::snprintf(big, sizeof big, "%s", what);
+    }
+    alert_.show(big, color::kAlarm, hint);
+    return true;
+}
+
 void App::update_alert(const core::state::Frame& f) {
     using core::alert::Kind;
     const Kind k = alerter_.update(f);
@@ -314,6 +369,7 @@ void App::update_alert(const core::state::Frame& f) {
     // alerter has kept its clock meanwhile, so a fault present at key-on is
     // shown the moment the dash is.
     if (splash_on_ || !sweep_done_) return;
+    if (update_crash(f)) return;
     if (k == alert_kind_) return;
     alert_kind_ = k;
     if (k == Kind::None) {
@@ -403,6 +459,7 @@ void App::update_toast(const core::state::Frame& f) {
         seen_stunt_ = f.stunt.seq;
         seen_notify_ = f.notify.seq;
         seen_line_refused_ = f.lap.line_refused_seq;
+        seen_usb_refused_ = f.nav.usb_refused_seq;
     }
 
     char big[40], small[64], a[16], b[16];
@@ -505,6 +562,13 @@ void App::update_toast(const core::state::Frame& f) {
         game_event_.set("LINE NOT SET", small, color::kWarn, now + kLineToastMs);
     }
 
+    // CONFIG -> SD card -> USB drive while moving: `logic` refused it.
+    if (f.nav.usb_refused_seq != seen_usb_refused_) {
+        seen_usb_refused_ = f.nav.usb_refused_seq;
+        game_event_.set("USB DRIVE: PARKED ONLY", "stop the bike, then try again", color::kWarn,
+                        now + kLineToastMs);
+    }
+
     const core::state::Notify& n = f.notify;
     const bool moving = f.motion.best_mph >= kMovingMph;
     if (n.seq != seen_notify_) {
@@ -583,6 +647,15 @@ void App::update(const core::state::Frame& f) {
         dev_running_ = dev;
         needs_full_ = true;
     }
+    // The FPS counter: turned on, it is drawn as damage; turned off, the
+    // patch it covered is painted back, like a dismissed alert.
+    const bool fps = ctx_.settings && ctx_.settings->show_fps;
+    if (fps != fps_on_) {
+        fps_on_ = fps;
+        if (fps) fps_tag_.touch();
+        else restore(kFpsTag);
+    }
+    if (fps_on_ && ctx_.system) fps_tag_.set(ctx_.system->render_hz_x10, ctx_.system->render_sent_hz);
 
     // CONFIG hands itself over to the gear calibration page while `logic`
     // has a run open, and takes itself back at the end. Entering needs a
@@ -703,6 +776,7 @@ void App::paint_region(Canvas& c) {
     if (toast_.active() && c.intersects(toast_.bounds)) toast_.render(c);
     if (alert_.active() && c.intersects(alert_.bounds)) alert_.render(c);
     if (dev_running_ && c.intersects(dev_tag_.bounds)) dev_tag_.render(c);
+    if (fps_on_ && c.intersects(fps_tag_.bounds)) fps_tag_.render(c);
 }
 
 void App::render(Canvas& c, bool full) {
@@ -760,6 +834,10 @@ void App::render(Canvas& c, bool full) {
         if (c.intersects(dev_tag_.bounds)) dev_tag_.render(c);
         dev_tag_.clear_dirty();
     }
+    if (fps_on_) {
+        if (c.intersects(fps_tag_.bounds)) fps_tag_.render(c);
+        fps_tag_.clear_dirty();
+    }
 }
 
 size_t App::damage(Damage* out, size_t max) {
@@ -796,6 +874,7 @@ size_t App::damage(Damage* out, size_t max) {
     if (toast_.active() && toast_.dirty && n < max) out[n++] = Damage{&toast_, toast_.bounds};
     if (alert_.active() && alert_.dirty && n < max) out[n++] = Damage{&alert_, alert_.bounds};
     if (dev_running_ && dev_tag_.dirty && n < max) out[n++] = Damage{&dev_tag_, dev_tag_.bounds};
+    if (fps_on_ && fps_tag_.dirty && n < max) out[n++] = Damage{&fps_tag_, fps_tag_.bounds};
     return n;
 }
 
@@ -809,6 +888,8 @@ void App::draw_damage(Canvas& c, const Damage& d) {
         return;
     }
     d.w->render(c);
+    // The FPS counter is the topmost thing on the glass: nothing goes over it.
+    if (d.w == &fps_tag_) return;
     // Over everything, as on a full repaint: an overlay whose own pixels
     // did not change still has to cover what was just drawn under it.
     if (d.w != &slip_bar_ && d.w != &alert_ && d.w != &dev_tag_ && d.w != &toast_ &&
@@ -821,6 +902,7 @@ void App::draw_damage(Canvas& c, const Damage& d) {
     }
     if (d.w != &alert_ && alert_.active() && d.r.intersects(alert_.bounds)) alert_.render(c);
     if (d.w != &dev_tag_ && dev_running_ && d.r.intersects(dev_tag_.bounds)) dev_tag_.render(c);
+    if (fps_on_ && d.r.intersects(fps_tag_.bounds)) fps_tag_.render(c);
 }
 
 void App::clear_damage() {
@@ -833,6 +915,7 @@ void App::clear_damage() {
     toast_.clear_dirty();
     alert_.clear_dirty();
     dev_tag_.clear_dirty();
+    fps_tag_.clear_dirty();
 }
 
 }  // namespace ui

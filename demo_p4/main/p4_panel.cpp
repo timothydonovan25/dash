@@ -10,7 +10,7 @@
 // panel has a real hardware reset line (GPIO5) that has to be pulsed
 // before it will answer anything, which the generic driver never learned
 // about because we had it configured as GPIO_NUM_NC. See
-// docs/bringup-p4-demo.md.
+// demo_p4/README.md.
 //
 // The DPI panel gives us a real framebuffer in memory that the DSI
 // peripheral scans out continuously; there is no bus transaction to push a
@@ -45,7 +45,7 @@ namespace {
 constexpr const char* kTag = "p4_panel";
 
 // If the picture comes up sideways or mirrored on first boot, this is the
-// first thing to flip — see docs/bringup-p4-demo.md.
+// first thing to flip — see demo_p4/README.md.
 constexpr bool kRotateCw = true;
 
 constexpr int kNativeRows = p4pins::kPanelNativeH;   // 800
@@ -349,7 +349,7 @@ hal::Status P4Panel::init() {
 
     // LEDC PWM for actual dimming — upgrades set_backlight() to real
     // dimming if it configures; falls back to the plain on/off above if
-    // not (see docs/bringup-p4-demo.md for why that fallback exists).
+    // not (see demo_p4/README.md for why that fallback exists).
     ledc_timer_config_t timer_cfg = {};
     timer_cfg.speed_mode = kBacklightMode;
     timer_cfg.timer_num = kBacklightTimer;

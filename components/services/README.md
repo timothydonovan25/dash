@@ -1,37 +1,37 @@
-The tasks. Each glues drivers to core logic and publishes into state.
+The thirteen tasks. Each glues drivers to core logic and publishes into
+state; each is a loop plus a health report. If one starts to look clever,
+the clever part belongs in `core/` where it can be tested.
 
-`ctrl` `imu` `gnss` `logic` `input` `render` `logger` `storage` `keeper`
-`ble`, plus the one command queue. Cores and priorities are fixed in docs/system-architecture.md §5 and
-repeated at the top of `services.hpp`.
+| Core 0 (real-time) | Core 1 (can be late) |
+|---|---|
+| `ctrl` 18, 500 Hz + every tach edge | `render` 6, 120 Hz |
+| `imu` 15, 200 Hz | `logger` 2 |
+| `gnss` 12 | `storage` 3 |
+| `logic` 10, 50 Hz + on demand (`logic_tick.cpp`) | `keeper` 3, 20 Hz |
+| `input` 9, 200 Hz | `power` 22, 1 kHz |
+| | `ota` 2, `ble` 4, `wifi` 3 |
 
-Core 0 is a real-time island; do not put a radio or a filesystem on it.
+Core and priority are set where each `*_service.cpp` creates its task;
+`docs/system-architecture.md` §5 has what each owns. Core 0 never gets a
+radio or a filesystem.
 
-`ble` runs the Dash Media GATT server (§11.1) over the module's C6, through
-ESP-Hosted. NimBLE's callbacks only queue what happened; `ble` is the one
-writer of `media` and `ble_diag`, and the line parsing is `core::media`,
-host-tested. Which phone may stay is `core::ble`'s call (§11.3); `ble` only
-acts on it, and takes CONFIG's Forget / Pairing mode from `logic` through
-the `ble_request` slot. It also lowers ESP-Hosted's own tasks, which the component
-creates at priority 23 with no core affinity, below everything on core 0.
+- `ble` — the §11.1 Dash Media server, an iPhone's AMS/ANCS, and the watch's
+  heart rate, over ESP-Hosted to the C6. NimBLE's callbacks only queue; `ble`
+  is the one writer of `media`, `notify`, `heart` and `ble_diag`. It lowers
+  ESP-Hosted's tasks (23, no affinity) to 8 by name, and `c6_firmware.cpp`
+  keeps the C6's firmware current from `slave_fw`.
+- `ota` — the stable/dev slots (§11.7), the only writer of the dev slot,
+  every flash write parked-only, reading an install from the card or from
+  `Deps::ota_stream` (a Wi-Fi upload). Decisions are `core::ota`'s.
+- `wifi` + `wifi_page.cpp` — the on-demand hotspot and its one page
+  (§11.7.1). It never writes flash; policy is `core::wifi`'s.
+- `storage` — owns the card's mount, eject, and the track files
+  (`track_store.cpp`, `TrackMailbox`); the seam for USB mass storage, which
+  is not written and cannot be done by halves.
+- `keeper` — health states, retry policy (`Deps::retry_requests`: the task
+  that owns a device re-inits it), NVS saves while still
+  (`settings_store.cpp`), backlight level, the console summary.
+- `stack_watch.cpp`, `watchdog.cpp` — stack high-water marks; the task
+  watchdog for `ctrl`, `imu`, `logic`, `render`.
+
 The TPMS scan is not written: it waits on a sensor to capture.
-
-`ota` owns the two app slots (§11.7): it works out at boot whether this
-image is stable or dev, installs from the card into the dev slot, and
-promotes dev to stable only when the rider asks, from DIAG → Update. Every
-flash write is parked-only. The decisions are `core::ota`'s. It reads an
-install from a `Source`: the card, or `Deps::ota_stream` for a Wi-Fi upload.
-
-`wifi` runs the update hotspot and its one page (§11.7.1), off until the
-rider turns it on. It carries an upload's bytes to `ota` and never writes
-flash itself; it serves logs through `hal::ICard::list`/`read_at` and
-firmware backups straight from the partitions. Its policy is `core::wifi`'s.
-It replaces the C6's firmware if the C6 turns out to have no Wi-Fi.
-
-`storage_service` owns the card and holds the seam where USB mass storage
-goes. MSC itself is not written, and it cannot be done by halves: the device
-has to unmount before a host mounts, or two writers corrupt the volume.
-
-Every service is a loop plus a health report. If one starts to look clever,
-the clever part belongs in `core/` where it can be tested — that is where
-the debounce, the tach maths, the attitude filter and the lap timer already
-went.

@@ -6,6 +6,7 @@
 #pragma once
 #include "core/state/published.hpp"
 #include "core/state/vehicle.hpp"
+#include "core/crash/crash.hpp"
 
 namespace core::state {
 
@@ -25,6 +26,8 @@ struct Slots {
     Published<Health>   health;     // keeper
     Published<BleDiag>  ble_diag;   // ble
     Published<Waypoints> waypoint;  // logic
+    Published<Nav>      nav;        // logic
+    Published<PhoneDest> phone_dest; // ble; not in Frame, `logic` reads it
     Published<Fused>    fused;      // logic
     Published<GearCal>  gear_cal;   // logic
     Published<Session>  session;    // logic
@@ -33,6 +36,7 @@ struct Slots {
     Published<Notify>   notify;     // ble
     Published<Heart>    heart;      // ble
     Published<HrRecovery> hr_recovery;  // logic
+    Published<core::crash::State> crash; // logic (core::crash)
     // Not in Frame: nothing on screen reads it, only whichever task owns
     // the radio. See core::state::MediaCtrl.
     Published<MediaCtrl> media_ctrl;  // logic
@@ -65,6 +69,7 @@ struct Frame {
     Ota      ota;
     Wifi     wifi;
     Waypoints waypoint;
+    Nav      nav;
     Fused    fused;
     GearCal  gear_cal;
     Session  session;
@@ -73,6 +78,7 @@ struct Frame {
     Notify   notify;
     Heart    heart;
     HrRecovery hr_recovery;
+    core::crash::State crash;
     uint32_t t_ms = 0;
 };
 

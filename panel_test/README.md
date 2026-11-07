@@ -1,6 +1,13 @@
 # panel_test — the ILI9488 on a bare ESP32-S3 dev board
 
-Step one of `docs/s3-parallel-respin.md` §2: before laying out a respin,
+> **History.** Built for the ESP32-S3 respin that was never made
+> (`docs/history/s3-parallel-respin.md`); it targets an S3 dev board and
+> has never run. The bike board's panel is brought up by
+> `components/drivers/src/ili9488.cpp` (`docs/bringup.md` §3). The *What
+> you should see* and *Reading the ramps* tables below still apply to any
+> ILI9488 on an 8-bit bus.
+
+Step one of `docs/history/s3-parallel-respin.md` §2: before laying out a respin,
 prove the panel runs on an 8-bit 8080 bus, that all eight data lines work,
 and measure a full frame. It also runs the shipped board's 4-line SPI mode,
 which is the first thing to try: if SPI does not light the panel, the fault
@@ -151,6 +158,6 @@ The floor is the wire alone: 307 kB at one byte per WR on i80, 460 kB at
 one bit per clock on SPI. Measured close to the floor means the bus is the
 limit, as expected. Raise the clock in menuconfig until the toggle test
 speckles, then back off. **Record the highest clean clock and its frame
-time in `docs/s3-parallel-respin.md`** — §6 decides from that number
+time in `docs/history/s3-parallel-respin.md`** — §6 decides from that number
 whether dirty rects can go. The datasheet's write cycle (about 66 ns, so
 roughly 15 MHz) is the in-spec ceiling, whatever the bench tolerates.

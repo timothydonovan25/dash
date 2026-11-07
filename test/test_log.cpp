@@ -179,7 +179,8 @@ int main() {
 
         // The replay columns, at the end where RaceRender ignores them, and
         // one cell per name.
-        CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR\n"));
+        CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,"
+                             "NavTurnFt,NavDestMi,LimitMPH\n"));
         const auto commas = [](const char* p) {
             size_t c = 0;
             for (; *p && *p != '\n'; ++p) c += *p == ',';
@@ -191,10 +192,15 @@ int main() {
         r.fused_mph = 30.5f;
         r.alt_ft = 5280.4f;
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",5280,0\n"));              // whole feet, then no HR
+        CHECK(contains(line, ",5280,0,0,0.00,0\n"));     // whole feet, no HR, not routing
         r.hr_bpm = 142;
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",5280,142\n"));            // heart rate, last
+        CHECK(contains(line, ",5280,142,"));              // heart rate
+        r.nav_turn_ft = 412.6f;
+        r.nav_dest_mi = 12.345f;
+        r.limit_mph = 45;
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",142,413,12.35,45\n"));    // routing, last
         CHECK(contains(line, ",31.25,"));
         CHECK(contains(line, ",45296.12,"));
         CHECK(contains(line, ",30.50,"));
@@ -303,7 +309,7 @@ int main() {
 
         // Every option has a label; the menu indexes this array directly.
         for (uint8_t r = 0; r < kRateCount; ++r) CHECK(kRateLabels[r] != nullptr);
-        CHECK(contains(kRateLabels[0], "Off"));
+        CHECK(contains(kRateLabels[0], "No log"));
     }
 
     CASE("the decimator logs the first tick, then holds the rate");

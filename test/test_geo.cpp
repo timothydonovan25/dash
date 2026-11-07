@@ -117,27 +117,5 @@ int main() {
     CHECK(x.crossed);
     CHECK_NEAR(x.fraction, 3.0 / 8.8, 0.03);   // worth ~65 ms of lap accuracy
 
-    CASE("guide: heading-up when riding, north-up when parked");
-    {
-        const LatLon here{40.0, -75.0};
-        const LatLon north{40.0 + 1000.0 / 364000.0, -75.0};   // ~1000 ft north
-        // Riding east: the waypoint is 90 degrees to the left.
-        Guide g = guide(here, 90.0f, 20.0f, north);
-        CHECK(g.heading_up);
-        CHECK_NEAR(g.dist_ft, 1000.0, 15.0);
-        CHECK_NEAR(g.bearing_deg, 0.0, 0.5);
-        CHECK_NEAR(g.rel_deg, -90.0, 0.5);
-        // Riding south: straight behind, which is +/-180.
-        g = guide(here, 180.0f, 20.0f, north);
-        CHECK_NEAR(std::fabs(g.rel_deg), 180.0, 0.5);
-        // Parked, the course is noise: measured from north instead.
-        g = guide(here, 90.0f, 1.0f, north);
-        CHECK(!g.heading_up);
-        CHECK_NEAR(g.rel_deg, 0.0, 0.5);
-        // On top of it.
-        g = guide(here, 0.0f, 0.0f, here);
-        CHECK_NEAR(g.dist_ft, 0.0, 0.01);
-    }
-
     return check::report("geo");
 }

@@ -67,6 +67,13 @@ struct Record {
     // The rider's heart rate from the watch (core/hr), bpm. 0 when there is
     // no current reading: the setting off, no watch, or the last one stale.
     uint16_t hr_bpm     = 0;
+
+    // Turn-by-turn (core::route), 0 when not routing: the distance to the
+    // next turn, what is left of the route, and the road's posted limit
+    // from the map (0 also where the map has none).
+    float    nav_turn_ft = 0.0f;
+    float    nav_dest_mi = 0.0f;
+    uint8_t  limit_mph   = 0;
 };
 
 enum Flags : uint16_t {

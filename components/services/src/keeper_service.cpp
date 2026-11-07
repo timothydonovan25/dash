@@ -40,6 +40,77 @@ constexpr double kOdoWriteThresholdMi = 0.01;
 
 constexpr uint32_t kHealthPeriodMs = 50;
 constexpr uint32_t kSlowEvery = 1000 / kHealthPeriodMs;   // passes per second
+constexpr uint32_t kStatusPeriodMs = 5000;
+
+const char* dev_state(const core::state::Health& h, core::state::Dev dev) {
+    switch (h[dev].state) {
+        case core::state::DevState::Absent:   return "absent";
+        case core::state::DevState::Init:     return "init";
+        case core::state::DevState::Ok:       return "ok";
+        case core::state::DevState::Degraded: return "degraded";
+        case core::state::DevState::Fault:    return "FAULT";
+    }
+    return "?";
+}
+
+// Every 5 s on the USB console, one line per service, from the slots and
+// SystemInfo: what a soak or a bench session watches (docs/console.md).
+void print_status(Deps& d, uint32_t now) {
+    using core::state::Dev;
+    const ui::SystemInfo& s = *d.system;
+    const core::state::Health h = d.slots->health.get();
+    const core::state::Engine e = d.slots->engine.get();
+    const core::state::Motion m = d.slots->motion.get();
+    const core::state::Gnss g = d.slots->gnss.get();
+    const core::state::Fused f = d.slots->fused.get();
+    const core::state::Trip t = d.slots->trip.get();
+    const core::state::Battery bt = d.slots->battery.get();
+    const core::state::Ota o = d.slots->ota.get();
+    const core::state::BleDiag b = d.slots->ble_diag.get();
+    const core::state::Heart hr = d.slots->heart.get();
+    const core::state::Wifi w = d.slots->wifi.get();
+    const auto lost = [](const auto* r) { return r ? static_cast<unsigned>(r->dropped()) : 0u; };
+    const auto u = [](auto v) { return static_cast<unsigned>(v); };
+    const auto f1 = [](float v) { return static_cast<double>(v); };
+
+    printf("---- status at %u s ----\n", u(now / 1000));
+    printf("ctrl    lamps %s, late ticks %u, rpm %.0f, gear %u%s, tps %.0f%%, front %.1f rear %.1f mph\n",
+           dev_state(h, Dev::LedDriver), u(s.ctrl_late), f1(e.rpm), u(e.gear),
+           e.neutral ? " (N)" : "", f1(e.tps_pct), f1(m.front_mph), f1(m.rear_mph));
+    printf("imu     %s, timeouts %u, most waiting %u (FIFO ~128), wakes >64 %u, >100 %u\n",
+           dev_state(h, Dev::Imu), u(s.imu_timeouts), u(s.imu_catchup_max),
+           u(s.imu_catchup_over64), u(s.imu_catchup_over100));
+    printf("gnss    %s, %s, sats %u, hdop %.1f, %.6f %.6f, %.1f mph, sentences %u, bad checksums %u\n",
+           dev_state(h, Dev::Gnss), g.fix ? "FIX" : "no fix", u(g.sats), f1(g.hdop), g.lat, g.lon,
+           f1(g.speed_mph), u(s.gnss_sentences), u(s.gnss_bad_csum));
+    printf("logic   fused %s%.1f mph, resets %u, odo %.2f mi, trip A %.2f mi, engine %.2f h\n",
+           f.speed_valid ? "" : "(invalid) ", f1(f.speed_valid ? f.speed_mph : 0.0f), u(f.resets),
+           f1(t.odo_mi), f1(t.trip_a_mi), f1(t.eng_hours));
+    printf("input   pod %s, bus recoveries %u, stuck %u\n",
+           dev_state(h, Dev::McpPod), u(s.pod_recoveries), u(s.pod_stuck));
+    printf("render  panel %s, %u.%u Hz, %u Hz sent\n",
+           dev_state(h, Dev::Display), u(s.render_hz_x10 / 10), u(s.render_hz_x10 % 10),
+           u(s.render_sent_hz));
+    printf("logger  rows %u, %u bytes, %u errors, slowest %u ms, dropped %u/%u/%u/%u/%u (bb/imu/tach/det/evt)\n",
+           u(s.log_records), u(s.log_bytes), u(s.log_errors), u(s.log_max_ms), lost(d.blackbox),
+           lost(d.imu_log), lost(d.tach_log), lost(d.det_log), lost(d.evt_log));
+    printf("storage sd %s%s%s\n", dev_state(h, Dev::Sd),
+           s.sd_ejected ? ", ejected" : "", s.sd_usb ? ", USB drive" : "");
+    printf("keeper  heap %u free, %u lowest, %u largest; psram %u free; chip %.1f C; stack low %s %u B\n",
+           u(s.heap_free_b), u(s.heap_min_b), u(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+           u(s.psram_free_b), f1(s.chip_temp_ok ? s.chip_temp_c : 0.0f), s.stack_low_task,
+           u(s.stack_low_free_b));
+    printf("power   battery %.2f V, rest %.2f, charge %.2f, crank min %.2f, verdict %u%s\n",
+           f1(d.slots->elec.get().vbat), f1(bt.rest_v), f1(bt.charge_v), f1(bt.crank_min_v),
+           u(bt.verdict), d.power_fail.load(std::memory_order_relaxed) ? ", SUPPLY CUT" : "");
+    printf("ota     %s %s from %s, install %u (%u%%), error %u\n",
+           core::ota::role_name(o.role), o.running_ver, o.running_slot, u(o.install),
+           u(o.install_pct), u(o.error));
+    printf("ble     host %s, phone %s, rssi %d, bonds %u, watch link %u, %u bpm\n",
+           dev_state(h, Dev::BleHost), dev_state(h, Dev::Phone), b.has_rssi ? b.rssi_dbm : 0,
+           u(b.bonds), u(hr.link), u(hr.bpm));
+    printf("wifi    %s, %u clients\n", core::wifi::state_name(w.state), u(w.clients));
+}
 
 // Is there a core dump in flash, and which task made it? Once, at boot: a
 // dump only changes with a crash, and a crash is a reboot. The summary is
@@ -82,7 +153,7 @@ void keeper_task(void* arg) {
     core::sun::AutoDim auto_dim;
     uint32_t pass = 0;
     uint32_t saved_wp_gen = 0;
-    uint32_t gnss_log_ms = 0;
+    uint32_t status_ms = 0;
     TickType_t next = xTaskGetTickCount();
 
     for (;;) {
@@ -105,19 +176,6 @@ void keeper_task(void* arg) {
         }
 
         d.health->publish_if_changed(d.slots->health, now);
-
-        // shortcut: bring-up only. The attitude at 20 Hz for tools/imu_view.py,
-        // only while a USB host is there to read it (is_connected() costs a
-        // little on every tick); remove once DIAG -> IMU is on a panel.
-        if (d.system && usb_serial_jtag_is_connected()) {
-            const core::state::Attitude a = d.slots->attitude.get();
-            printf("IMU %.2f %.2f %.2f %.3f %.3f %.3f %.2f %.1f %u\n",
-                   static_cast<double>(a.lean_deg), static_cast<double>(a.pitch_deg),
-                   static_cast<double>(a.heading_deg), static_cast<double>(a.g_lon),
-                   static_cast<double>(a.g_lat), static_cast<double>(a.g_vert),
-                   static_cast<double>(a.yaw_rate_dps), static_cast<double>(a.imu_temp_c),
-                   static_cast<unsigned>(d.system->imu_timeouts));
-        }
 
         if (++pass < kSlowEvery) continue;
         pass = 0;
@@ -202,42 +260,17 @@ void keeper_task(void* arg) {
 
             watch_stacks(*d.system, now);
 
-            // The GPS on the console every 10 s: with no panel, DIAG -> GPS
-            // is not there to read. From here, core 1, not from `gnss`.
-            if (now - gnss_log_ms >= 10000) {
-                gnss_log_ms = now;
-                const core::state::Gnss g = d.slots->gnss.get();
-                ESP_LOGI("gnss", "sentences %u, bad checksums %u, %s, sats %u, hdop %.1f",
-                         static_cast<unsigned>(d.system->gnss_sentences),
-                         static_cast<unsigned>(d.system->gnss_bad_csum),
-                         g.fix ? "FIX" : "no fix", static_cast<unsigned>(g.sats),
-                         static_cast<double>(g.hdop));
-                const core::state::Battery bt = d.slots->battery.get();
-                ESP_LOGI("power", "battery %.2f V (VIN + trim), rest %.2f, charge %.2f, crank min %.2f, verdict %u",
-                         static_cast<double>(d.slots->elec.get().vbat), static_cast<double>(bt.rest_v),
-                         static_cast<double>(bt.charge_v), static_cast<double>(bt.crank_min_v),
-                         static_cast<unsigned>(bt.verdict));
-                // For a soak on the bench: a leak is a falling `free` here.
-                ESP_LOGI("heap", "internal free %u, lowest %u, largest %u; psram free %u",
-                         static_cast<unsigned>(d.system->heap_free_b),
-                         static_cast<unsigned>(d.system->heap_min_b),
-                         static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
-                         static_cast<unsigned>(d.system->psram_free_b));
-                ESP_LOGI("imu", "most samples waiting at one wake: %u (the FIFO holds ~128); wakes over 64: %u, over 100: %u",
-                         static_cast<unsigned>(d.system->imu_catchup_max),
-                         static_cast<unsigned>(d.system->imu_catchup_over64),
-                         static_cast<unsigned>(d.system->imu_catchup_over100));
-                ESP_LOGI("timing", "ctrl late ticks %u, render %u.%u Hz",
-                         static_cast<unsigned>(d.system->ctrl_late),
-                         static_cast<unsigned>(d.system->render_hz_x10 / 10),
-                         static_cast<unsigned>(d.system->render_hz_x10 % 10));
-            }
-
             // Bus recoveries live in the driver that performs them; the
             // DIAG bus screen is the reason they are counted at all.
             if (auto* pod = static_cast<drivers::ButtonPod*>(d.pod)) {
                 d.system->pod_recoveries = pod->recoveries();
                 d.system->pod_stuck = pod->stuck();
+            }
+
+            // The console's one periodic output: a line per service.
+            if (now - status_ms >= kStatusPeriodMs) {
+                status_ms = now;
+                if (usb_serial_jtag_is_connected()) print_status(d, now);
             }
         }
 

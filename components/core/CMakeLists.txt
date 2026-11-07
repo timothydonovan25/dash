@@ -40,4 +40,12 @@ idf_component_register(
          "src/perf.cpp"
          "src/stunt.cpp"
          "src/hr.cpp"
+         "src/route_graph.cpp"
+         "src/route_query.cpp"
+         "src/route_follow.cpp"
+         "src/route_navigator.cpp"
+         "src/route_dest.cpp"
+         "src/route_search.cpp"
+         "src/route_pace.cpp"
+         "src/crash.cpp"
     INCLUDE_DIRS "include")

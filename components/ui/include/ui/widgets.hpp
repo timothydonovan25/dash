@@ -223,17 +223,32 @@ public:
     // Points ever added, which keeps moving after a full buffer's count()
     // stops: what the map watches to know the trace has grown.
     virtual size_t total() const { return count(); }
+    // A planned route's point, and whether the stretch from the point
+    // before is on a 65 mph road (drawn amber).
+    virtual bool route_point(size_t i, float& x_ft, float& y_ft, bool& fast) const {
+        fast = false;
+        return point(i, x_ft, y_ft);
+    }
 };
 
 class MapView : public Widget {
 public:
     void set_source(const IPointSource* src);
+    // A planned route (core::route), drawn under the trace and inside the
+    // fit. Its total() is a generation: when it changes, the map redraws.
+    void set_route(const IPointSource* route);
     // Called every frame. The marker is drawn on the newest trace point,
     // which is where the bike is, with a pointer the way it was going (from
     // the trace itself, so it always agrees with the line under it, and
     // moves when the trace is redrawn rather than on every fix); `valid` is
     // whether to draw it at all.
     void set_live(bool valid);
+    // NAV's route view: fit the route alone (the day's trace is clipped),
+    // draw it bright with the destination ringed, the bike white so it
+    // stands off the amber 65 mph stretches.
+    void set_route_only(bool on) {
+        if (assign_t(route_only_, on)) fit_stale_ = true;
+    }
     void render(Canvas& c) override;
 
 private:
@@ -245,12 +260,16 @@ private:
     void refit();
 
     const IPointSource* src_ = nullptr;
+    const IPointSource* route_ = nullptr;
+    size_t drawn_route_ = 0;
+    size_t fit_route_n_ = 0;
     static constexpr size_t kRedrawPoints = 10;
 public:
     // Between the frame and the trace, for the marker and its pointer.
     static constexpr int16_t kMarkerMargin = 14;
 private:
     size_t drawn_total_ = 0;
+    bool  route_only_ = false;
     bool  valid_ = false;
     bool  fit_stale_ = true;
     size_t fit_n_ = 0;
@@ -572,38 +591,59 @@ private:
 // air is worth interrupting the trip map for (§7.4).
 class AlertOverlay : public Widget {
 public:
-    void show(const char* text, Color c = color::kAlarm);
+    // `hint` is the small line under it: what a press does.
+    void show(const char* text, Color c = color::kAlarm, const char* hint = "E to dismiss");
     void dismiss();
     bool active() const { return active_; }
     void render(Canvas& c) override;
 
 private:
     TextBuf<28> text_;
+    TextBuf<48> hint_;
     Color       color_ = color::kAlarm;
     bool        active_ = false;
 };
 
 // "DEV", in a corner, on every frame a dev image is running, so nobody rides
 // a test build thinking it is the real one.
-// The NAV screen's pointer: an arrow in a ring, pointing at the waypoint.
-// `rel_deg` is from the top of the ring, clockwise. Heading-up when riding,
-// so straight up is "ahead"; north-up when parked, with an N on the ring.
-// `--` with no fix or no waypoint.
-class NavArrow : public Widget {
+// Background, and nothing else: the gutters of a screen whose views tile
+// the body exactly (NAV's picker and guidance), so a view change repaints
+// every pixel without two widgets claiming one.
+class Blank final : public Widget {
 public:
-    void set(float rel_deg, bool heading_up, bool valid);
+    void render(Canvas& c) override { c.fill_rect(bounds, color::kBg); }
+};
+
+// NAV's "Where to?" keyboard: 39 keys in a 13 x 3 grid, DEL, then LIST (or
+// GO), then core::route::kAlphabet. Keys that cannot lead anywhere are
+// drawn dim, as an old Garmin greys them; the cursor's key is filled.
+class KeyGrid : public Widget {
+public:
+    static constexpr int kKeys = 39;
+    static constexpr int kCols = 13;
+    // `enabled` bit k for key k; `cursor` a key index, or -1 for none.
+    void set(uint64_t enabled, int cursor, const char* second);
     void render(Canvas& c) override;
-    // Where the chevron was and where it is, not the whole 236x236 dial:
-    // heading-up while riding, it turns on nearly every fix.
-    int damage(Rect* out, int max) const override;
-    void clear_dirty() override { Widget::clear_dirty(); sent_deg_ = rel_deg_; }
+    static char key_char(int k);       // the character of key k (2..38), 0 for DEL/LIST
 
 private:
-    Rect chevron_box(int16_t deg) const;
+    uint64_t enabled_ = 0;
+    int      cursor_ = -1;
+    char     second_[6] = "LIST";
+};
 
-    int16_t rel_deg_ = 0;           // whole degrees: finer only redraws noise
-    int16_t sent_deg_ = 0;
-    bool    heading_up_ = false;
+// The NAV screen's next turn (core::route::CueKind): a stem from below and
+// an arm at the turn's real angle with an arrowhead, so a slight fork reads
+// differently from a hairpin. A U-turn is a hook; the arrival a target.
+// Nothing at all with `valid` false.
+class TurnArrow : public Widget {
+public:
+    void set(uint8_t kind, int16_t turn_deg, bool valid);
+    void render(Canvas& c) override;
+
+private:
+    uint8_t kind_ = 0;
+    int16_t turn_deg_ = 0;          // 5-degree steps: finer is noise
     bool    valid_ = false;
 };
 
@@ -644,6 +684,23 @@ private:
 class DevTag : public Widget {
 public:
     void render(Canvas& c) override;
+};
+
+// The render rate, small, in the top-left corner (CONFIG -> Diag -> FPS
+// counter): "tried/sent", frames a second and the ones that put anything on
+// the wire. The App owns it like the DEV tag.
+class FpsTag : public Widget {
+public:
+    // Tenths of a hertz, as SystemInfo::render_hz_x10 carries it; whole hertz sent.
+    void set(uint16_t hz_x10, uint16_t sent_hz) {
+        assign_t(hz_, static_cast<uint16_t>((hz_x10 + 5) / 10));
+        assign_t(sent_, sent_hz);
+    }
+    void render(Canvas& c) override;
+
+private:
+    uint16_t hz_ = 0xFFFF;   // nothing shown yet, so the first set() draws
+    uint16_t sent_ = 0xFFFF;
 };
 
 // A strip along the bottom of every screen, for a few seconds: a trick that

@@ -1,29 +1,28 @@
-One component per chip. A driver knows its chip and nothing about the app.
+One component per chip. A driver knows its chip and nothing about the app,
+reports health, and decides no policy (rule 5).
 
-`clock` `pod` (MCP23017) `engine_sense` `pa1616d` `icm42688p` `ili9488`
-`pca9955b` `vin_sense` `nvs_storage` `sdcard`. The ILI9488 command set comes
-from the `esp_lcd_ili9488` managed component rather than being written here.
+| Driver | Chip / job |
+|---|---|
+| `ili9488` | The panel on the 8-bit i80 bus, via the `esp_lcd_ili9488` managed component (IPS init for the HT035; VIEWE's ST7365 table for the UEED035HV, told apart by which WR/RS wiring makes TE pulse). Forwards the backlight to `pca9955b` |
+| `pca9955b` | Shift lamps (OUT0–7) and backlight (OUT8–10), I2C1 at 1 MHz. `init()` rewrites every register: its reset is on the P4's EN |
+| `icm42688p` | IMU on SPI2, FIFO-driven, every transaction polling (never a queued transmit beside the SD host) |
+| `pa1616d` | GPS on UART1, bytes only (the parser is `core/nmea`); baud negotiation that proves itself |
+| `pod` | Handlebar pod, MCP23017 on I2C0 at 100 kHz, polled; `recover_bus` clocks a stuck bus free |
+| `engine_sense` | Tach and both wheel Halls (one driver: the same three edge counters behind one latched read) and neutral |
+| `vin_sense` | VIN divider on ADC1: bike vs USB, key-off |
+| `sdcard` (+ `sdcard_spi.cpp`) | The card and its one lock; the mount is behind `sdcard_mount.hpp` (SPI here, SDMMC on the demo) |
+| `chip_temp` | The P4's die temperature |
+| `nvs_storage`, `clock` | NVS, and time |
 
-This is the P4 board's set (docs/p4-board-pin-map.md): no MCP23S17, the
-panel on an 8-bit 8080 bus, the shift lamps and backlight on a PCA9955B.
-They compile clean for esp32p4 against IDF v6.0.2. **Only some of it has
-run:** the panel, the SD card, GPS and the IMU on the bench, on the first
-board (2026-10-28; `docs/bringup.md` opens with the full status). Compiling
-is not working: they are written against
-the datasheets and the netlist, which is not the same as correct — every class
-is the right shape, the register maps and init orders are there, and the
-places that can only be settled on a bench are marked BRINGUP rather than
-guessed at confidently. In particular:
+They compile clean for esp32p4 against IDF v6.0.2. **Only some has run on
+the bike board** — `docs/bringup.md`'s status table is the record. The rest
+is written against datasheets and the netlist; every place that can only be
+settled on a bench is marked `BRINGUP` (bringup §10 lists them), e.g. the
+IMU axis mapping (bench only, not ridden), the tach refractory window, and
+`ButtonPod::recover_bus` (never freed a real stuck slave; DIAG → Bus counts
+its recoveries and the ones that left SDA low).
 
-- the IMU axis mapping is checked on the bench, not yet on a ride;
-- the tach refractory window is a starting number, not a measured one;
-- I2C bus recovery (`ButtonPod::recover_bus`: up to nine SCL clocks by
-  hand, then a STOP) is written but has never freed a real stuck slave;
-  DIAG -> Bus counts its recoveries and the ones that left SDA low.
+Pin numbers come only from `components/bsp/include/bsp/pins.hpp`. A driver
+adds a device to a bus `bsp/buses.cpp` already made.
 
-`tach_capture` and `hall_capture` from the architecture sketch are one
-`engine_sense` here — they are the same three edge counters behind one
-latched read. The backlight is three channels of the `pca9955b`, which
-`ili9488` forwards to.
-
-Work down DIAG → Sensors. That screen exists for bring-up.
+Work down DIAG → Sensors and DIAG → Bus. Those screens exist for bring-up.

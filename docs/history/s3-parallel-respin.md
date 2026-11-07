@@ -1,8 +1,12 @@
 # S3 respin — ILI9488 on an 8-bit parallel bus
 
-> **Historical — superseded.** The parallel-bus panel this planned was
-> carried into the P4 board instead of an S3 respin (`p4-board-pin-map.md`).
-> The `panel_test/` procedure in §2 still applies.
+> **History: a respin of the ESP32-S3 board that was never made.** The
+> 8-bit 8080 panel it planned went onto the P4 board instead. Its open
+> questions were answered there: the HT035 runs in 8080 (IPS init), clean
+> at 25 and 30 MHz through `esp_lcd_ili9488` on an i80 handle, about 12 ms
+> a frame — and dirty rects stayed (`ui::Shadow`, features §4). `panel_test/`
+> was its step one (S3, never run). The §5.2 bench notes on the S3 power
+> section describe that board only. Kept for the reasoning.
 
 **Status.** A plan, not a design. Nothing here has been drawn, ordered or
 tested. The shipped S3 board (`Sheet_1_2026-09-23.net`, 167 parts, 110

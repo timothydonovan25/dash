@@ -6,6 +6,7 @@ idf_component_register(
          "src/logic_service.cpp"
          "src/logic_tick.cpp"
          "src/track_store.cpp"
+         "src/route_store.cpp"
          "src/input_service.cpp"
          "src/render_service.cpp"
          "src/keeper_service.cpp"

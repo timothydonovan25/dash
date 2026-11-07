@@ -47,7 +47,8 @@
 //        slip=KIND/pct, alert=TEXT, spaces as _, `-` for none;
 //        bl=backlight percent, which the front end dims the picture by;
 //        phase=lap phase 0 no line 1 armed 2 timing, track=saved track or -1.
-//        Saved tracks live in sim_card/tracks/, so they outlast a run)
+//        Saved tracks live in sim_card/tracks/, so they outlast a run;
+//        a routing map goes in sim_card/route/map.rgf)
 //        P6\n320 480\n255\n<pixels>
 #include "sim_bike.hpp"
 #include "panel_sim.hpp"
@@ -213,6 +214,7 @@ public:
     explicit DirCard(const char* root) : root_(root) {
         ::mkdir(root, 0777);
         ::mkdir((std::string(root) + "/tracks").c_str(), 0777);
+        ::mkdir((std::string(root) + "/route").c_str(), 0777);
     }
     hal::Status init() override { return hal::Status::Ok; }
     bool present() const override { return true; }
@@ -584,6 +586,14 @@ int main() {
     deps.lap_history = &lap_history;
     static services::TrackMailbox tracks;
     deps.tracks = &tracks;
+    // Routing (docs/navigation.md): put a map at sim_card/route/map.rgf
+    // (tools/routegraph) and favourites in sim_card/route/destinations.csv.
+    static services::RouteMailbox route_box;
+    static services::RouteEngine route_engine;
+    deps.route = &route_box;
+    deps.route_engine = &route_engine;
+    static services::RouteTrace route_trace;
+    deps.route_trace = &route_trace;
     static DirCard card("sim_card");
 
     // Everything reports healthy except the things that genuinely are not
@@ -631,6 +641,27 @@ int main() {
     static TraceSource trip_src(&trip_trace);
     static TraceSource lap_src(&lap_trace);
     app.set_trip_source(&trip_src);
+    // The planned route, as render_service hands it over.
+    struct RouteSource final : public ui::IPointSource {
+        explicit RouteSource(const services::RouteTrace* t) : t(t) {}
+        size_t count() const override { return t->pts.size(); }
+        size_t total() const override { return t->gen.load(); }
+        bool point(size_t i, float& x, float& y) const override {
+            bool fast;
+            return route_point(i, x, y, fast);
+        }
+        bool route_point(size_t i, float& x, float& y, bool& fast) const override {
+            core::state::TrackPoint p;
+            if (!t->pts.read_nth(i, p)) return false;
+            x = p.x_ft;
+            y = p.y_ft;
+            fast = p.speed_mph >= 65.0f;
+            return true;
+        }
+        const services::RouteTrace* t;
+    };
+    static RouteSource route_src(&route_trace);
+    app.set_route_source(&route_src);
     static core::hr::History hr_history;
     app.set_hr_history(&hr_history);
     app.set_track_source(&lap_src);
@@ -826,7 +857,10 @@ int main() {
         const bool card_in =
             dev_mode[static_cast<uint8_t>(core::state::Dev::Sd)] != DevMode::Absent;
         fake_storage.step(slots, health, system, card_in);
-        if (card_in && !fake_storage.ejected) services::serve_tracks(tracks, card);
+        if (card_in && !fake_storage.ejected) {
+            services::serve_tracks(tracks, card);
+            services::serve_route(route_box, route_engine, card);
+        }
         fake_wifi.step(slots, now, bike.speed_mph(), wifi_in_use);
         fake_ble.step(slots, health, now, phone_on);
         fake_heart.step(slots, settings, now, hr_bpm, hr_off_wrist);
@@ -952,8 +986,24 @@ int main() {
         panel.advance(static_cast<uint64_t>(kTickMs) * 1000000ull);
 
         // --- one frame --------------------------------------------------
+        static uint32_t sim_sent_frames = 0;   // frames that put anything on the wire
         if (now - last_frame < kFrameMs) continue;
         last_frame = now;
+        // `render`'s figure for DIAG -> System and the FPS counter: frames
+        // counted over each second, in tenths of a hertz.
+        {
+            static uint32_t fps_frames = 0, fps_since = 0;
+            ++fps_frames;
+            if (now - fps_since >= 1000) {
+                system.render_hz_x10 = static_cast<uint16_t>(
+                    fps_frames * 10000u / (now - fps_since));
+                system.render_sent_hz = static_cast<uint16_t>(
+                    sim_sent_frames * 1000u / (now - fps_since));
+                fps_frames = 0;
+                sim_sent_frames = 0;
+                fps_since = now;
+            }
+        }
         // render is blocked in its blit while the last frame is still on the
         // wire, so a slow bus drops frames instead of queueing them. The
         // glass keeps filling in; just redraw it.
@@ -1027,6 +1077,7 @@ int main() {
                 panel.queue_part(r, glass.data());
             }
             cost = wire.end_frame();
+            if (cost.transfers > 0) ++sim_sent_frames;
         }
         if (system.first_frame_ms == 0) system.first_frame_ms = now ? now : 1;
 

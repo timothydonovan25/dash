@@ -1,20 +1,45 @@
 # CRF250F Dashboard — Feature Reference
 
 Every feature of the v2 firmware, its tools and its simulator, as of
-firmware **1.46** (`tach-smooth`), 2026-10-24.
+firmware **1.62** (`bike-doom`), 2026-11-02. This is the reference for
+*what exists and how it behaves*; `CLAUDE.md` keeps only the rules and the
+traps, and `system-architecture.md` the argument for the shape.
 
-**Read this first.** The P4 board was ordered on 2026-10-07 and arrived on
-2026-10-28. Everything below is *written*. The parts under `components/core/`
-and `components/ui/` are host-tested (48 test files under `test/`) and run in
-the simulator. The parts that talk to hardware (drivers, services, BLE,
-Wi-Fi, OTA, power-fail) compile and link for the ESP32-P4, and **only some
-of it has run on the bike board**: the panel, the SD card, GPS and the IMU
-on the bench (`docs/bringup.md` opens with the full status). Some of it has
-run on the Guition demo board, and that is said where it applies. Where a feature is a placeholder or runs
-on guessed thresholds, its section says so.
+**Read this first.** Everything below is *written*. The parts under
+`components/core/` and `components/ui/` are host-tested (`test/test_*.cpp`)
+and run in the simulator. The parts that talk to hardware compile and link
+for the ESP32-P4, and **only some of it has run on the bike board**:
+`docs/bringup.md`'s status table is the one record of what has. Where a
+feature is a placeholder or runs on guessed thresholds, its section says so.
 
 Each section gives what the feature does, where it lives in the code, and
 how a rider reaches it. Paths are relative to the repo root.
+
+### Find a feature by its code
+
+| Code | § | Code | § |
+|---|---|---|---|
+| `core/alert` | 11.1 | `core/log` (blackbox, detail) | 23 |
+| `core/attitude` | 14.1 | `core/media`, `core/media/apple` | 24 |
+| `core/battery`, `core/power` | 21 | `core/nav` | 3, 9 |
+| `core/ble` (pairing) | 24 | `core/nmea`, `core/fixtime` | 16, 7.1 |
+| `core/c6` (C6 firmware push) | 24 | `core/ota` | 26 |
+| `core/crash` (crash SOS) | 24.3 | | |
+| `core/config` | 10, 34 | `core/perf` | 19 |
+| `core/delta` | 7.3 | `core/session` | 7.6 |
+| `core/flash` (`still`) | 28 | `core/shift`, `core/tach` | 12 |
+| `core/fusion` | 13 | `core/slip` | 11.3 |
+| `core/gear`, `core/gearcal` | 15 | `core/state` (slots, Frame, Command) | 2, 34 |
+| `core/geo`, `core/lap` | 7 | `core/stunt` | 20 |
+| `core/health` | 22 | `core/sun` | 27 |
+| `core/hr` | 24.2 | `core/sweep` | 5 |
+| `core/input` | 3 | `core/track` | 7.5 |
+| `core/jump` | 14.2 | `core/trip`, `core/units` | 17 |
+| `core/waypoint` | 18 | `core/wifi` | 25 |
+| `core/route`, `services/route_store` | 6.5, 18 | `tools/routegraph` | 18 |
+| `ui/` widgets, `Shadow`, fonts | 4 | `ui::Toast` | 11.2 |
+| `components/doom` | 31.1 | `sim/` | 29 |
+| `tools/`, `mount/` | 30 | `demo_p4/` | 31 |
 
 ---
 
@@ -123,7 +148,7 @@ contract. In summary:
 | `ctrl` 500 Hz + every tach edge — shift lamps, LED driver | `render` 120 Hz — the panel |
 | `imu` — IMU FIFO, attitude | `logger` — SD writes |
 | `gnss` — NMEA in | `storage` — card, track files |
-| `logic` 50 Hz + on each fix and command | `keeper` 20 Hz — health, NVS, backlight level |
+| `logic` 50 Hz + a pass on each fix or command (`wake_logic`, `LogicPass`) | `keeper` 20 Hz — health, NVS, backlight level |
 | `input` 200 Hz — the pod | `power` 1 kHz — VIN, battery |
 | | `ota`, `ble` (+ NimBLE host), `wifi` |
 
@@ -136,7 +161,7 @@ interrupt line, so `input` polls it at 200 Hz. `core/input/` debounces it:
 the reading must be stable for 4 ms, which is two reads. A spike seen by one
 read is never a press. A press registers 5–10 ms after it lands.
 
-| Button | Short press | Long press (700 ms) |
+| Button | Short press | Long press (600 ms, `core::input::Config::long_press_ms`) |
 |---|---|---|
 | **A** | Next mode, acted on the press | Jump to CRUISE screen 0. Fires on top of the short press, so the escape works from anywhere |
 | **B** | Next screen in this mode, acted on the press | — (gave up "previous screen" so it would not lag) |
@@ -145,7 +170,8 @@ read is never a press. A press registers 5–10 ms after it lands.
 | **E** | Accept / select, acted on release | The screen's context action |
 
 E alone waits for its release, because its short and long presses do
-different things. Long presses fire when the hold reaches 700 ms, not on
+different things. Which buttons act on the press is `core::input`'s
+`on_press_mask`: a button given a long meaning must leave that mask. Long presses fire when the hold reaches 600 ms, not on
 release, so a rider holding E to set the finish line knows when it took.
 
 **Modes**, cycled by A: CRUISE → TRACK → STAT → DIAG → CONFIG.
@@ -162,7 +188,13 @@ screen does not take goes to the navigation state machine in `core/nav/`.
   write clock (clean at 25 and 30 MHz on the first board). A whole frame is
   307 kB in RGB565, about 12 ms on the wire, roughly one and a half render
   periods (31 ms at the 10 MHz it started at). The driver is the
-  `esp_lcd_ili9488` component on an i80 IO handle.
+  `esp_lcd_ili9488` component on an i80 IO handle. Two panels are
+  supported: the HT035SHV007NS (IPS: it takes the component's `_ips` init;
+  the default TN init gave a negative with a crawling speckle) and VIEWE's
+  transflective UEED035HV (ST7365, VIEWE's own init table in
+  `drivers/ili9488.cpp`, with WR and RS the other way round on FPC pins
+  10/11). The first `init()` tells the two wirings apart by which one makes
+  TE pulse, trying the one saved last boot first (`hal::kKeyPanelModel`).
 - **Partial updates.** `render` sends only the widgets that changed, and
   where a widget can say (`Widget::damage()`), only the part that changed:
   a table's changed rows, the tach marker's rows. Anything that moves is a
@@ -182,9 +214,11 @@ screen does not take goes to the navigation state machine in `core/nav/`.
   Bold are blended at 4 bits into the 5×7 bitmap's cell. Widths, layout and
   per-character damage stay the same. `tools/gen_font.py` generates
   `font_aa.cpp`. It costs about 350 kB of flash and no RAM.
-- **22 widgets** in `components/ui/`: BigNumber, Label, ValueBox, TachBar,
-  ShiftStrip, RevBar, LeanGauge, LeanIndicator, DeltaBar, MapView, Table,
-  Sparkline, Bar, StatusDot, MediaRow, MediaProgress, album art and more.
+- **23 widgets** in `ui/widgets.hpp`: Label, ValueBox, BigNumber, Bar,
+  StatusDot, ShiftStrip, DeltaBar, LeanIndicator, Sparkline, Table, MapView,
+  TachBar, RevBar, LeanGauge, MediaRow, MediaProgress, AlbumArt,
+  AlertOverlay, NavArrow, SlipBar, HrGraph, DevTag (the red DEV tag a dev
+  image wears) and Toast.
   `ui/chrome.hpp` holds the shared titles, rules and framed tiles, and
   `theme.hpp` is the semantic colour layer.
 - **One live screen.** `ui::App` builds the current screen into one slot
@@ -192,6 +226,21 @@ screen does not take goes to the navigation state machine in `core/nav/`.
   App costs about 1.9 kB on render's stack instead of 13 kB. Anything that
   must outlive a screen (map traces, lap history, CONFIG's place) is held by
   the App and handed back.
+- **FPS counter** (2.0, CONFIG → Diag → FPS counter, off by default). The
+  render rate as `tried/sent` (2.2), e.g. `120/15`: frames a second
+  (`SystemInfo::render_hz_x10`, the figure DIAG → System shows) and how many
+  of them put anything on the wire (`render_sent_hz`; at least 1, the tag's
+  own redraw), small, in the top-left corner over every
+  screen (`ui::FpsTag`, owned by the App like the DEV tag). It changes once a
+  second, so it costs one tiny blit a second; switched off, the corner is
+  painted back as damage. It covers the start of a title bar.
+- **Frame rate** (2.1, CONFIG → Diag → Frame rate): `render`'s deadline,
+  10, 20, 30, 60 or 120 Hz (the default), or Unlimited. Read every pass, so
+  a change takes effect at once. Unlimited still waits one 1 ms tick a
+  frame: `render` outranks `ble`, `keeper`, `storage`, `wifi`, `logger` and
+  `ota` on core 1, and a loop that never blocked would starve them and the
+  idle task the watchdog checks. A button press always cuts the wait short.
+  The bike's `render` only; the demo board's loop is its own.
 - **Backlight.** Three PCA9955B channels. `keeper` decides the level and
   `ctrl`, the chip's only writer, applies it.
 
@@ -199,7 +248,8 @@ screen does not take goes to the navigation state machine in `core/nav/`.
 
 ## 5. Startup
 
-- **Splash.** 0.5 s at power-on (CONFIG → Startup → Splash).
+- **Splash.** 1 s at power-on (`ui::App::kSplashMs`; CONFIG → Startup →
+  Splash turns it off).
 - **Gauge sweep** (`core/sweep/`). Rpm, speed and gear run to full scale and
   back. It takes 1 s by default (500–5000 ms, CONFIG → Startup → Sweep
   time), with peak rpm 8800 and five gears. The sweep is applied to the
@@ -249,12 +299,41 @@ a framed box. **Long** E resets trip A. A short press does nothing, so a bump ca
 A live breadcrumb trace of the ride (`MapView` over the trace ring), with
 distance, heading and speed.
 
-### 6.5 NAV — guide back to a waypoint
-An arrow, the distance and the bearing to one of five named waypoints:
-**START, TRUCK, CAMP, FUEL, MARK**. The arrow is heading-up above 3 mph and
-north-up below. The list shows every waypoint's distance, and the row under
-the cursor is the target. Short E drops the selected waypoint here and long
-E clears it. See §18.
+### 6.5 NAV — turn-by-turn routing (2.x, not yet run on the board)
+Offline routing on an OpenStreetMap map from the card (`route/map.rgf`,
+built by `tools/routegraph`). It never uses interstates and asks before
+using 65 mph roads. See `docs/navigation.md`.
+
+**Picker:**
+- The first row is **Where to?**: spell an address, town or place with the
+  pod, as on an old Garmin. Only letters that lead somewhere are offered;
+  results come nearest first; a street then takes a house number, or GO
+  for the street. It works offline from `route/search.idx`
+  (docs/navigation.md §7.1).
+- Then a destination sent from the phone (Feed `G`, routed to at
+  once), the waypoints that are set, the favourites from
+  `route/destinations.csv`, the nearest fuel and food, and a "Dirt roads"
+  switch (CONFIG → Nav → Avoid dirt).
+- CRUISE → MAP draws the route, dim, under the ridden trace; its 65 mph
+  stretches amber (2.7).
+- E goes. Hold E on a waypoint row drops that waypoint here.
+
+**Guidance:**
+- A turn arrow, the distance to the turn and the road's name, the posted
+  limit, and the distance and minutes left.
+- Off the route for 5 s, it reroutes. Avoiding 65 mph roads but on one, it
+  routes along it without asking, and avoids them again once off it (2.6).
+- Short E switches to the **route view** and back (2.7): the whole route
+  fitted to the screen, north up, blue with its 65 mph stretches amber, the
+  destination ringed and the bike a white dot and arrow. The distance and
+  time left stay below it.
+- **Pace notes** (2.8): the next bends on the road graded rally style,
+  1 (tightest) to 6, with into / tightens / opens / long / hairpin, on the
+  status line: `300 R4 tightens 150 L3 into R5` (docs/navigation.md §7.2).
+  From the map's shape only; first-guess thresholds, not yet ridden.
+- Hold E stops.
+- When a route uses 65 mph roads: the route view comes up by itself, so
+  the amber shows where they are; E avoids them, hold E keeps them.
 
 ### 6.6 MINIMAL
 Speed and the time, with no title, tach, lean or tiles. For long road
@@ -345,7 +424,7 @@ IMU screen shows it.
 
 ## 8. STAT mode
 
-Five screens: **ALL, ENGINE, IMU, PERF, STUNT.**
+Six screens: **ALL, ENGINE, IMU, PERF, STUNT, HEART.**
 
 - **ALL** — every live value in one table.
 - **ENGINE** — rpm, engine hours, throttle position with a bar, voltage,
@@ -357,6 +436,8 @@ Five screens: **ALL, ENGINE, IMU, PERF, STUNT.**
 - **PERF** — the performance timers (§19). E clears the bests.
 - **STUNT** — wheelie and stoppie scoring (§20). E starts a new session
   score.
+- **HEART** — the watch's heart rate, zone, session average/high/low, a
+  ten-minute graph (`ui::HrGraph`) and the RECOVERY tile (§24.2).
 
 ---
 
@@ -405,6 +486,7 @@ priority:
 
 | Alert | Trigger |
 |---|---|
+| **No pulse** | The watch, worn this ride, has sent readings with no pulse for 10 s (§24.2) |
 | **Bike down** | Leaned past 70° and below 3 mph |
 | **Battery high** | Regulator fault, battery cooking near 16 V |
 | **Battery low** | Engine running and not charging |
@@ -463,6 +545,9 @@ holds at its peak for 0.7 s. CONFIG → Display → Slip bar turns it off.
   reset does not reset it. `init()` rewrites every register, and `ctrl`
   refreshes the config once a second.
 - The on-screen ShiftStrip and RACE's RevBar mirror the lamp colour.
+- **Bike board:** the backlight lights, so the PCA9955B answers; the lamps
+  and the tach are untested (the tach wrap gave no signal, the R34/C19
+  filter is the suspect: bringup §8).
 
 ---
 
@@ -547,6 +632,9 @@ least 30 s apart, and never more than 5 % from the calibrated base (CONFIG
 - **Fix ageing** (`age_fix`). With no new fix for 2.5 s, the slot's `fix`
   goes false. One lost fix at 1 Hz is not a fault.
 - **Fix timing** onto the system clock (§7.1).
+- **Bike board: stuck at 1 Hz.** The receiver never hears the P4 (GPIO3 →
+  U4-10), so the baud and rate commands never land; the firmware's side is
+  proven (bringup §7). 9–13 satellites on the first rides.
 
 ---
 
@@ -565,16 +653,20 @@ least 30 s apart, and never more than 5 % from the calibrated base (CONFIG
 
 ---
 
-## 18. Navigation waypoints
+## 18. Navigation waypoints and routing
 
 `core/waypoint/`:
 - Five named waypoints: **START, TRUCK, CAMP, FUEL, MARK.**
 - **START sets itself** at the first good fix of a ride if it is not set,
   is from another day, or is more than 6 h old. A key-off at lunch keeps it.
-- `core::geo::guide` gives distance and bearing.
 - `logic` owns them, `keeper` saves them to NVS while stopped, and
   `logic_restore` brings them back.
-- Used by CRUISE → NAV (§6.5).
+- They are destinations in CRUISE → NAV's picker (§6.5).
+
+`core/route/` (routing), `services/route_store` (the card side) and
+`tools/routegraph` (the map builder): the whole design, the measured
+numbers and what is left are in `docs/navigation.md`. The blackbox gains
+`NavTurnFt`, `NavDestMi` and `LimitMPH` at the end (§23).
 
 ---
 
@@ -599,12 +691,14 @@ least 30 s apart, and never more than 5 % from the calibrated base (CONFIG
   rate comes from a small inertial + GPS-altitude filter (accelerometer
   rotated into the world frame), so a hill does not count as a wheelie. The
   climb filter is suspended in the air, so a jump does not count either.
-- **Detection.** 10° for 250 ms starts a trick, under 4° for 120 ms ends it,
+- **Detection.** 20° for 400 ms (2.9) starts a trick, under 4° for 120 ms ends it,
   under 0.5 s scores nothing, and past 70° is a loop-out.
 - **Scoring.** Points rise with angle and speed, with 1.5× in the 30–50°
   balance band. Landings are smooth (+20 %) or slammed (−30 %) by vertical
   g. Tricks within 4 s chain into a combo, +0.5× each up to 4×.
 - **Grades** from POP to LEGENDARY.
+- **Length.** A trick's time up and the road it covered up (`ft`,
+  integrated from the fused speed), on STUNT, the toast and `_evt`.
 - Session only, nothing saved. **Every threshold is a guess that has never
   seen a real wheelie.**
 - Shown on STAT → STUNT and as a toast.
@@ -622,7 +716,9 @@ window, as battery volts: VIN plus CONFIG → Battery → Trim (default
 - **Crank dip** comes from the minimum.
 - **Charging voltage** comes from the mean.
 - **Verdict:** good, weak, not charging, or overcharging. It feeds the
-  battery alerts and DIAG → POWER.
+  battery alerts and DIAG → POWER. `power` owns the `battery` slot;
+  `keeper`'s `elec.vbat` carries the same trimmed battery volts
+  (`core::power::battery_v`).
 
 ### 21.2 Power-fail handling (`core/power/FailDetector`)
 The `power` task runs at 1 kHz on core 1. When VIN falls below about 9 V and
@@ -673,13 +769,16 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 ### 23.1 Ride log, the blackbox (`core/log/`)
 - **CSV, with columns named for RaceRender**, so one file is both the
   blackbox and a video overlay source:
-  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,…,AltFt`.
-  `Time` is in seconds, X is longitudinal g and Y is lateral g.
+  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR`
+  (`core/src/log.cpp`). `Time` is in seconds, X is longitudinal g and Y is
+  lateral g. **Rules for a new column** (CLAUDE.md, *Logging is for
+  RaceRender*): append it at the end, name it with its unit, never rename or
+  move one, and write a missing reading as 0, never the last value held.
 - **Lap tags** (`# Lap 0: 00:02:43.08`) come from the lap timer's own
   measurement and are placed between the right two rows.
-- **Rate.** CONFIG → Log → Rate: Off, 1, 5, 10 (default), 25 or 50 Hz, all
+- **Rate.** CONFIG → Log → Rate: No log, 1, 5, 10 (default), 25 or 50 Hz, all
   divisors of the 50 Hz tick so rows are evenly spaced. A tick that starts
-  or ends a lap always gets its row, unless the rate is Off.
+  or ends a lap always gets its row, unless the rate is No log (which writes no blackbox file at all).
 - **Ring.** Fixed 72-byte records, 512 of them in PSRAM, drained to SD in
   8 kB blocks. Producers never touch the filesystem or block.
 - **`FlushPolicy`.** A block goes to the card when its oldest row is 2 s
@@ -706,7 +805,11 @@ holds up to six files open. `tools/ridelog` reads a session back (§30).
 
 ### 23.3 SD card management
 - **Eject** (CONFIG → SD card → Eject card) flushes and unmounts, and DIAG →
-  System shows "safe to pull" until the card is removed.
+  System shows "safe to pull" until the card is removed. `storage` first has
+  `logger` put its RAM blocks on the card (`Deps::log_flush_req`/`ack`,
+  1.61); before that the last ~2 s of every stream, ~20 kB, were lost.
+- **Bike board:** on 12 V the card mounts and writes ~32 kB/s clean; on USB
+  alone it did not mount (the supply). Test the card on 12 V.
 - One lock in `drivers/sdcard` guards every card call from `logger`, `ota`,
   `storage` and `wifi`.
 - The SD card shares SPI2 with the IMU. The IMU's FIFO absorbs the SD
@@ -716,11 +819,38 @@ holds up to six files open. `tools/ridelog` reads a session back (§30).
 
 ## 24. Bluetooth: media control and phone notifications
 
-Built, and **never run on this board.** `services/src/ble_service.cpp`:
+`services/src/ble_service.cpp`. **On the bike board the Android app has
+bonded and sent Feed lines (2026-10-31)**; no watch or iPhone has tried
+there. The signal is weak (−90 dBm beside it; the phone never gets the scan
+response): check the C6's antenna. The watch has run on the demo.
+
+### 24.1 Transport, the C6, and the phone link
 - **Transport.** ESP-Hosted over SDIO to the C6, with the NimBLE host on
-  core 1. If the C6's firmware is older than 2.12, `demo_p4/c6_cp`'s image
-  is pushed to it from `slave_fw`.
-- **Dash Media GATT service** (architecture §11.1): **Feed** in (phone →
+  core 1. `start_ble` is last in the boot order, so a radio that will not
+  come up delays nothing.
+- **C6 firmware** (`core/c6`, `services/src/c6_firmware.cpp`). `slave_fw`
+  holds `demo_p4/c6_cp`'s image (`idf.py -p /dev/ttyACM0 c6-flash`). The
+  dash pushes it over SDIO when the C6 is older than 2.12 or its build id
+  (first four bytes of its ELF SHA-256) differs, once per image, and never
+  across an ESP-Hosted major version from a dev image. A C6 with no Wi-Fi in
+  its firmware gets it replaced the same way. DIAG → Update shows
+  `2.12.8 #<id>`. A C6 with **blank flash** (the first bike board's) cannot
+  be reached over SDIO: flash it over its UART once (`docs/c6-uart-flash.md`).
+- **A lost C6 does not reboot the dash** (1.61,
+  `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n`). `ble` hears
+  `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` on the default event loop (which it
+  creates) and reports the radio lost until the next power-on. Console
+  `c6 hold` / `c6 release` tests it.
+- **NimBLE's timers mended at link time** (1.48). With
+  `CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, IDF v6.0.2's FreeRTOS callouts never
+  stored their event queue, so every NimBLE timer ran on the FreeRTOS timer
+  task, and the central role asserted in `ble_hs_timer_exp` during sync.
+  `ble_service.cpp` wraps `npl_freertos_funcs_init` (`-Wl,--wrap`, set in
+  `components/services` and `demo_p4/main`). Keep both flags.
+- **Names.** Advertises as `CRF250F-Dash`; the scan response carries the
+  short `CRF250F` beside the ANCS solicitation, so a phone stores the bond
+  under `CRF250F` and the app matches either.
+- **Dash Media GATT service** (`radio-and-updates.md` §11.1): **Feed** in (phone →
   dash, line protocol) and **Ctrl** out (dash → phone: previous, play/pause,
   next).
 - **Feed parser** (`core/media/`). Bounded and UTF-8-safe, with `P` as an
@@ -732,14 +862,16 @@ Built, and **never run on this board.** `services/src/ble_service.cpp`:
   bonds. A link that is not encrypted within 30 s is dropped.
 - **Notifications** (tag `N`, 1.32). Calls, missed calls and messages from
   the phone app's `NotifListener` show as a toast and on CRUISE → PHONE.
-  CONFIG → Phone → Notifications and → Text moving control them.
+  CONFIG → Phone → Notifications and → Text moving control them. The app's
+  `NotifyFilter` is JVM-tested, but the two ends have never talked over
+  this tag.
 - **One writer.** NimBLE's callbacks only queue, and `ble` is the one writer
   of `media`, `notify` and `ble_diag`.
 - **Priority demotion.** ESP-Hosted makes its SDIO/RPC tasks at priority 23
   with no core affinity, and `ble` lowers them to 8 by name.
 - The bond store writes flash only when the bike is still (§28).
 - The Android companion app is in `~/phone`, not in this repo.
-- **An iPhone needs no app** (1.59, architecture §11.1.1). Once it is let
+- **An iPhone needs no app** (1.59, `radio-and-updates.md` §11.1.1). Once it is let
   in, `ble` finds its AMS and ANCS and subscribes: what is playing, the
   transport keys (as AMS remote commands), and calls, missed calls and
   messages. The scan response solicits ANCS so the iPhone lists the dash
@@ -747,11 +879,82 @@ Built, and **never run on this board.** `services/src/ble_service.cpp`:
   same `apply_line()`/`apply_notify()` as the feed. Never run against a real
   iPhone.
 
+### 24.2 Heart rate from the watch (`core/hr`, 1.48–1.58)
+The rider's watch over the standard Heart Rate Service (0x180D/0x2A37), as a
+Garmin sends it with Broadcast Heart Rate on. Run against the rider's D2 Air
+X10 on the demo (its spec sheet says ANT+, but it broadcasts over Bluetooth
+too). CONFIG → Heart rate → **Watch HR**, off by default; **Max HR** sets the
+zones.
+- **Central role.** `ble` scans continuously while the setting is on and no
+  watch is linked (3 s scans, 50 ms in 100, no controller duplicate filter),
+  and `Picker` takes the strongest advertiser above −95 dBm once a scan has
+  heard them all, then only that one (address or name) for the power-on.
+  Turning the setting off and on forgets it. The watch is the second of
+  `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2`, on its own GAP callback, and its bond
+  is never stored. The log's 30 s `watch search` line with no adverts means
+  the watch is not broadcasting (its Broadcast ends when it restarts).
+- **Shown** on STAT → HEART, under SPEED's rpm tile and in RACE's gear tile,
+  coloured by zone, blank with the setting off (`chrome::hr_readout`); DIAG →
+  Radio shows the link. The blackbox's last column is `HR` (0 for no
+  reading); `_evt` has a `heart` event per link change.
+- **No pulse** (1.56). Off the wrist the D2 keeps sending its last bpm with
+  the contact bit clear (`04 5E` against `06 61` worn), so a reading without
+  contact is published as bpm 0 (`Measurement::pulse()`). `no_pulse()` (live,
+  a pulse seen on this link, readings arriving, none with a pulse) for 10 s
+  raises **NO PULSE**, first of all the alerts; `_evt` logs `pulse=none`.
+- **History** (1.57). `core::hr::History`, a sample every 2 s with gaps for
+  no pulse, in PSRAM (`Deps::hr_history`), fed by `ui::App` every Frame so it
+  fills whatever screen is up.
+- **Recovery** (1.58, `core::hr::Recovery`, run by `logic`). The pulse at
+  the stop less the pulse one and two minutes later, **parked only**: within
+  15 s of stopping the bike must be in neutral or the engine off, and stay
+  that way, after 2 min riding above 5 mph since the last one. Stops in gear
+  never count. HEART's RECOVERY tile, a toast, `hr_recovery` in `_evt`.
+
+### 24.3 Crash SOS (`core/crash`, 2.x)
+
+After a crash the rider does not cancel, the phone texts someone the bike's
+position. **The whole path has run on the bench** (2026-11-03): CONFIG →
+Phone → Test crash, the countdown, `X` to the phone, the text, `K` back
+(SOS TEXTED), and E's "I'm OK". The detector's thresholds have not met a
+real crash or a real ride.
+
+- **A crash is three things in order** (`core::crash::Detector`, in
+  `logic` at 50 Hz): ridden upright above 10 mph within 5 s before a hit
+  (so a board mounted on its side, as in the car tests, never arms); a hit
+  over 3 g (the largest |a| of every 200 Hz IMU sample, `imu`'s
+  `PeakHold` → `Attitude::hit_g`/`hit_ms`, so a 10 ms spike is not missed
+  between logic's looks); then, within 30 s of it, the bike on its side
+  (the low-passed gravity vector more than 60° off the frame's up) and under
+  3 mph for 5 s straight. A jump landing is a hit with the bike upright; a
+  tip-over in the car park has no speed before it; a board face-down on a
+  car seat has neither. No IMU, no crash.
+- **Then a 30 s countdown** in the alert box over every screen, "CRASH? SOS
+  IN 27s", ahead of any alert. **Any button cancels it** and nothing is
+  sent. Riding off (10 mph) cancels it too.
+- **Then the SOS.** `ble` sends `X` on Ctrl with the last fix it saw
+  (radio-and-updates §11.1), every 15 s until the phone answers `K`. The box
+  shows SOS SENDING / SOS TEXTED / SOS OFF ON PHONE / SOS FAILED, RETRY /
+  SOS: NO PHONE. **E then says "I'm OK"**: the phone texts a false alarm to
+  the same contacts, only if the SOS went.
+- **Two switches, both on to text.** CONFIG → Phone → Crash SOS on the dash
+  (on by default; off, there is no countdown, and BIKE DOWN still shows), and
+  the app's Settings → Crash SOS text (off by default) with SOS contacts
+  (numbers, commas between). The app asks for SEND_SMS when it is turned on.
+  Settings → Send SOS test text sends a test through the same path.
+- **Bench test**: console `crash test` starts the countdown as a crash would
+  (docs/console.md). With the phone linked and the app's switch on, it texts.
+- The phone texts only once per SOS (its id, for 10 min: the dash's ids
+  restart at power-on) and answers the resends. A text that failed (no
+  signal) is tried again on the next resend.
+
 ---
 
 ## 25. Wi-Fi hotspot and web page
 
-Built, and **run on the demo board, not on the bike.** Architecture §11.7.1.
+Built, and **run on the demo board.** On the bike the hotspot comes up and
+goes down cleanly (20 cycles from CONFIG, internal RAM back each time);
+nothing has joined it or uploaded. `radio-and-updates.md` §11.7.1.
 - **On-demand WPA2 hotspot**, `CRF250F-Dash`, with a new eight-digit
   password each time, shown on DIAG → Update. It is never a station.
   Toggle it with CONFIG → Wi-Fi → Wi-Fi on/off.
@@ -781,7 +984,10 @@ Built, and **run on the demo board, not on the bike.** Architecture §11.7.1.
 
 ## 26. Firmware updates: stable and dev slots
 
-Architecture §11.7. Built, **never run on the board.**
+See `radio-and-updates.md` §11.7. **Partly run on the bike board** (2026-11-01):
+`flash_dev.py` to the dev slot, Boot dev once, and a reset and a panic in
+dev both falling back to stable. Install from SD, the refusals and Promote
+have not run (bringup §9.1).
 - **Two 6 MB app slots** hold a stable image and a dev image. Which is which
   is read off the bootloader's rollback state, never stored.
 - **A dev image never confirms itself**, so any reset returns to stable.
@@ -828,9 +1034,21 @@ sets the level, as a percentage of CONFIG → Display → Brightness, and
   `-Wframe-larger-than=1024 -Werror` (`cmake/dash_stack.cmake`), with
   explicit `DASH_BIG_FRAME_BEGIN/END` exceptions.
 - **No dynamic allocation after boot**, no exceptions, no RTTI.
-- **Internal RAM ceiling.** ESP-Hosted's SDIO buffers are in PSRAM
-  (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`). Big buffers go in PSRAM with
-  `EXT_RAM_BSS_ATTR` or on a task stack.
+- **IDF's `esp_timer` task is at 22 on core 0**, so NimBLE uses FreeRTOS
+  timers (`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, a build error in `main.cpp`
+  otherwise). ESP-Hosted's host port still makes esp_timers.
+- **Internal RAM ceiling.** Until the scheduler starts, the only internal
+  heap runs from `_heap_start` to 0x4FF3AFC0 plus 18 kB; the 384 kB region
+  at 0x4FF40000 is added after. ESP-Hosted's constructor once took ~87 kB
+  of it and the demo boot-looped (`vApplicationGetIdleTaskMemory` assert).
+  Its buffers are now in PSRAM (`CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM`:
+  38 kB internal at constructor time instead of ~125 kB); it falls back to
+  internal RAM **silently** if PSRAM fails, so check that first if the boot
+  loop returns. After adding statics, `nm build/dash.elf | grep _heap_start`:
+  the bike is at 0x4FF51240 (1.62; Doom is ~64 kB of it), the demo at
+  0x4FF2A680 (1.40). Big buffers go in PSRAM with `EXT_RAM_BSS_ATTR` or on a
+  task stack, never in a plain static. The SDIO link, lwIP and NimBLE share
+  what is left at run time; `wifi` logs free internal RAM at every change.
 
 ---
 
@@ -875,13 +1093,19 @@ python3 sim/dash_sim.py
 
 | Tool | What it does |
 |---|---|
-| **Host tests** (`test/`, ctest) | 48 test files over `core/` and `ui/`, using a 40-line harness (`test/check.hpp`). The fast loop |
+| **Host tests** (`test/`, ctest) | One `test_*.cpp` per module over `core/`, `ui/` and `logic_tick`, using a 40-line harness (`test/check.hpp`); `check_no_esp_headers.sh` enforces rule 3. The fast loop |
+| **`tools/pod_keys.py`** | Laptop keys 1–5 (shift for long) press the pod's buttons over the USB console; `docs/console.md` |
+| **`tools/imu_view.py`** | Live pitch/lean/heading from `keeper`'s USB stream, for checking the IMU axes |
+| **`tools/c6_uart.py`** | Listen to, back up, inspect and flash the C6 over its own UART (`docs/c6-uart-flash.md`) |
 | **`tools/replay`** | Runs `core::fusion::SpeedFilter` over a blackbox log or a synthetic ride with a known truth (`--scenario`). Tune the filter's noise and gate settings on a laptop. `plot.py` draws the output |
 | **`tools/ridelog/ridelog.py`** | Reads a session off the card (blackbox plus detail log) and reports, one section per firmware assumption, what the ride measured, most suspect first, with verdicts. Optional numpy vibration spectrum and matplotlib plots |
 | **`tools/flash_dev.py`** | Writes the dev slot over USB |
 | **`tools/gen_font.py`** | Generates the anti-aliased font tables from Noto Sans Condensed Bold |
 | **`tools/make_album_art.py`** | Converts album art into a UI image |
 | **`tools/dash_media_peripheral.py`** | A laptop BLE peripheral speaking §11.1, so the phone app has a counterpart |
+| **`tools/replay/plot.py`** | Draws a `replay --out` CSV as an SVG (`docs/fusion.md`) |
+| **`mount/`** (CadQuery) | `pod.py`: the isolated mount — tray on four silicone damping balls in front of an H-frame clamp, three prints, tuned for fn ≈ 15–20 Hz (`docs/imu-vibration.md` §6). `mount.py`: the earlier rigid carrier. `cd mount && python pod.py` writes `mount/out/pod_*.stl`, `*.step` |
+| **`kline-adapter/gen_sch.py`, `pcb_drc.py`** | Generate the K-line adapter's EasyEDA schematic/netlist from LCSC parts; check its PCB's connectivity and clearances (`kline-adapter/review.md`) |
 
 ---
 
@@ -894,29 +1118,53 @@ and still can away from it.
   task.
 - Its SD card is the Guition's microSD on 4-bit SDMMC slot 0. ESP-Hosted
   owns the SDMMC host, so the card only adds slot 0.
-- **Doom** (1.32; on the bike too since 1.62, parked only). DIAG's menu has
-  a ninth row (`doom::Program`, `components/doom`). E hands the panel to
-  doomgeneric (GPL-2.0, vendored). The WAD is the first `.wad` in `games/`.
-  Controls: A/B forward/back, C/D turn, E fire/select, A+B menu, C+D use.
-  Quit Game in Doom's menu returns to the dash, and DIAG -> Doom resumes the
-  game where it was; on the bike, moving does the same. A Doom error ends it
-  until the next power-on ("error"), without a reset. The big arrays are in
-  PSRAM.
+- It reuses the bike's `ota`, `ble`, `c6_firmware`, `settings_store` and
+  `wifi` services by source (`demo_p4/main/CMakeLists.txt`), so those run
+  here as they are, not as copies.
 - The serial command `inputs` traces raw pod pins, touch zones and decoded
   presses for 30 s.
-- `c6_cp/` is the C6 co-processor firmware pushed to the C6 when it is out
-  of date.
+- `c6_cp/` is the C6 co-processor firmware (BLE + Wi-Fi) that `slave_fw`
+  holds and the dash pushes to the C6. `demo_p4/README.md` has the build and
+  the demo's own bring-up story.
+
+### 31.1 Doom (`components/doom`, both boards)
+1.32 on the demo; on the bike since 1.62, **parked only**. DIAG's menu has a
+ninth row, `doom::Program` (a `ui::IProgram`), over doomgeneric
+(`components/doomgeneric`, GPL-2.0, vendored). Each board's main supplies a
+`doom::Board`: how a picture reaches its panel, held buttons, parked.
+- E starts it on render's task, and render draws nothing while `active()`.
+  The bike shows 320×200 at 1.5×, 480×300; its Doom task is core 1,
+  priority 1.
+- **Leaving needs no reset.** Quit Game pauses it (`I_Quit` → `DG_Quit`) and
+  DIAG → Doom resumes where it was; on the bike so does moving
+  (`core::flash::still` false; it starts only still). Every `exit()` in Doom
+  is `DG_Exit` (`src/dg_dash.h`), which stops Doom for the power-on
+  ("error") and gives the panel back.
+- **Buttons are raw held state** (`Deps::buttons_held`, the pod before
+  debounce, ORed with the console's `hold <mask>`): A/B forward/back, C/D
+  turn, E fire/select/yes, A+B menu, C+D use. `pod_keys.py` plays it only on
+  a terminal that reports key releases (kitty protocol); elsewhere it sends
+  decoded presses, which Doom never sees (`docs/console.md`).
+- The WAD is the first `.wad` in `games/` on the card, uploaded from the
+  Wi-Fi page's Games section (`Deps::games`, `core::wifi::valid_game_name`).
+- **Memory.** The big arrays are in PSRAM by `DG_EXTRAM` (IDF v6.0.2's
+  ldgen emits nothing for a `* (extram_bss)` mapping) and `states` is read
+  from flash; it still costs ~64 kB of internal RAM on either board.
 
 ---
 
 ## 32. Release and version management
 
 - `firmware.txt` holds the version and a one-to-three-word feature name.
+  Bump it before a build you mean to keep. `cmake/dash_version.cmake` makes
+  the image's version string `"<version> <board> <feature>"` (31 chars max).
 - Every build of either board is copied to `releases/` as
   `dash-<version>-<date>-<board>-<feature>.bin`, read back out of the image.
   `releases/` is in git.
 - The Update screen and the Wi-Fi page show the version and date for both
-  slots.
+  slots. An upload built for the other board (`demo` vs `bike`) is refused.
+- C6 images are `releases/c6-<esp_hosted version>-<date>-<feature>.bin`;
+  `releases/README.md` lists them and the known-bad dash images.
 
 ---
 
@@ -987,11 +1235,18 @@ Every item in `components/core/src/config.cpp`, by CONFIG submenu.
 | Phone | Pairing mode | action | — |
 | Phone | Notifications | On / Off | — |
 | Phone | Text moving | On / Off | — |
+| Phone | Crash SOS | On / Off (on by default) | — |
+| Heart rate | Watch HR | On / Off (off by default) | — |
+| Heart rate | Max HR | 120–230 | bpm |
+| Nav | Avoid dirt | On / Off (off by default; NAV's picker switches it too) | — |
 | SD card | Eject card | action | — |
+| SD card | USB drive | action: the card as a USB drive on a laptop, parked only (a toast says so when moving); Eject on the laptop gives it back and the dash restarts (2.6) | — |
 | Wi-Fi | Wi-Fi on/off | action | — |
 | Battery | Trim | −1.0 to +1.5, step 0.05 | V |
-| Log | Rate | Off / 1 / 5 / 10 / 25 / 50 Hz | — |
+| Log | Rate | No log / 1 / 5 / 10 / 25 / 50 Hz | — |
 | Log | Detail log | On / Off | — |
+| Diag | FPS counter | On / Off (off by default) | — |
+| Diag | Frame rate | 10 / 20 / 30 / 60 / 120 (default) Hz / Unlimited | — |
 
 ### Commands
 Everything a screen, the Wi-Fi page or a service can ask of the owning
@@ -1000,4 +1255,4 @@ ConfigSet, LogStart, LogStop, StorageToHost, StorageEject, ImuCalibrate,
 ImuSetMountOffset, MediaCtrl, BleForgetPhone, BlePairingMode, OtaInstallSd,
 OtaBootDevOnce, OtaPromote, WifiToggle, NavDropWaypoint, NavClearWaypoint,
 GearCalStart, GearCalNext, GearCalSkip, GearCalCancel, GearCalReset,
-LeanPeaksReset, TrackForget, PerfReset, StuntReset.
+LeanPeaksReset, TrackForget, PerfReset, StuntReset, CrashCancel, CrashTest.

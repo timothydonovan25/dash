@@ -2,7 +2,7 @@
 ## (p4_panel.cpp) talks to the DPI/DBI peripherals directly and its own
 ## init command table, rather than through a vendor panel component — see
 ## the file comment there for why. Confirmed against a bring-up sketch
-## written for this exact board (docs/bringup-p4-demo.md).
+## written for this exact board (demo_p4/README.md).
 dependencies:
   espressif/esp_lcd_touch_gt911: "==1.2.1"
   espressif/esp_lcd_touch: "==1.2.1"

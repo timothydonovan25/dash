@@ -33,6 +33,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.ota    = s.ota.get();
     f.wifi   = s.wifi.get();
     f.waypoint = s.waypoint.get();
+    f.nav    = s.nav.get();
     f.fused  = s.fused.get();
     f.gear_cal = s.gear_cal.get();
     f.session = s.session.get();
@@ -41,6 +42,7 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.notify = s.notify.get();
     f.heart  = s.heart.get();
     f.hr_recovery = s.hr_recovery.get();
+    f.crash = s.crash.get();
     f.t_ms   = t_ms;
     return f;
 }
@@ -80,6 +82,14 @@ const char* command_name(CommandId id) {
         case CommandId::WifiToggle:        return "wifi.toggle";
         case CommandId::NavDropWaypoint:   return "nav.drop";
         case CommandId::NavClearWaypoint:  return "nav.clear";
+        case CommandId::NavGo:             return "nav.go";
+        case CommandId::NavCancel:         return "nav.cancel";
+        case CommandId::NavAvoidFast:      return "nav.avoid65";
+        case CommandId::NavKeepFast:       return "nav.keep65";
+        case CommandId::NavSearch:         return "nav.search";
+        case CommandId::NavSearchKey:      return "nav.key";
+        case CommandId::NavSearchPick:     return "nav.pick";
+        case CommandId::NavSearchGo:       return "nav.go_number";
         case CommandId::GearCalStart:      return "gearcal.start";
         case CommandId::GearCalNext:       return "gearcal.next";
         case CommandId::GearCalSkip:       return "gearcal.skip";
@@ -88,6 +98,8 @@ const char* command_name(CommandId id) {
         case CommandId::LeanPeaksReset:    return "lean.peaks_reset";
         case CommandId::PerfReset:         return "perf.reset";
         case CommandId::StuntReset:        return "stunt.reset";
+        case CommandId::CrashCancel:       return "crash.cancel";
+        case CommandId::CrashTest:         return "crash.test";
         case CommandId::TrackForget:       return "track.forget";
         case CommandId::ImuCalibrate:      return "imu.calibrate";
         case CommandId::ImuSetMountOffset: return "imu.set_mount_offset";

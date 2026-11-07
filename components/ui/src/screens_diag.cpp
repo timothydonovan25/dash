@@ -462,6 +462,7 @@ void SystemScreen::update(const Frame& f) {
     // The value column holds 13 characters; "ejected, safe to pull" lost
     // the half that matters.
     if (s->sd_ejected) sd = "safe to pull";
+    if (s->sd_usb) sd = "USB drive";
     table_.set_row(11, "SD card", sd);
 
     table_.set_row_count(12);

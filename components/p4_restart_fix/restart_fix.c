@@ -71,3 +71,24 @@ void IRAM_ATTR __wrap_esp_restart_noos(void)
     sha_ready_for_rom();
     __real_esp_restart_noos();
 }
+
+// A panic's core dump hashes itself with the ROM's own SHA calls, past the
+// driver wrap above, and ets_sha_disable() strands the ROM the same way.
+// The bike board (v3.2) wedged after a panic on 2026-11-06 with an erased
+// dump partition: the reset came mid-dump (the panic's 10 s RTC watchdog,
+// or a fault in the dump), never reaching esp_restart_noos(). So the engine
+// is made ready before the dump starts, and the ROM's disable is a no-op.
+struct panic_info_t;
+void __real_esp_core_dump_write(struct panic_info_t *info);
+
+void IRAM_ATTR __wrap_esp_core_dump_write(struct panic_info_t *info)
+{
+    sha_ready_for_rom();
+    __real_esp_core_dump_write(info);
+    sha_ready_for_rom();
+}
+
+void IRAM_ATTR __wrap_ets_sha_disable(void)
+{
+    sha_ready_for_rom();
+}

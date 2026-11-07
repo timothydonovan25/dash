@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # The real dash's core/ui/dash_hal live one level up. This project borrows
-# them unmodified rather than forking them — see docs/bringup-p4-demo.md.
+# them unmodified rather than forking them — see demo_p4/README.md.
 list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../components")
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/dash_version.cmake)

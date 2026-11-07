@@ -89,7 +89,7 @@ struct Logger {
     uint16_t         sd_slow = 0;
     uint16_t         sd_errors = 0;
     // shortcut: bring-up totals for the console; remove once DIAG is on a panel.
-    uint32_t         tot_bytes = 0, tot_errors = 0, tot_max_ms = 0, next_report_ms = 0;
+    uint32_t         tot_bytes = 0, tot_errors = 0, tot_max_ms = 0;
     char             line[1024] = {};
     Batches*         batch = nullptr;
 };
@@ -330,9 +330,10 @@ void maybe_date(Logger& L) {
 size_t drain_main(Logger& L) {
     Deps& d = *L.d;
     Out& o = L.out[core::log::kMain];
-    if (!o.header) write_header(L, core::log::kMain);
     core::log::Record* rows = L.batch->main;
     const size_t n = d.blackbox->pop_batch(rows, kBatch);
+    // Header with the first row, so "No log" leaves no header-only file.
+    if (n > 0 && !o.header) write_header(L, core::log::kMain);
     for (size_t i = 0; i < n; ++i) {
         size_t len = 0;
         // A lap tag goes in immediately before the row it happened on.
@@ -579,16 +580,10 @@ void logger_task(void* arg) {
         }
 
         flush(L);
-        if (static_cast<int32_t>(now_ms(L) - L.next_report_ms) >= 0) {
-            L.next_report_ms = now_ms(L) + 10000;
-            // Rows the rings threw away since boot (blackbox, imu, tach, det,
-            // evt): a soak's sign that a card stall outlasted a ring.
-            const auto lost = [](const auto* r) { return r ? static_cast<unsigned>(r->dropped()) : 0u; };
-            ESP_LOGI("logger", "%s: %u rows, %u bytes to the card, %u errors, slowest %u ms, dropped %u/%u/%u/%u/%u",
-                     L.out[core::log::kMain].path, static_cast<unsigned>(L.out[core::log::kMain].rows),
-                     static_cast<unsigned>(L.tot_bytes), static_cast<unsigned>(L.tot_errors),
-                     static_cast<unsigned>(L.tot_max_ms), lost(d.blackbox), lost(d.imu_log),
-                     lost(d.tach_log), lost(d.det_log), lost(d.evt_log));
+        if (d.system) {
+            d.system->log_bytes = L.tot_bytes;
+            d.system->log_errors = L.tot_errors;
+            d.system->log_max_ms = L.tot_max_ms;
         }
         vTaskDelay(pdMS_TO_TICKS(n == 0 ? 200 : 20));
     }

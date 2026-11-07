@@ -26,7 +26,8 @@
 // phones, and core::ble counts them.
 //
 // Not here yet: the TPMS observer (§11.2). It waits on a sensor to sniff;
-// the decoders are a guess until then, and observer is off in sdkconfig.
+// the decoders are a guess until then. The observer role is on (it came
+// with the central role, for the watch), but nothing scans for TPMS.
 //
 // One file-scope object, `g_ctx`, is the exception to rule 1 in this
 // component. NimBLE's sync and reset callbacks take no argument, so there is
@@ -34,9 +35,11 @@
 #include "services/services.hpp"
 #include "c6_firmware.hpp"
 
+#include "core/route/dest.hpp"
 #include "core/ble/pairing.hpp"
 #include "core/hr/hr.hpp"
 #include "core/media/apple.hpp"
+#include "core/crash/crash.hpp"
 #include "core/media/feed.hpp"
 
 #include "esp_hosted.h"
@@ -124,6 +127,8 @@ constexpr uint32_t kDiagPeriodMs = 1000;
 // The longest the loop sleeps. A Ctrl press from the handlebars waits at
 // most this long to reach the phone.
 constexpr uint32_t kIdleWaitMs = 50;
+// An SOS the phone has not answered goes again this often.
+constexpr uint32_t kSosResendMs = 15000;
 
 // ESP-Hosted creates its transport and RPC tasks at priority 23 with no core
 // affinity, which on this chip means "may run on core 0, above ctrl". There
@@ -881,6 +886,16 @@ void send_ctrl(uint16_t conn, uint8_t cmd) {
     }
 }
 
+// A Ctrl line that is not a transport press: the SOS (core::crash).
+void send_ctrl_text(uint16_t conn, const char* line, size_t n) {
+    if (n == 0) return;
+    os_mbuf* om = ble_hs_mbuf_from_flat(line, n);
+    if (!om) return;
+    if (ble_gatts_notify_custom(conn, g_ctx.ctrl_val_handle, om) != 0) {
+        ESP_LOGW(kTag, "sos notify failed");
+    }
+}
+
 // The bonded peers, read back from NimBLE's store. Called whenever this task
 // has changed the store, and at sync, so the cache cannot drift from it for
 // long — NimBLE's own eviction and repeat-pairing also write the store.
@@ -1583,6 +1598,12 @@ void ble_task(void* arg) {
     bool radio_lost = false;   // for good: ESP-Hosted does not bring it back
     uint32_t dropped_at_disconnect_ms = 0;   // 0: nothing to clear
     uint32_t ctrl_gen = d.slots->media_ctrl.generation();
+    // The SOS (core::crash): the last one sent and when, the "I'm OK" sent,
+    // and the last fix to put in it.
+    uint16_t sos_sent_id = 0, ok_sent_id = 0;
+    uint32_t sos_sent_ms = 0, sos_fix_ms = 0;
+    double   sos_lat = 0.0, sos_lon = 0.0;
+    bool     sos_have_fix = false;
     uint32_t request_gen = d.slots->ble_request.generation();
 
     // Who may connect (§11.3). The policy is core::ble; this only acts on it.
@@ -1630,7 +1651,31 @@ void ble_task(void* arg) {
                 d.health->report_ok(Dev::Phone, now);
             }
             switch (e.kind) {
-                case Event::Line:
+                case Event::Line: {
+                    uint16_t ack_id = 0;
+                    core::crash::Ack ack = core::crash::Ack::None;
+                    if (core::crash::parse_ack(e.data, e.len, ack_id, ack)) {
+                        ESP_LOGI(kTag, "sos %u: phone says %c", static_cast<unsigned>(ack_id), static_cast<char>(ack));
+                        diag.sos_ack_id = ack_id;
+                        diag.sos_ack = static_cast<uint8_t>(ack);
+                        diag_dirty = true;
+                        break;
+                    }
+                    core::route::Dest go;
+                    if (core::route::parse_go(reinterpret_cast<const char*>(e.data), e.len, go)) {
+                        // A destination typed on the phone (`G`): `logic` routes.
+                        core::state::PhoneDest pd = d.slots->phone_dest.get();
+                        ++pd.seq;
+                        std::memcpy(pd.name, go.name, sizeof pd.name);
+                        pd.lat_e7 = go.p.lat_e7;
+                        pd.lon_e7 = go.p.lon_e7;
+                        d.slots->phone_dest.publish(pd);
+                        ESP_LOGI(kTag, "destination from the phone: \"%s\"", pd.name);
+                        diag.last_tag = 'G';
+                        diag_dirty = true;
+                        d.health->report_ok(Dev::Phone, now);
+                        break;
+                    }
                     if (const char tag = core::media::apply_line(media, e.data, e.len, now)) {
                         diag.last_tag = tag;
                         media_dirty = diag_dirty = true;
@@ -1646,6 +1691,7 @@ void ble_task(void* arg) {
                         d.health->report_ok(Dev::Phone, now);
                     }
                     break;
+                }
                 case Event::Connect:
                     ESP_LOGI(kTag, "phone connected, waiting for encryption");
                     conn = e.conn;
@@ -1874,6 +1920,41 @@ void ble_task(void* arg) {
             const uint8_t cmd = d.slots->media_ctrl.get().cmd;
             if (conn != BLE_HS_CONN_HANDLE_NONE && encrypted && !apple.press(cmd) && subscribed) {
                 send_ctrl(conn, cmd);
+            }
+        }
+        // The SOS (core::crash). `logic` decides; this only carries it. Sent
+        // the moment it is due, then every kSosResendMs until the phone says
+        // it texted or that it will not, so a phone that connects late, or
+        // has no signal yet, still gets it. The phone knows a resend by its
+        // id. The "I'm OK" goes once. Where: the last fix this task saw.
+        {
+            const core::state::Gnss g = d.slots->gnss.get();
+            if (g.fix) {
+                sos_lat = g.lat;
+                sos_lon = g.lon;
+                sos_fix_ms = now;
+                sos_have_fix = true;
+            }
+            const core::crash::State cs = d.slots->crash.get();
+            const bool link = conn != BLE_HS_CONN_HANDLE_NONE && encrypted && subscribed;
+            const bool answered = diag.sos_ack_id == cs.sos_id &&
+                (diag.sos_ack == static_cast<uint8_t>(core::crash::Ack::Texted) ||
+                 diag.sos_ack == static_cast<uint8_t>(core::crash::Ack::Off));
+            if (link && cs.phase == core::crash::Phase::Sent && cs.sos_id != 0 && !answered &&
+                (cs.sos_id != sos_sent_id || now - sos_sent_ms >= kSosResendMs)) {
+                char line[64];
+                const int32_t age_s = static_cast<int32_t>((now - sos_fix_ms) / 1000);
+                const size_t n = core::crash::sos_line(cs.sos_id, sos_have_fix, sos_lat, sos_lon,
+                                                       age_s, line, sizeof line);
+                ESP_LOGW(kTag, "SOS %u to phone: %.*s", static_cast<unsigned>(cs.sos_id), static_cast<int>(n), line);
+                send_ctrl_text(conn, line, n);
+                sos_sent_id = cs.sos_id;
+                sos_sent_ms = now;
+            }
+            if (link && cs.ok_id != 0 && cs.ok_id != ok_sent_id) {
+                char line[16];
+                send_ctrl_text(conn, line, core::crash::ok_line(cs.ok_id, line, sizeof line));
+                ok_sent_id = cs.ok_id;
             }
         }
         apple.poll(now);

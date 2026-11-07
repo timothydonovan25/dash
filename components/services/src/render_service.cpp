@@ -63,9 +63,14 @@ constexpr const char* kTag = "render";
 // A button press cuts the wait short and is drawn at once, so the pacing
 // bounds how stale a *number* can be, not how fast a menu responds.
 //
+// The rate is CONFIG -> Diag -> Frame rate (120 Hz by default; read every
+// pass, so a change takes effect at once). Unlimited has no deadline but
+// still waits one tick a frame: render is above ble, keeper, storage, wifi,
+// logger and ota on core 1, and a loop that never blocked would starve them
+// and core 1's idle task, which the task watchdog checks.
+//
 // The deadline is kept in whole frames from a fixed start, so the 8.33 ms
 // period does not drift by rounding to the 1 ms tick.
-constexpr uint32_t kFrameHz = 120;
 
 constexpr int16_t kBandLines = bsp::kTftBandLines;
 constexpr size_t  kBandPixels = static_cast<size_t>(ui::kScreenW) * kBandLines;
@@ -89,6 +94,30 @@ public:
 
 private:
     Buffer* buf_;
+};
+
+// The planned route for the trip map (services::RouteTrace): its total()
+// is the route's generation, which is what makes the map redraw.
+class RouteTraceSource final : public ui::IPointSource {
+public:
+    explicit RouteTraceSource(const RouteTrace* t) : t_(t) {}
+    size_t count() const override { return t_ ? t_->pts.size() : 0; }
+    size_t total() const override { return t_ ? t_->gen.load(std::memory_order_acquire) : 0; }
+    bool point(size_t i, float& x_ft, float& y_ft) const override {
+        bool fast;
+        return route_point(i, x_ft, y_ft, fast);
+    }
+    bool route_point(size_t i, float& x_ft, float& y_ft, bool& fast) const override {
+        core::state::TrackPoint p;
+        if (!t_ || !t_->pts.read_nth(i, p)) return false;
+        x_ft = p.x_ft;
+        y_ft = p.y_ft;
+        fast = p.speed_mph >= 65.0f;   // logic_tick's trace_route
+        return true;
+    }
+
+private:
+    const RouteTrace* t_;
 };
 
 // What one more transfer costs in pixels: below it, sending unchanged pixels
@@ -181,6 +210,8 @@ void render_task(void* arg) {
     TraceSource trip_src(d.trip_trace);
     TraceSource lap_src(d.lap_trace);
     app.set_trip_source(&trip_src);
+    RouteTraceSource route_src(d.route_trace);
+    app.set_route_source(&route_src);
     app.set_track_source(&lap_src);
 
     // Internal SRAM, not PSRAM. This is 38 kB that is redrawn for every
@@ -209,6 +240,7 @@ void render_task(void* arg) {
                          sizeof(ui::Color), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!glass) ESP_LOGW(kTag, "no PSRAM for the shadow: sending damage whole");
     ui::Shadow shadow(glass);
+    d.glass.store(glass, std::memory_order_release);   // the console's `screen`
 
 
 
@@ -217,6 +249,7 @@ void render_task(void* arg) {
     d.backlight_pct.store(d.settings->brightness_pct, std::memory_order_relaxed);
 
     uint32_t frames = 0;
+    uint32_t sent_frames = 0;   // passes that put anything on the wire
     uint32_t last_hz_ms = d.clock->now_ms();
     bool last_send_ok = true;
     uint32_t last_scrub_ms = d.clock->now_ms();
@@ -224,7 +257,8 @@ void render_task(void* arg) {
 
     uint32_t start_ms = d.clock->now_ms();
     uint32_t frame_no = 1;
-    auto deadline_ms = [&] { return start_ms + frame_no * 1000u / kFrameHz; };
+    uint32_t frame_hz = core::config::frame_rate_hz(*d.settings);
+    auto deadline_ms = [&] { return start_ms + frame_no * 1000u / frame_hz; };
 
     watchdog_join();
     for (;;) {
@@ -234,14 +268,30 @@ void render_task(void* arg) {
         // period has run out. That is the difference between a menu that
         // feels immediate and one that feels like it is thinking about it.
         const uint32_t before = d.clock->now_ms();
-        const int32_t left = static_cast<int32_t>(deadline_ms() - before);
+        // A new rate starts its schedule from now.
+        if (const uint32_t hz = core::config::frame_rate_hz(*d.settings); hz != frame_hz) {
+            frame_hz = hz;
+            start_ms = before;
+            frame_no = 1;
+        }
         core::nav::InputEvent ev;
-        if (left > 0 && wait_input_event(ev, static_cast<uint32_t>(left))) {
+        if (frame_hz == 0) {
+            // Unlimited: every pass is a frame, after one tick's wait, which
+            // also takes a press the moment it lands.
+            if (wait_input_event(ev, 1)) {
+                if (!program_active()) app.on_input(ev, canvas);
+                while (take_input_event(ev)) {
+                    if (!program_active()) app.on_input(ev, canvas);
+                }
+            }
+            ++frames;
+        } else if (const int32_t left = static_cast<int32_t>(deadline_ms() - before);
+                   left > 0 && wait_input_event(ev, static_cast<uint32_t>(left))) {
             if (!program_active()) app.on_input(ev, canvas);
             while (take_input_event(ev)) {
                 if (!program_active()) app.on_input(ev, canvas);
             }
-        } else if (left > 0 &&
+        } else if (static_cast<int32_t>(deadline_ms() - before) > 0 &&
                    static_cast<int32_t>(deadline_ms() - d.clock->now_ms()) > 0) {
             // Timed out in whole ticks, a fraction of a millisecond short of
             // the deadline by esp_timer: wait the rest. Counted as a frame,
@@ -258,8 +308,8 @@ void render_task(void* arg) {
             const uint32_t t = d.clock->now_ms();
             while (static_cast<int32_t>(deadline_ms() - t) <= 0) {
                 // Rebase once a second so frame_no * 1000 never overflows.
-                if (++frame_no > kFrameHz) {
-                    frame_no -= kFrameHz;
+                if (++frame_no > frame_hz) {
+                    frame_no -= frame_hz;
                     start_ms += 1000;
                 }
             }
@@ -379,7 +429,7 @@ void render_task(void* arg) {
         // panel that fails only when written to.
         // A still screen sends nothing for seconds, so an idle frame
         // vouches for the panel only while its last transfer worked.
-        if (sent) last_send_ok = hal::ok(blit_status);
+        if (sent) { last_send_ok = hal::ok(blit_status); ++sent_frames; }
         if (sent && !last_send_ok) {
             d.health->report_error(core::state::Dev::Display,
                                    static_cast<int32_t>(blit_status), now);
@@ -391,8 +441,11 @@ void render_task(void* arg) {
             if (d.system) {
                 d.system->render_hz_x10 =
                     static_cast<uint16_t>(frames * 10000 / (now - last_hz_ms));
+                d.system->render_sent_hz =
+                    static_cast<uint16_t>(sent_frames * 1000 / (now - last_hz_ms));
             }
             frames = 0;
+            sent_frames = 0;
             last_hz_ms = now;
         }
 
@@ -408,8 +461,10 @@ void start_render(Deps& d, CommandQueue& q) {
     g_render_arg = {&d, &q};
     // Core 1, with the card and the radio. The panel can afford to be late;
     // the shift lights cannot, and they are on the other core.
-    // 8 kB for the task itself plus the App that lives on its stack.
-    xTaskCreatePinnedToCore(render_task, "render", 8192 + sizeof(ui::App),
+    // 8 kB for the task itself plus the App that lives on its stack, and
+    // the Frame's NAV part (a local too), which came after the 8 kB was set.
+    xTaskCreatePinnedToCore(render_task, "render",
+                            8192 + sizeof(ui::App) + sizeof(core::state::Nav),
                             &g_render_arg, 6, nullptr, 1);
 }
 

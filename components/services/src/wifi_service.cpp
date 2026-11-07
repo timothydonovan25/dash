@@ -30,6 +30,7 @@
 #include "core/config/config.hpp"
 #include "core/ota/ota.hpp"
 #include "core/wifi/wifi.hpp"
+#include "core/route/search.hpp"
 
 #include "esp_app_desc.h"
 #include "esp_attr.h"
@@ -125,16 +126,20 @@ const esp_partition_t* slot_for(bool stable) {
     return stable == running_is_stable ? running : other;
 }
 
+// The map's date for the page, out of line: the Nav it comes in is most
+// of a kilobyte, which status_get's own frame cannot also hold.
+__attribute__((noinline)) unsigned map_date(const Deps& d) { return d.slots->nav.get().map_date; }
+
 esp_err_t status_get(httpd_req_t* r) {
     g_web.touch();
     const core::state::Ota o = g_web.d->slots->ota.get();
     const hal::ICard* card = g_web.d->card;
-    char body[448];
+    char body[480];
     std::snprintf(body, sizeof body,
                   "{\"running\":\"%s\",\"running_date\":\"%s\",\"slot\":\"%s\","
                   "\"role\":\"%s\",\"other\":\"%s\",\"other_date\":\"%s\","
                   "\"install\":%u,\"pct\":%u,\"error\":\"%s\","
-                  "\"image_error\":\"%s\",\"card\":%s,\"games\":%s}",
+                  "\"image_error\":\"%s\",\"card\":%s,\"games\":%s,\"map\":%u}",
                   o.running_ver, o.running_date, o.running_slot, core::ota::role_name(o.role),
                   o.other == core::ota::Other::Ready ? o.other_ver : "",
                   o.other == core::ota::Other::Ready ? o.other_date : "",
@@ -142,7 +147,8 @@ esp_err_t status_get(httpd_req_t* r) {
                   core::ota::install_error_name(o.error),
                   core::ota::image_error_name(o.image_error),
                   card && card->present() ? "true" : "false",
-                  g_web.d->games ? "true" : "false");
+                  g_web.d->games ? "true" : "false",
+                  map_date(*g_web.d));
     return send_json(r, body);
 }
 
@@ -323,6 +329,51 @@ esp_err_t games_list_get(httpd_req_t* r) {
     return list_dir(r, "games", core::wifi::valid_game_name);
 }
 
+// The body of a PUT onto the card at `tmp`, 32 kB at a time through
+// g_game_buf. `first_ok`, when given, sees the first chunk before anything
+// is written and may refuse the file. Null on success; else why, with the
+// temporary file removed. (Games and maps share it.)
+const char* stream_to_card(httpd_req_t* r, hal::ICard& card, const char* tmp, size_t size,
+                           bool (*first_ok)(const uint8_t*, size_t)) {
+    size_t at = 0;     // bytes on the card
+    size_t held = 0;   // bytes in g_game_buf, not yet written
+    int quiet = 0;     // receive timeouts in a row (10 s each)
+    while (at + held < size) {
+        const size_t room = kGameChunk - held;
+        const size_t left = size - at - held;
+        const int n = httpd_req_recv(r, reinterpret_cast<char*>(g_game_buf + held),
+                                     left < room ? left : room);
+        // A sender gone without closing (a laptop that changed networks)
+        // used to be waited for for ever, and its half file stayed.
+        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++quiet < 3) continue;
+        quiet = 0;
+        if (n <= 0) {
+            ESP_LOGW(kTag, "upload to %s cut off at %u of %u", tmp, static_cast<unsigned>(at + held),
+                     static_cast<unsigned>(size));
+            card.remove(tmp);
+            return "connection lost";
+        }
+        held += static_cast<size_t>(n);
+        g_web.touch();
+        if (held == kGameChunk || at + held == size) {
+            if (at == 0 && first_ok && !first_ok(g_game_buf, held)) {
+                // Drain nothing more: the browser is told at once.
+                return "not the right kind of file";
+            }
+            const hal::Status st = card.write_at(tmp, at, g_game_buf, held);
+            if (!hal::ok(st)) {
+                ESP_LOGW(kTag, "upload: card write at %u: %s", static_cast<unsigned>(at),
+                         hal::status_name(st));
+                card.remove(tmp);
+                return "the card refused it";
+            }
+            at += held;
+            held = 0;
+        }
+    }
+    return nullptr;
+}
+
 esp_err_t game_put(httpd_req_t* r) {
     g_web.touch();
     Deps& d = *g_web.d;
@@ -338,35 +389,10 @@ esp_err_t game_put(httpd_req_t* r) {
     if (size == 0 || size > kGameMaxBytes) {
         return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"too big for a WAD\"}");
     }
-
-    size_t at = 0;     // bytes on the card
-    size_t held = 0;   // bytes in g_game_buf, not yet written
-    while (at + held < size) {
-        const size_t room = kGameChunk - held;
-        const size_t left = size - at - held;
-        const int n = httpd_req_recv(r, reinterpret_cast<char*>(g_game_buf + held),
-                                     left < room ? left : room);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        if (n <= 0) {
-            ESP_LOGW(kTag, "game upload cut off at %u of %u", static_cast<unsigned>(at + held),
-                     static_cast<unsigned>(size));
-            d.card->remove(kGameTmp);
-            return ESP_FAIL;
-        }
-        held += static_cast<size_t>(n);
-        g_web.touch();
-        if (held == kGameChunk || at + held == size) {
-            const hal::Status st = d.card->write_at(kGameTmp, at, g_game_buf, held);
-            if (!hal::ok(st)) {
-                ESP_LOGW(kTag, "game upload: card write at %u: %s", static_cast<unsigned>(at),
-                         hal::status_name(st));
-                d.card->remove(kGameTmp);
-                return send_status(r, "500 Internal Server Error",
-                                   "{\"ok\":false,\"error\":\"the card refused it\"}");
-            }
-            at += held;
-            held = 0;
-        }
+    if (const char* err = stream_to_card(r, *d.card, kGameTmp, size, nullptr)) {
+        char body[96];
+        std::snprintf(body, sizeof body, "{\"ok\":false,\"error\":\"%s\"}", err);
+        return send_status(r, "500 Internal Server Error", body);
     }
 
     char path[48];
@@ -380,6 +406,58 @@ esp_err_t game_put(httpd_req_t* r) {
     ESP_LOGI(kTag, "game %s: %u bytes", path, static_cast<unsigned>(size));
     return send_json(r, "{\"ok\":true}");
 }
+
+// --- the routing map ------------------------------------------------------
+//
+// A new route/map.rgf (docs/navigation.md), the same way as a game: to a
+// temporary file, then over the old one once every byte is down. The first
+// chunk must be an .rgf this firmware reads. `storage` notices the new file
+// on its next routing job and opens it; until then routes use the old one,
+// and in the moment between remove and rename a query is "no map", which
+// logic looks again for in 30 s.
+
+constexpr const char* kMapTmp = "route/map.tmp";
+constexpr size_t kMapMaxBytes = 1024u * 1024 * 1024;   // a few states
+
+bool map_first_ok(const uint8_t* p, size_t n) { return core::route::map_header_ok(p, n); }
+
+bool search_first_ok(const uint8_t* p, size_t n) {
+    core::route::SearchHeader h;
+    if (n < sizeof h) return false;
+    std::memcpy(&h, p, sizeof h);
+    return std::memcmp(h.magic, core::route::kSearchMagic, 4) == 0 && h.version == core::route::kSearchVersion;
+}
+
+// The map and the search index go the same way: to a temporary file, then
+// over the old one.
+esp_err_t route_file_put(httpd_req_t* r, const char* tmp, const char* path,
+                         bool (*first_ok)(const uint8_t*, size_t)) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    if (!d.card || !d.card->present()) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    }
+    const size_t size = r->content_len;
+    if (size == 0 || size > kMapMaxBytes) {
+        return send_status(r, "400 Bad Request", "{\"ok\":false,\"error\":\"not the right kind of file\"}");
+    }
+    if (const char* err = stream_to_card(r, *d.card, tmp, size, first_ok)) {
+        char body[96];
+        std::snprintf(body, sizeof body, "{\"ok\":false,\"error\":\"%s\"}", err);
+        return send_status(r, "400 Bad Request", body);
+    }
+    d.card->remove(path);
+    if (!hal::ok(d.card->rename(tmp, path))) {
+        d.card->remove(tmp);
+        return send_status(r, "500 Internal Server Error",
+                           "{\"ok\":false,\"error\":\"could not rename it on the card\"}");
+    }
+    ESP_LOGI(kTag, "%s: %u bytes", path, static_cast<unsigned>(size));
+    return send_json(r, "{\"ok\":true}");
+}
+
+esp_err_t map_put(httpd_req_t* r) { return route_file_put(r, kMapTmp, kMapPath, map_first_ok); }
+esp_err_t search_put(httpd_req_t* r) { return route_file_put(r, "route/search.tmp", kSearchPath, search_first_ok); }
 
 esp_err_t game_delete(httpd_req_t* r) {
     g_web.touch();
@@ -601,6 +679,8 @@ httpd_handle_t start_server() {
         {"/api/games",     HTTP_GET,  games_list_get, nullptr},
         {"/games/*",       HTTP_PUT,  game_put,      nullptr},
         {"/games/*",       HTTP_DELETE, game_delete, nullptr},
+        {"/route/map.rgf", HTTP_PUT,  map_put,       nullptr},
+        {"/route/search.idx", HTTP_PUT, search_put,  nullptr},
     };
     for (const httpd_uri_t& u : uris) httpd_register_uri_handler(h, &u);
     return h;

@@ -5,6 +5,7 @@
 // short file to read.
 #include "wiring.hpp"
 #include "serial_buttons.hpp"
+#include "drivers/usb_drive.hpp"
 
 #include "core/config/config.hpp"
 #include "esp_log.h"
@@ -48,6 +49,10 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #endif
 
 // IDF's IPC tasks had 400 bytes left of 1024 (1.61). An overflow is a crash.
+#if !CONFIG_FATFS_USE_FASTSEEK
+#error "CONFIG_FATFS_USE_FASTSEEK must be on (a route seeks all over a 120 MB map): delete sdkconfig and rebuild"
+#endif
+
 #if CONFIG_ESP_IPC_TASK_STACK_SIZE < 1536
 #error "CONFIG_ESP_IPC_TASK_STACK_SIZE must be at least 1536: delete sdkconfig and rebuild"
 #endif
@@ -82,6 +87,11 @@ static_assert(CONFIG_BT_NIMBLE_PINNED_TO_CORE == 1,
 #endif
 
 extern "C" void app_main() {
+    // A reset or a crash in USB-drive mode leaves the USB-C on the OTG
+    // controller (LP registers outlive it): give it back to the console
+    // before anything prints (drivers::UsbDrive).
+    drivers::UsbDrive::restore_phy();
+
     ESP_LOGI(kTag, "dash v2 — %u config items",
              static_cast<unsigned>(core::config::item_count()));
 
@@ -115,7 +125,7 @@ extern "C" void app_main() {
     services::start_gnss(deps);
     services::start_logic(deps, commands);
     services::start_input(deps, commands);
-    start_serial_buttons();   // bench stand-in for the pod: tools/pod_keys.py
+    start_serial_buttons(commands, deps);   // bench stand-in for the pod: tools/pod_keys.py
 
     services::start_logger(deps);
     services::start_storage(deps);

@@ -1,0 +1,595 @@
+# Radio and updates — architecture §11
+
+This is §11 of `system-architecture.md`, kept in its own file because it is
+half that document's size and most tasks need only one or the other. **The
+section numbers are unchanged**, so a code comment citing "§11.3" or
+"§11.7.1" means the heading of that number here. The five rules, the state
+model and the task table (§1–§5) are in `system-architecture.md`; what is
+built and how it behaves is in `features.md` §24–§26. Any other § number
+below (§4, §9.3, §10.1, §13 …) refers to `system-architecture.md`.
+
+| § | Topic |
+|---|---|
+| 11.1 | No Bluetooth Classic; the Dash Media GATT contract (Feed tags, rules) shared with the Android app |
+| 11.1.1 | An iPhone: AMS and ANCS, no app |
+| 11.2 | TPMS (not written) |
+| 11.3 | Radio roles (phone, watch, observer), the NimBLE timer bug, which phone gets in |
+| 11.4 | Task and core placement: NimBLE on core 1, ESP-Hosted demoted |
+| 11.5–11.6 | The `Media`/`Tpms` state, where it shows |
+| 11.7 | Partition table, stable/dev slots, versions and file names |
+| 11.7.1 | Wi-Fi updates: the hotspot, its page, the rules, memory |
+| 11.8 | Failure rules |
+
+## 11. Bluetooth (BLE)
+
+Two features: now-playing song metadata from the phone, and TPMS sensor
+readings. Both use BLE only. Both are optional at runtime — if the radio
+never connects, nothing else in the dash changes behaviour.
+
+### 11.1 The hard constraint: no Bluetooth Classic
+
+The radio is the module's ESP32-C6, which has **BLE 5 only**, like the
+S3 before it. It has no Bluetooth Classic radio at all. That rules out AVRCP, which is the normal way a car stereo gets track
+metadata, and it rules out SPP, which is the normal way to get a serial
+stream. There is no workaround in firmware.
+
+The phone is a Sonim XP3900, an Android handset, so there is one path:
+something runs on the phone and pushes strings to the dash. The V1 build
+worked this way too.
+
+**BLE offers exactly two connection-oriented transports**: ATT/GATT, and
+L2CAP connection-oriented channels. There is no third. Advertising cannot
+carry this — 31 bytes of payload will not hold a song title, and it is
+fire-and-forget with no delivery guarantee.
+
+We take GATT, in its smallest form: **one characteristic that the phone
+writes bytes to.** L2CAP CoC is a real socket and would also work, but
+nRF Connect and every other off-the-shelf BLE app speak GATT and not CoC.
+When neither the dash nor the phone app has ever worked, being able to
+poke the dash from an app you did not write is worth more than the
+difference between `write()` and a stream.
+
+```
+Service   6e5f0001-b5a3-f393-e0a9-e50e24dcca9e   "Dash Media"
+  char    ...0002  Feed     write-no-response, UTF-8
+```
+
+One handle, one line per write, tag character then the value:
+
+```
+T The Devil In I
+A Slipknot
+L .5: The Gray Chapter (Special Edition)
+S 1
+```
+
+| Tag | Meaning | Value |
+|---|---|---|
+| `T` | Title | UTF-8, truncated to 59 bytes on arrival |
+| `A` | Artist | as above |
+| `L` | aLbum | as above (`A` was taken) |
+| `Y` | lYric | current line only, as above (`L` was taken) |
+| `S` | State | `0` stop, `1` play, `2` pause |
+| `D` | Duration | track length, decimal ASCII milliseconds; `0`/absent is unknown |
+| `P` | Position | decimal ASCII milliseconds, **an anchor, not a live value** — see below |
+| `N` | Notification | `N<kind> <who>` 0x1F `<text>`, one write — see below |
+| `K` | sos acKnowledge | `K <id> <code>`: the answer to Ctrl's `X` — see below |
+| `G` | Go to | `G <lat> <lon> [name]`: a destination for NAV — see below |
+
+Rules the firmware side depends on:
+
+- **One line per write.** The trailing newline is optional; the end of the
+  write is the end of the line. No reassembly across writes, so a dropped
+  write costs one field and not the parser's state.
+- **No chunking.** `CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU` is 256, so a
+  60-byte string is a single write. If a negotiated MTU ever comes back
+  smaller, truncate on the phone rather than chunking here.
+- **Any tag may arrive at any time**, and unknown tags are ignored rather
+  than being an error. That is what lets a tag be added later without
+  breaking a phone app that predates it.
+- **`updated_ms` is set on every accepted line.** Screens use it as the
+  "is there any media" gate.
+- **On disconnect, `ble` must publish a zeroed `Media`** — after a
+  ten-second hold (§11.8, `core::media::kDisconnectHoldMs`), so a link that
+  blinks out and straight back keeps its title. A dash still showing what
+  was playing forty minutes ago is worse than one showing nothing, and
+  nothing downstream can tell stale from current.
+- **`P` is not resent every second of playback.** A `MediaController`
+  position callback fires continuously on the phone, and turning that into
+  a BLE write a second would be most of the link's traffic for a number
+  the dash can work out itself. `P` instead means "position was this many
+  ms, as of now" — the dash records its own clock alongside it
+  (`Media.position_at_ms`) and, while `S` says playing, adds the elapsed
+  wall time on top for display. The phone resends `P` on connect, on a
+  track or seek change, and otherwise only as an occasional resync beat
+  (alongside `S`'s existing one) to correct for drift — never on every
+  position tick.
+- **`Y` is the opposite of `T`/`A`/`L`: it changes continuously during
+  playback, once per lyric line, and is never resent as a liveness beat.**
+  The phone reads the `.lrc` sitting next to the track (same file the
+  Lyrics screen already parses) and writes the line whose timestamp the
+  playhead has just reached — nothing is chunked or reassembled, so only
+  one line is ever in flight, never a whole file. The dash never stores a
+  lyric file: it holds exactly the line it was last told, same as any
+  other `Media` field, and a title change clears it immediately rather
+  than leaving the old track's last line on screen under a new song.
+
+- **`N` is a notification, not media** (1.32). One write carries a whole
+  one: a kind byte, the caller/sender/app (31 bytes), ASCII's unit
+  separator 0x1F, and the message (95 bytes, absent for a call). Kinds:
+  `C` an incoming call, ringing; `E` that call ended (answered, rejected,
+  gone), which changes nothing but the ringing; `X` missed call; `M`
+  message; `O` other. It lands in its own `Notify` slot (`ble` its one
+  writer, parsed by `core::media::apply_notify`), so a new song does not
+  clear it and a disconnect only stops a call ringing; a call also stops
+  after 45 s with no `E`. The phone sends calls, missed calls and messages
+  only (`Notify.kt`'s `NotifyFilter`), and sanitises both fields so 0x1F
+  can only be the separator. The dash shows it as a toast and on CRUISE →
+  PHONE, with the message text only when stopped unless CONFIG → Phone →
+  Text moving is on.
+
+- **`X` and `K` are the crash SOS** (features §24.3). Dash to phone, on
+  Ctrl: `X <id> <lat> <lon> <age_s>` asks the phone to text its contacts
+  (decimal degrees, 6 places; `X <id> - - -1` with no fix since power-on),
+  and `X <id> ok` says that SOS was a false alarm. `<id>` is 1–65535,
+  counted from 1 at each power-on. Phone to dash, on Feed: `K <id> 1`
+  texted, `K <id> 0` this phone will not (its switch off, no contact, no
+  SEND_SMS), `K <id> 2` it tried and the network refused. The dash resends
+  `X` every 15 s until it hears `1` or `0`, so the phone answers a resend of
+  one it texted with `1` again and texts it once (`SosSender.kt`, 10 min by
+  id). `X` waits for an encrypted, subscribed link like `C`; nothing else
+  in Ctrl starts with `X`, and `parseCtrl` ignores it.
+
+- **`G` is a destination** (docs/navigation.md §7). It is an address typed
+  on the phone and geocoded there. Decimal degrees with up to 7 places,
+  then an optional name: ASCII, up to 15 bytes are kept, and "PHONE" is
+  used when there is none. Example: `G 36.062600 -94.157400 Dickson St`.
+  The dash routes to it at once and lists it first in NAV's picker
+  (`core::route::parse_go`, the `PhoneDest` slot, `ble` its writer). One
+  write is one destination; resending the same one starts it again.
+  Nothing comes back on Ctrl. The app sends it from Settings → "Send a
+  destination to the dash" (`NavProto.kt`), geocoding with Android's
+  `Geocoder` or taking "lat, lon" typed in.
+
+`Media.src` records which path fed the data: `kSrcPhone` for the feed,
+`kSrcAms` for an iPhone (§11.1.1).
+
+### 11.1.1 An iPhone: AMS and ANCS, no app (1.59)
+
+An iPhone serves two GATT services of its own to any bonded accessory:
+**AMS** (Apple Media Service, `89D3502B-0F36-433A-8EF4-C502AD55F8DC`) for
+what is playing and the transport keys, and **ANCS** (Apple Notification
+Center Service, `7905F431-B5CE-4E99-A40F-4B1E122D00D0`) for calls and
+messages. So an iPhone needs no app: the dash reads both as a GATT
+*client* over the phone's own connection. It stays the peripheral; the
+iPhone connects to it. The GATT client was already on for the watch (1.48).
+
+Not a setting. The two paths share the connection, the bond and every rule
+of §11.3, and which one a phone uses is found out, not configured:
+
+1. The phone connects and encrypts, and `core::ble::judge` lets it in, as
+   for any phone.
+2. The `ble` task (`AppleLink`) looks through the phone's services. No AMS
+   or ANCS: an Android phone, which writes Feed. Otherwise it subscribes:
+   AMS's Entity Update (track title, artist, album, duration; then the
+   player's playback info), then ANCS's Data Source and Notification Source,
+   in that order, as Apple asks.
+3. `core/media/apple` turns each AMS update into the §11.1 line it amounts
+   to (`T`, `A`, `L`, `D`, `S`+`P`) and each ANCS notification into an `N`
+   line, and hands them to the feed's own `apply_line()`/`apply_notify()`.
+   The bounds, the UTF-8 cuts and the "new title restarts the clock" rule
+   are the feed's, not a second copy.
+4. A handlebar press goes to AMS's Remote Command (toggle, next, previous)
+   when the phone has AMS, and over Ctrl otherwise.
+
+ANCS says only that a notification exists. Its title and text are asked for
+on the Control Point, one at a time, in lengths `Notify` can hold, and the
+answer comes back on the Data Source, possibly in pieces;
+`core::media::ancs::Tracker` queues the asks and puts the answers together.
+The same three kinds as the Android app: an incoming call (category 1),
+rings until iOS removes it, a missed call (2), and a message (Social, 4).
+Everything iOS replays on subscribing is skipped, except a call ringing now.
+
+**Advertising.** The scan response solicits ANCS (AD type 0x15). That is
+what makes an iPhone list the dash under Settings → Bluetooth, and pairing
+from there is how it bonds. The 128-bit solicitation fills 18 of the 31
+bytes, so the scan response carries the shortened name `CRF250F`; the full
+name is in the GAP service. The advertisement itself is unchanged, so the
+Android app's service-UUID scan still finds it.
+
+DIAG → Radio's Ctrl row shows `AMS + ANCS` for an iPhone that is live.
+
+### 11.2 TPMS
+
+BLE TPMS sensors are almost all **advertising-only beacons**. They never
+connect. They put pressure, temperature, battery, and an ID into the
+manufacturer-specific data field of an advertisement, every few seconds
+while the wheel is rolling. So the dash only needs a passive scanner.
+
+That is good news architecturally: no connection state, no pairing, no
+reconnect logic. It is a decode problem, not a Bluetooth problem.
+
+```cpp
+// core/tpms/decode.hpp   — pure, host-testable
+struct TpmsReading { uint32_t id; float psi; float temp_c;
+                     uint8_t batt_pct; bool alarm; };
+
+using Decoder = bool (*)(const uint8_t* mfg, size_t len, TpmsReading& out);
+extern const Decoder kDecoders[];   // one per sensor family
+```
+
+Put the decoders in `core/`, and unit-test each one against a captured hex
+string. When you buy a set of sensors and they turn out to use a layout
+you have not seen, you add one function and one test, and you never touch
+the BLE code.
+
+Bind a sensor ID to a wheel position in CONFIG — a "learn front" and
+"learn rear" action that stores the next new ID it sees. Do not guess by
+signal strength.
+
+**Worth a sanity check before you buy:** most cheap BLE TPMS sensors are
+valve-cap type and add rotating mass at the rim, and they only transmit
+above a speed or pressure-change threshold. On a tubed dirtbike wheel
+running low pressure, check that the sensor's range actually covers your
+pressures before you commit.
+
+### 11.3 Radio topology
+
+The dash needs these BLE roles at once:
+
+- **Peripheral** — advertises the Dash Media service; the phone connects
+  in and writes to it.
+- **Observer** — passive scan for TPMS advertisements.
+- **Central and GATT client** (1.48) — the rider's watch. With CONFIG →
+  Heart rate → Watch HR on, `ble` scans for the standard Heart Rate Service
+  (0x180D), connects to the strongest advertiser above -95 dBm (then only
+  to that one, by address or name, for the power-on), and subscribes to
+  Heart Rate Measurement (0x2A37). A Garmin does this with Broadcast Heart
+  Rate on. `core/hr` is the decision side and is host-tested. The watch is
+  the second of `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2`; its connection has its
+  own GAP callback, so the phone's pairing policy never sees it, and its bond
+  is never stored (the store is the phones', §11.3 below). The reading goes
+  to the `heart` slot, STAT → HEART, DIAG → Radio, the blackbox's `HR`
+  column and a `heart` event in the detail log.
+
+  The search is continuous while the setting is on and no watch is linked
+  (1.52): 3 s scans back to back, each listening 50 ms in 100, so a
+  broadcast turned on after power-on is found within a scan or two. The scan
+  asks the controller **not** to filter duplicates: the C6 image's filter is
+  by address and never refreshed (`CONFIG_BT_LE_SCAN_DUPL_CACHE_REFRESH_PERIOD=0`),
+  so a watch heard advertising for its phone before Broadcast HR was on was
+  never reported again. `hr_disc_event` passes each Heart Rate advertiser on
+  once a scan, and once more with its name. A connect gets 4 s.
+
+Central and the GATT client were off before 1.48 (they had been for AMS,
+§11.1) to save flash. Turning them on, with the watch code, cost 31 kB of
+image and under 0.5 kB of internal `.bss`. The observer role came with
+them; the TPMS scan will use it.
+
+**IDF v6.0.2 bug this exposed.** With `CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`,
+NimBLE's FreeRTOS callouts never learn their event queue, so every NimBLE
+timer ran on FreeRTOS's timer task, not the host task. With the central
+role on, the host timer fires during the controller sync and asserts
+(`ble_hs_timer_exp`, ble_hs.c:570), a boot loop. `ble_service.cpp` mends it
+by wrapping `npl_freertos_funcs_init` at link time (`-Wl,--wrap`, in
+`components/services` and `demo_p4/main`).
+
+NimBLE supports this. The cost is radio time. Scanning and an active
+connection compete for the same antenna, so duty-cycle the scan:
+
+| Setting | Value | Why |
+|---|---|---|
+| Scan interval / window | 300 ms / 30 ms | 10% duty. TPMS beacons repeat, so you catch them within a few seconds. |
+| Connection interval | 100–200 ms | Metadata is not latency-critical. Long intervals save radio time and phone battery. |
+| Max connections | 2 | One phone and the watch (`CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2`). Advertising stops while a phone is connected. |
+| Bonding | Required, stored in NVS | The bond is the phone's identity; see below. |
+
+**Which phone gets in.** One connection means a stranger's phone holding
+it is a dash with no media, and Android rotates its address every fifteen
+minutes, so the dash cannot recognise a phone by address. Only the
+identity key that bonding exchanges does that. So the dash asks for
+encryption the moment a phone connects (`ble_gap_security_initiate`), Feed
+needs an encrypted link (`BLE_GATT_CHR_F_WRITE_ENC`), and the policy in
+`core/ble/pairing.hpp` decides who stays:
+
+- The first phone ever bonds freely — a new dash, or one whose bonds were
+  just forgotten, must be reachable without a menu.
+- After that a new phone bonds only inside CONFIG → Phone → **Pairing mode**,
+  a 60 s window that admits one phone. Opening it lets the current phone
+  go, and bonded phones are held off (not forgotten) until it closes, or
+  the rider's own phone would reconnect into the slot first.
+- A bond made outside a window is deleted and the link dropped. NimBLE may
+  only evict an old bond to make room while a window is open, so repeated
+  attempts cannot push the rider's phone out of the store.
+- A link that has not encrypted within 30 s is dropped.
+- **Forget phone** clears every bond. The phone keeps its half until the
+  rider forgets "CRF250F-Dash" in Android's Bluetooth settings too; until
+  then its encryption fails and the app says so.
+
+A Just Works bond has no MITM protection, and this is not trying to be
+security: it stops the dash's one slot going to whoever connects first.
+nRF Connect still works for bring-up; it bonds when asked.
+
+### 11.4 Task and core placement
+
+**This is the part that can break your shift lights.** On the S3 the BLE
+controller task ran at FreeRTOS priority 23 on the same chip as `ctrl`
+(priority 18). On the P4 board the controller runs on the ESP32-C6, so
+that task is off the P4 entirely. What stays on the P4 is the NimBLE
+host and the ESP-Hosted SDIO transport, and both must stay off core 0.
+
+Pin the NimBLE host to **core 1**:
+
+```
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_1=y
+```
+
+The ESP-Hosted transport is the catch. Its SDIO and RPC tasks
+(`sdio_read`, `sdio_write`, `rpc_rx`, …) are created inside the component
+at priority 23 with **no core affinity**, and there is no Kconfig for
+either. Left alone, they can run on core 0 above `ctrl`. `ble` lowers each
+one by name to priority 8 once the link is up: below everything on core 0,
+so any real-time task preempts them at once, and above `render`, so the
+radio still beats the panel on core 1. It logs how many it found, which is
+how a future esp_hosted that renames them would show up. `demo_p4/` is the working reference for the transport, but it
+leaves NimBLE on core 0 — fine on a demo with no real-time path, wrong
+here. Do not copy its `sdkconfig`.
+
+Core 0 stays a clean real-time island: `ctrl`, `imu`, `gnss`, `logic`,
+`input`. Core 1 absorbs the radio alongside `render`, `logger`, `keeper`.
+The render task will be preempted sometimes and drop a frame. At 120 Hz
+with an 8.3 ms period, that is invisible.
+
+Your V1 build already pinned NimBLE to core 1 for exactly this reason.
+That decision was correct. Keep it.
+
+Add one application task:
+
+| Task | Core | Prio | Rate | Owns |
+|---|---|---|---|---|
+| `ble` | 1 | 4 | event | media GATT server, TPMS scan callback, publishes `Media` and `Tpms` |
+
+The task itself does almost nothing. It receives NimBLE callbacks, runs a
+decoder, and publishes. All the real work is in the NimBLE host task,
+which the IDF creates for you.
+
+### 11.5 State
+
+```cpp
+struct Media { char title[60]; char album[60]; char artist[60];
+               char lyric[60];       // tag `Y`, current line only
+               uint8_t state;        // 0 stop 1 play 2 pause
+               uint8_t src;          // 0 none 1 phone app
+               uint32_t updated_ms; };   // 0 means no media at all
+
+struct TpmsWheel { float psi, temp_c; uint8_t batt_pct;
+                   bool alarm; uint32_t age_ms; bool valid; };
+struct Tpms { TpmsWheel front, rear; };
+```
+
+Both go in `Slots` as their own `Published<T>`, written only by `ble`.
+`Media` is a few hundred bytes (the real struct, in `core/state/vehicle.hpp`, has grown position, duration and source fields), and the copy is cheap at the render rate.
+
+Add to `Health`: `ble_host`, `phone`, `tpms_f`, `tpms_r`. A TPMS wheel is
+`Degraded` when its reading is older than about 5 minutes while moving,
+and `Absent` when no ID is bound.
+
+### 11.6 Where it shows on screen
+
+- **Cruise → big speed.** Three `MediaRow` widgets in the bottom right:
+  song, album and artist, each behind its icon, scrolling if the name is
+  wider than the row. The whole block disappears when `updated_ms` is 0,
+  so it never steals space from the speed digits. **Built already** —
+  the rows are laid out and drawing, and the only missing piece is the
+  radio that fills the slot.
+- **Cruise → MEDIA.** The dedicated media screen: song, album, artist and
+  a fourth `MediaRow` for the current lyric line (tag `Y`), plus an
+  `AlbumArt` widget between the speed tile and the progress ring. Art is
+  matched locally against `ui/album_art.hpp` — a handful of albums baked
+  into flash at compile time — by the album title already on the wire;
+  nothing about a cover ever crosses BLE. Blank when the album is not one
+  of the baked-in ones, which is the common case for anyone's whole
+  library.
+- **Stat → all data.** TPMS front and rear pressure and temperature.
+- **Diag → RADIO** (built). Connection state, bonded device, RSSI,
+  last line accepted on the Feed characteristic, last TPMS advertisement
+  age per wheel, decoder hit and miss counts. This screen is what you will actually use to work out
+  why a sensor is not showing up.
+- **Config.** Forget phone and pairing mode (built, §11.3); learn front
+  sensor, learn rear sensor, TPMS low-pressure alarm thresholds (with TPMS).
+
+A TPMS low-pressure alarm should be a mode-independent overlay, not a
+screen. Losing air is worth interrupting the trip map for.
+
+### 11.7 Partition table, firmware slots and updates
+
+The table is `partitions.csv`, and it must be final before the first flash:
+moving NVS later erases it, and NVS holds the odometer.
+
+The table itself is at 0x10000 (`CONFIG_PARTITION_TABLE_OFFSET`), not IDF's
+0x8000. The bootloader at 0x2000 runs up to the table, and nothing updates
+it over the air, so the bike keeps the bootloader it is first flashed with;
+at 0x8000 that bootloader had 1.1 kB to spare, at 0x10000 it has 33 kB.
+Moved on 2026-10-17, before the bike's first flash. Both `main.cpp`s refuse
+to build with any other offset, since a bootloader looking for the table in
+the wrong place does not boot.
+
+```
+# name     type  subtype   offset     size
+nvs        data  nvs       0x11000    0x10000    # settings, odometer, BLE bonds
+otadata    data  ota       0x21000    0x2000     # which app slot boots
+coredump   data  coredump  0x23000    0x1D000
+ota_0      app   ota_0     0x40000    0x600000   # 6 MB
+ota_1      app   ota_1     0x640000   0x600000   # 6 MB
+slave_fw   data  0x40      0xC40000   0x200000   # the C6's firmware
+# 0xE40000-0x1000000 (1.75 MB) unallocated: room for an assets partition
+```
+
+Secure boot and flash encryption are off by decision: both burn eFuses for
+good, and either would end USB recovery, `tools/flash_dev.py` and Wi-Fi
+uploads to the dev slot. `sdkconfig.defaults` says so and `main.cpp`
+refuses to build with either on.
+
+`dash.bin` is about 1.8 MB (2.0 MB on the demo, as of 1.40), so a slot is
+under a third full.
+
+**Stable and dev.** The two slots hold a stable image and a dev image. Which
+is which is never stored: it is read off the bootloader's own state for the
+running slot (`core/ota/`, host-tested), because that is the one record a
+crash cannot leave out of date. It rests on
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, which `main.cpp` refuses to build
+without, and which has to be in the first image flashed: the bootloader is
+not updated over the air.
+
+- **Stable** is whatever runs with state Valid, or with no state at all.
+  `idf.py flash` erases otadata, so a USB flash is always the new stable:
+  USB is the recovery path.
+- **Dev** is the other slot. "Boot dev once" sets it to boot and restarts.
+  The bootloader marks it pending, and a dev image never confirms itself,
+  so the next reset of any kind (crash, watchdog, ignition) marks it
+  aborted and boots stable. A dev build that hangs costs one key cycle.
+- **Promote** is always the rider's decision, never a timer. While dev is
+  running, DIAG → Update → Promote to stable confirms it on the spot
+  (`esp_ota_mark_app_valid_cancel_rollback`), with no restart; from then on
+  it is stable and the old stable's slot is where the next install goes.
+  Not promoted, it is gone at the next reset.
+- Dev cannot install anything: IDF refuses `esp_ota_begin` while the running
+  image is pending. Installs run from stable and only ever write the dev
+  slot, so **stable is never overwritten while it is the fallback.**
+
+**Every power-on boots stable, with nothing to wait for.** There is no
+boot-time chooser: the dash comes up as fast as the hardware allows, and
+dev is reached only from DIAG → Update → Boot dev once. A dev image wears a
+red DEV tag in the top-right corner of every screen.
+
+**Getting an image into the dev slot**, from DIAG → Update:
+
+| Path | How |
+|---|---|
+| SD card | `update/dash.bin` on the card → Install from SD. Header checked first (chip, project, size), then written a sector at a time, then the image's own hash checked by `esp_ota_end`. |
+| USB | `tools/flash_dev.py` reads otadata, works out stable as the bootloader would, and writes the other slot without touching otadata. (`idf.py flash` is the other USB path: it makes a new stable.) |
+| Wi-Fi | DIAG → Update → Wi-Fi, then upload `dash-*.bin` from the dash's page. Same header check, same writer, same parked rule as the card; see §11.7.1. |
+
+Every write is refused unless parked (not moving, engine off): an erase
+stops the flash cache on both cores, long enough to break the 3 ms
+tach-to-lamp budget.
+
+**Versions and file names.** `firmware.txt` at the repo root holds the
+version and, in one to three words, what is new. `cmake/dash_version.cmake`
+makes the image's version string `"<version> <board> <feature>"`, for
+example `1.0 demo Wi-Fi OTA` (31 characters at most, checked at configure
+time), with `bike` from the root project and `demo` from `demo_p4/`. Every
+build copies its image to `releases/dash-<version>-<date>-<board>-<feature>.bin`,
+named from what is inside it, and `releases/` is kept in git. The build date
+is the image's own `esp_app_desc_t` date, kept current by a daily stamp
+(IDF otherwise only refreshes it when the version string changes). The
+Update screen and the Wi-Fi page show version and date for both slots, and
+firmware downloaded from the page is saved under the same name.
+`core::ota::check_board` refuses an image whose board word differs from the
+running one's; an image from before this scheme has no board word and is not
+refused.
+
+### 11.7.1 Wi-Fi updates
+
+The dash is a **hotspot, never a station.** It works at a track with no
+router, it stores no network passwords, and nothing on the dash ever
+connects out. The C6 runs the soft AP through `esp_wifi_remote` over the
+same SDIO link as BLE; the P4 runs lwIP and `esp_http_server`. The C6 must
+carry the BLE + Wi-Fi build (`CONFIG_ESP_HOSTED_CP_WIFI=y`, about 1.3 MB of
+`slave_fw`'s 2 MB). That build has the same ESP-Hosted version as the
+BLE-only one, so the version check cannot tell them apart: a C6 that answers
+`esp_wifi_init` with `ESP_ERR_NOT_SUPPORTED` gets its firmware replaced from
+`slave_fw` and the dash restarts.
+
+| | |
+|---|---|
+| On | DIAG → Update → Wi-Fi, or CONFIG → Wi-Fi. A toggle. |
+| Network | `CRF250F-Dash`, WPA2, channel 6, two clients. |
+| Password | Eight digits from `esp_random`, new every time it starts, shown on the Update screen. Nothing is stored. |
+| Address | `http://192.168.4.1` |
+| Off | The toggle; 10 minutes with no page request (`core::wifi::kIdleOffMs`); or moving faster than 3 mph. |
+
+**The page** (`services/src/wifi_page.cpp`, no external files) can:
+
+- **upload** a `dash-*.bin` into the dev slot;
+- **download** the ride logs from `logs/` on the card;
+- **download** the stable and dev images as a backup;
+- **delete** ride logs (`DELETE /logs/<name>`), except the one the logger
+  has open, which answers 409;
+- **read and change every CONFIG setting** (`GET /api/settings`,
+  `POST /api/set?key=&value=`), grouped as CONFIG groups them. Actions are
+  not offered. A change is posted as the same `ConfigSet` command the
+  config screen posts, so `logic` applies it through the table's clamp and
+  `keeper` saves it; the answer is the clamped value.
+
+**The rules, which are the point of the design:**
+
+- **`ota` stays the one writer of the dev slot.** The upload's bytes go
+  through a 16 kB stream buffer (`Deps::ota_stream`) to `ota`, which reads
+  them exactly as it reads `update/dash.bin` from the card: header check,
+  board check, parked-only, a sector at a time, the image's own hash at
+  `esp_ota_end`. A stalled upload (10 s) is abandoned and the slot left
+  invalid.
+- **Nothing on the network can boot anything.** An upload only fills the
+  dev slot. Boot dev once and Promote are buttons on the dash.
+- **Downloads and deletes cannot leave `logs/`.** `core::wifi::valid_log_name` takes
+  only a plain `*.csv` name: no slash, no `..`, one dot.
+- **The policy is host-tested** (`core/wifi/`, `test_wifi`); the service is
+  the radio and the server.
+
+**Memory.** The SDIO link, lwIP and NimBLE all draw on internal RAM, and
+an upload is a burst of SDIO receive buffers. On the demo board a 300 kB
+canvas in internal RAM left them 17 kB, and the first upload asserted in
+`sdio_rx_get_buffer`. `wifi` logs internal free RAM at every change of
+state; the hotspot up costs about 20 kB. Check that line first on the bike
+board, whose render task uses only small DMA bands.
+
+**Demo-board caveat.** Its DSI panel scans its frame buffer out of PSRAM,
+and a flash write suspends that cache, so the panel flickers for the whole
+of an upload. `CONFIG_SPIRAM_XIP_FROM_PSRAM` (IDF's suggested fix) asserted
+at startup creating the main task and was reverted (release 1.1, kept as a
+record). The bike's i80 panel keeps its own GRAM and does not flicker.
+
+**What the two images share, and the rules for it:**
+
+- **NVS.** Dev must never write anything stable cannot read. CONFIG keys are
+  permanent IDs, enforced by `test_config`'s shipped-key list; any new NVS
+  data follows the same rule.
+- **The C6.** Its firmware is in one place, and an upgrade outlives the dev
+  image that pushed it. `c6_firmware.cpp` refuses to move the C6 across an
+  ESP-Hosted major version from a dev image.
+
+**The bootloader** (0x5B70 bytes with rollback) had 1.1 kB to spare when the
+table was at 0x8000; at 0x10000 it has about 33 kB (§11.7). It is never
+updated over the air, so what the first flash put there is what the bike
+keeps.
+
+`sdkconfig.defaults` carries the whole block, with comments: the
+ESP-Hosted SDIO settings copied from `demo_p4/` (do not trust that
+component's choice defaults), then NimBLE as host only
+(`CONFIG_BT_CONTROLLER_DISABLED=y`, since the controller is the C6's),
+pinned to core 1, all four roles (peripheral and broadcaster for the
+phone, central and observer for the watch and later TPMS), two connections,
+MTU 256, bonds persisted to NVS. The partition table already has `slave_fw`
+for the C6's own firmware.
+
+**Maps.** The page's Map card uploads `map.rgf` to `PUT /route/map.rgf` and
+`search.idx` to `PUT /route/search.idx` (docs/navigation.md). Each goes to
+a temporary file, which replaces the old one only once every byte has
+arrived, and each is refused at its first chunk if it isn't that kind of
+file.
+
+### 11.8 Failure rules
+
+- If the radio fails to start, log it, mark `ble_host` as `Fault`, and
+  carry on. The dash must never wait on Bluetooth.
+- Never block a publish on a BLE callback. The `ble` task copies and
+  returns.
+- Media text is untrusted input from the phone. Bound every copy to the
+  buffer size and terminate it. A 300-character song title must not be
+  able to overflow a widget.
+- If the phone drops, keep the last title on screen for about 10 seconds,
+  then clear it. Do not leave a stale song showing for the whole ride.
+- NimBLE's callbacks run on its host task and only queue what happened.
+  `ble` drains the queue and is the one writer of `media` and `ble_diag`.
+  A full queue drops the event and counts it. It never waits.

@@ -1,4 +1,6 @@
 #include "check.hpp"
+#include "core/route/navigator.hpp"
+#include "core/route/search.hpp"
 #include "core/hr/hr.hpp"
 #include "core/gearcal/gearcal.hpp"
 #include "core/fusion/speed.hpp"
@@ -1485,43 +1487,304 @@ int main() {
         CHECK(fx.app.needs_full_repaint());       // the screen comes in whole
     }
 
-    CASE("NAV: drop and clear post commands, arrow and distance from the frame");
+    CASE("MAP: the planned route draws before any trace, and redraws for a new one");
+    {
+        struct Route final : IPointSource {
+            size_t gen = 1;
+            float bend = 0.0f;
+            size_t count() const override { return 30; }
+            size_t total() const override { return gen; }
+            bool point(size_t i, float& x, float& y) const override {
+                x = 100.0f * static_cast<float>(i);
+                y = bend * static_cast<float>(i * i);
+                return true;
+            }
+        } route;
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        fx.app.set_route_source(&route);
+        go_to(fx.app, s.canvas, Mode::Cruise, 3);
+        CHECK(fx.app.current_id() == ui::ScreenId::TripMap);
+        core::state::Frame f;
+        f.t_ms = 50;
+        fx.app.update(f);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        const std::vector<Color> straight = s.px;
+        fx.app.clear_full_repaint();
+        fx.app.clear_damage();
+        // Nothing changed: nothing to send.
+        fx.app.update(f);
+        App::Damage dm[App::kMaxDamage];
+        CHECK(fx.app.damage(dm, App::kMaxDamage) == 0);
+        // A new route: the map is damage again, and the glass changes.
+        route.gen = 2;
+        route.bend = 5.0f;
+        fx.app.update(f);
+        CHECK(send_damage(fx.app, s.px) > 0);
+        size_t differing = 0;
+        for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != straight[i]) ++differing;
+        CHECK(differing > 50);
+    }
+
+    CASE("NAV: the picker posts go, drop-here and the dirt switch");
     {
         Fixture fx;
         Screen320x480 s;
         fx.app.begin(s.canvas);
         go_to(fx.app, s.canvas, Mode::Cruise, 4);
         CHECK(std::strcmp(fx.app.current().name(), "NAV") == 0);
-        CHECK(fx.app.current().focus_count() == 5);      // START TRUCK CAMP FUEL MARK
-        fx.sink.posted.clear();
-        // Opens on START: short E puts it here.
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
-        CHECK(fx.sink.posted.size() == 1);
-        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavDropWaypoint);
-        CHECK(fx.sink.posted.back().i == 0);
-        // D to CAMP, then long E clears that one.
-        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
-        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavClearWaypoint);
-        CHECK(fx.sink.posted.back().i == 2);
-
-        // No waypoint draws, and so does one 1000 ft ahead.
         core::state::Frame f;
         f.t_ms = 50;
-        fx.app.update(f);
-        s.wipe();
-        fx.app.render(s.canvas, true);
-        const size_t none = s.ink();
         f.gnss.fix = true;
-        f.gnss.lat = 40.0;
-        f.gnss.lon = -75.0;
-        // CAMP, which is where the cursor is.
-        f.waypoint.pts[2] = core::state::Waypoint{true, 40.0 + 1000.0 / 364000.0, -75.0, 0, 0};
+        f.gnss.lat = 36.0;
+        f.gnss.lon = -94.16;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Idle);
+        f.nav.map_date = 20261102;
+        f.nav.n_dest = 2;
+        f.nav.dest[0] = core::state::NavDest{"CAMP", 360100000, -941600000,
+                                             core::state::NavDest::Waypoint, 2};
+        f.nav.dest[1] = core::state::NavDest{"Shell", 360000000, -941500000,
+                                             core::state::NavDest::Fuel, 0};
+        fx.app.update(f);
+        CHECK(fx.app.current().focus_count() == 4);      // Where to?, two places, the dirt row
+        fx.sink.posted.clear();
+        // The first row opens the search.
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearch);
+        CHECK(fx.sink.posted.back().i == 1);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavGo);
+        CHECK(fx.sink.posted.back().i == 0);
+        // Hold E on a waypoint row puts that waypoint here.
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavDropWaypoint);
+        CHECK(fx.sink.posted.back().i == 2);
+        // Not on a fuel row.
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        const size_t before = fx.sink.posted.size();
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.size() == before);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::ConfigSet);
+        CHECK(fx.sink.posted.back().cfg.key == core::config::kKeyNavAvoidDirt);
+        CHECK(fx.sink.posted.back().cfg.val == 1.0f);   // off now, so: avoid
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 0);
+    }
+
+    CASE("NAV: Where to? offers only letters that lead somewhere, lists, picks, takes a number");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 4);
+        core::state::Frame f;
+        f.t_ms = 50;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Idle);
+        f.nav.map_date = 20261102;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        fx.app.clear_full_repaint();
+        fx.app.clear_damage();
+        // The search opens with C, D and S possible: three keys, no DEL, no LIST.
+        f.nav.search = core::state::Nav::SearchTyping;
+        f.nav.search_ok = true;
+        const auto bit = [](char c) { return uint64_t(1) << (std::strchr(core::route::kAlphabet, c) - core::route::kAlphabet); };
+        f.nav.next = bit('C') | bit('D') | bit('S');
+        fx.app.update(f);
+        CHECK(send_damage(fx.app, s.px) > 0);
+        {   // a view change sent as damage leaves the glass a full repaint would
+            Screen320x480 whole;
+            whole.wipe();
+            fx.app.render(whole.canvas, true);
+            size_t differing = 0;
+            for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != whole.px[i]) ++differing;
+            CHECK(differing == 0);
+        }
+        CHECK(fx.app.current().focus_count() == 0);     // the keys are the screen's own
+        fx.sink.posted.clear();
+        // The cursor opens on the first letter, C; D moves to the next on offer.
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);   // C -> D
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchKey);
+        CHECK(fx.sink.posted.back().i == 'D');
+        // "D" typed: DEL, LIST and I now; two results.
+        std::snprintf(f.nav.query, sizeof f.nav.query, "D");
+        f.nav.next = bit('I');
+        f.nav.matches = 2;
+        f.nav.n_hits = 2;
+        std::snprintf(f.nav.hits[0].name, sizeof f.nav.hits[0].name, "E Dickson St");
+        std::snprintf(f.nav.hits[0].city, sizeof f.nav.hits[0].city, "Fayetteville");
+        f.nav.hits[0].kind = 1;
+        f.nav.hits[0].numbers = true;
+        f.nav.hits[0].dist_mi = 0.3f;
+        std::snprintf(f.nav.hits[1].name, sizeof f.nav.hits[1].name, "Dickson St Pub");
+        f.nav.hits[1].kind = 3;
+        f.nav.hits[1].dist_mi = 0.4f;
+        fx.app.update(f);
+        // D is gone, so the cursor goes to the nearest key still on offer:
+        // LIST, four keys back (I is five on). E opens the results.
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        fx.app.update(f);
+        CHECK(fx.app.current().focus_count() == 2);    // the two results
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchPick);
+        CHECK(fx.sink.posted.back().i == 1);
+        // Back on the keys the cursor is still on LIST; C is DEL.
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchKey);
+        CHECK(fx.sink.posted.back().i == 8);
+        // In the digits, a key typed keeps the cursor in the digits: "62"
+        // offers 6 and 7, the cursor on 6 is pressed, and only 7 is left:
+        // it goes to 7, the nearest, not back to the letters.
+        std::snprintf(f.nav.query, sizeof f.nav.query, "US ");
+        f.nav.next = bit('6') | bit('7') | bit('A');
+        f.nav.n_hits = 0;
+        fx.app.update(f);
+        // Walk the cursor to 6 and press it.
+        for (int i = 0; i < 40; ++i) {
+            fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+            if (fx.sink.posted.back().id == core::state::CommandId::NavSearchKey &&
+                fx.sink.posted.back().i == '6')
+                break;
+            fx.app.update(f);
+            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        }
+        CHECK(fx.sink.posted.back().i == '6');
+        std::snprintf(f.nav.query, sizeof f.nav.query, "US 6");
+        f.nav.next = bit('7') | bit('A');
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchKey);
+        CHECK(fx.sink.posted.back().i == '7');                            // not 'A'
+        // A street with numbers picked: digits, DEL and GO; no 0 first.
+        f.nav.search = core::state::Nav::SearchNumber;
+        std::snprintf(f.nav.street, sizeof f.nav.street, "E Dickson St");
+        fx.app.update(f);
+        // Opens on 1 (no leading 0).
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchKey);
+        CHECK(fx.sink.posted.back().i == '1');
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);   // back past the letters to GO
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearchGo);
+        // Hold E closes the search.
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavSearch);
+        CHECK(fx.sink.posted.back().i == 0);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() > 0);
+    }
+
+    CASE("NAV: Where to? with no index on the card says so, and hold E gets out");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 4);
+        core::state::Frame f;
+        f.t_ms = 50;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Idle);
+        f.nav.map_date = 20261102;
+        f.nav.search = core::state::Nav::SearchTyping;
+        f.nav.search_ok = false;          // the card answered: no route/search.idx
+        fx.app.update(f);
+        CHECK(fx.app.current().focus_count() == 0);    // nothing to press: C/D do nothing
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(!fx.sink.posted.empty() && fx.sink.posted.back().id == core::state::CommandId::NavSearch);
+        CHECK(fx.sink.posted.back().i == 0);
+    }
+
+    CASE("NAV: guidance draws a turn, asks about 65 mph roads, and hold E stops");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 4);
+        core::state::Frame f;
+        f.t_ms = 50;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Idle);
+        f.nav.map_date = 20261102;
         fx.app.update(f);
         s.wipe();
         fx.app.render(s.canvas, true);
-        CHECK(s.ink() != none);
+        const size_t picker = s.ink();
+
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Guiding);
+        f.nav.following = true;
+        f.nav.cue_kind = static_cast<uint8_t>(core::route::CueKind::Left);
+        f.nav.cue_turn_deg = -90;
+        f.nav.to_cue_ft = 420.0f;
+        std::snprintf(f.nav.cue_road, sizeof f.nav.cue_road, "College Ave");
+        f.nav.remain_mi = 3.2f;
+        f.nav.remain_s = 400;
+        f.nav.limit_mph = 45;
+        std::snprintf(f.nav.target, sizeof f.nav.target, "HOME");
+        fx.app.update(f);
+        CHECK(fx.app.current().focus_count() == 0);
+        s.wipe();
+        fx.app.render(s.canvas, true);
+        CHECK(s.ink() != picker);
+        fx.sink.posted.clear();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.empty());                    // nothing to do on a short E
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(!fx.sink.posted.empty() && fx.sink.posted.back().id == core::state::CommandId::NavCancel);
+
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::AskFast);
+        std::snprintf(f.nav.fast_road, sizeof f.nav.fast_road, "US 412");
+        f.nav.fast_mi = 12.0f;
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavAvoidFast);
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavKeepFast);
+    }
+
+    CASE("NAV: going back to the picker clears the guidance off the glass");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 4);
+        core::state::Frame f;
+        f.t_ms = 50;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Guiding);
+        f.nav.following = true;
+        f.nav.cue_kind = static_cast<uint8_t>(core::route::CueKind::Right);
+        f.nav.cue_turn_deg = 90;
+        f.nav.to_cue_ft = 2000.0f;
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        fx.app.clear_full_repaint();
+        fx.app.clear_damage();
+        // Back to the picker, sent as damage only, the way the bike sends it.
+        f.nav = core::state::Nav{};
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::Idle);
+        fx.app.update(f);
+        CHECK(!fx.app.needs_full_repaint());
+        CHECK(send_damage(fx.app, s.px) > 0);
+        Screen320x480 whole;
+        whole.wipe();
+        fx.app.render(whole.canvas, true);
+        size_t differing = 0;
+        for (size_t i = 0; i < s.px.size(); ++i) if (s.px[i] != whole.px[i]) ++differing;
+        CHECK(differing == 0);
     }
 
     CASE("an alert draws over whatever screen is up, and E dismisses it");
@@ -1546,6 +1809,38 @@ int main() {
         CHECK(!fx.app.alert().active());
         // The press that dismissed the alert must not also reach the screen.
         CHECK(fx.sink.posted.size() == posted_before);
+    }
+
+    CASE("a crash countdown takes the alert box, and any button cancels it");
+    {
+        Fixture fx;
+        fx.settings.splash = false;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        core::state::Frame f = busy_frame();
+        f.crash.phase = core::crash::Phase::Countdown;
+        f.crash.countdown_s = 27;
+        for (uint32_t t = 0; t < 3000; t += 20) { f.t_ms = t; fx.app.update(f); }   // past the sweep
+        CHECK(fx.app.alert().active());
+        const size_t before = fx.sink.posted.size();
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == before + 1);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::CrashCancel);
+
+        // Sent: only E says "I'm OK"; logic going Idle takes the box down.
+        f.crash.phase = core::crash::Phase::Sent;
+        f.crash.sos_id = 1;
+        f.ble_diag.sos_ack_id = 1;
+        f.ble_diag.sos_ack = '1';
+        fx.app.update(f);
+        CHECK(fx.app.alert().active());
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::CrashCancel);
+        f.crash.phase = core::crash::Phase::Idle;
+        fx.app.update(f);
+        CHECK(!fx.app.alert().active());
     }
 
     CASE("the alerter raises the overlay from the frame, and a dismissed fault stays dismissed");
@@ -1757,6 +2052,60 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() != stable_ink);
+    }
+
+    CASE("the FPS counter: drawn top-left when on, updated as damage, painted back when off");
+    {
+        Fixture fx;
+        Screen320x480 partial, whole;
+        fx.app.begin(partial.canvas);
+        go_to(fx.app, partial.canvas, Mode::Cruise, 2);   // TRIP: a titled screen
+        const Frame f = busy_frame();
+        const Rect tag{0, 0, 44, 11};
+        auto accent_in_tag = [&](const std::vector<Color>& px) {
+            size_t n = 0;
+            for (int16_t y = tag.y; y < tag.bottom(); ++y)
+                for (int16_t x = tag.x; x < tag.x + tag.w; ++x)
+                    if (px[static_cast<size_t>(y) * kScreenW + x] == color::kAccent) ++n;
+            return n;
+        };
+        auto matches_whole = [&] {
+            FrameBufferCanvas wc(whole.px.data(), kScreenW, kScreenH);
+            fx.app.render(wc, true);
+            return partial.px == whole.px;
+        };
+
+        fx.app.update(f);
+        fx.app.render(partial.canvas, true);
+        CHECK(accent_in_tag(partial.px) == 0);   // off by default
+
+        // On: the tag goes out as damage, no full repaint.
+        fx.settings.show_fps = true;
+        fx.app.update(f);
+        CHECK(!fx.app.needs_full_repaint());
+        send_damage(fx.app, partial.px);
+        CHECK(accent_in_tag(partial.px) > 0);
+        CHECK(matches_whole());
+
+        // A new rate redraws it; the same rate sends nothing.
+        fx.sys.render_hz_x10 = 1196;
+        fx.app.update(f);
+        CHECK(send_damage(fx.app, partial.px) > 0);
+        CHECK(matches_whole());
+        // So does a new sent count alone.
+        fx.sys.render_sent_hz = 15;
+        fx.app.update(f);
+        CHECK(send_damage(fx.app, partial.px) > 0);
+        CHECK(matches_whole());
+        fx.app.update(f);
+        CHECK(send_damage(fx.app, partial.px) == 0);
+
+        // Off: the corner it covered is painted back.
+        fx.settings.show_fps = false;
+        fx.app.update(f);
+        send_damage(fx.app, partial.px);
+        CHECK(accent_in_tag(partial.px) == 0);
+        CHECK(matches_whole());
     }
 
     CASE("a partial update lands the same pixels as a full repaint");

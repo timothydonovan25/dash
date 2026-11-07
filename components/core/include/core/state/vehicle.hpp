@@ -68,6 +68,11 @@ struct Attitude {
     // work this out for itself: `airtime_ms` holds the figure indefinitely,
     // and a Frame is one instant with no history in it. 0 means no jump yet.
     uint32_t land_ms     = 0;
+    // The hardest |a| of the last half second, from every IMU sample, and
+    // when it was (core::crash::PeakHold): a crash's hit, which logic's
+    // 50 Hz look at the low-passed g above would miss.
+    float    hit_g       = 0.0f;
+    uint32_t hit_ms      = 0;
     // The IMU's die temperature, from its FIFO packets. Its gyro bias moves
     // with temperature, so it is worth seeing; it is also the nearest thing
     // to an inside-the-dash thermometer. 0 until the IMU has reported.
@@ -424,6 +429,10 @@ struct BleDiag {
     // or "" before the link is up. "#-" is a build from before build ids.
     // DIAG's Update screen shows it beside the dash's own version.
     char    c6_fw[24]      = {};
+    // The phone's answer to the last SOS it was sent (core::crash, Feed `K`):
+    // which one, and what came of it. The crash overlay shows it.
+    uint16_t sos_ack_id    = 0;
+    uint8_t  sos_ack       = 0;       // a core::crash::Ack; 0 nothing heard
 };
 
 // The two firmware slots and any update in progress (§11.7). Written by
@@ -445,7 +454,9 @@ struct Ota {
 
 // CONFIG's card eject, handed from `logic` to `storage` like BleRequest.
 struct StorageRequest {
-    enum Op : uint8_t { None = 0, Eject };
+    // UsbDrive: the card to the laptop as a USB drive, or back if it is
+    // there (drivers::UsbDrive). `logic` asks only while parked.
+    enum Op : uint8_t { None = 0, Eject, UsbDrive };
     uint8_t op = None;
 };
 
@@ -508,6 +519,89 @@ struct Waypoint {
 struct Waypoints {
     static constexpr unsigned kCount = 5;
     Waypoint pts[kCount];
+};
+
+// Turn-by-turn routing (core::route, docs/navigation.md), for CRUISE -> NAV.
+// Written by `logic`; the road names come from the map on the card, put
+// into the route by `storage` before `logic` ever sees it.
+struct NavDest {
+    char    name[16] = {};
+    int32_t lat_e7 = 0;
+    int32_t lon_e7 = 0;
+    uint8_t kind = 0;            // NavDest::Kind
+    uint8_t waypoint = 0;        // for Waypoint: which (core::waypoint)
+    enum Kind : uint8_t { Favourite = 0, Fuel = 1, Food = 2, Waypoint = 10, Phone = 11, Recent = 12 };
+};
+
+// A destination the phone sent (Feed `G`, radio-and-updates §11.1): an
+// address typed there and geocoded there. Written by `ble`; `logic` routes
+// to it when `seq` moves. Not in Frame: the picker shows it from Nav.
+struct PhoneDest {
+    uint32_t seq = 0;
+    char     name[16] = {};
+    int32_t  lat_e7 = 0;
+    int32_t  lon_e7 = 0;
+};
+
+struct Nav {
+    static constexpr unsigned kMaxDest = 10;   // + "Where to?" and the dirt row = ui::Table::kRows
+    uint8_t  phase = 0;          // core::route::Phase
+    uint8_t  status = 0;         // core::route::Status of the last answer
+    uint32_t map_date = 0;       // yyyymmdd of the OSM data, 0 for no map
+    bool     avoid_dirt = false;
+    // The picker: waypoints that are set, the card's favourites, the
+    // nearest fuel and food.
+    NavDest  dest[kMaxDest];
+    uint8_t  n_dest = 0;
+    char     target[16] = {};    // where it is going
+    // Guidance, while following.
+    bool     following = false;
+    uint8_t  cue_kind = 0;       // core::route::CueKind
+    int16_t  cue_turn_deg = 0;
+    float    to_cue_ft = 0.0f;
+    char     cue_road[24] = {};  // the road after the turn
+    float    remain_mi = 0.0f;
+    uint32_t remain_s = 0;
+    uint8_t  limit_mph = 0;      // the road's tagged limit, 0 unknown
+    bool     on_fast = false;    // on a 65 mph road now
+    bool     off_route = false;
+    // Rally pace notes (core/route/pace.hpp): the next bends on the road
+    // ahead, nearest first. `pace_gap_ft[0]` is to the first (0 when the
+    // bike is in it), the rest from the end of the note before.
+    static constexpr unsigned kMaxPace = 3;
+    char     pace[kMaxPace][20] = {};
+    float    pace_gap_ft[kMaxPace] = {};
+    bool     pace_into[kMaxPace] = {};
+    uint8_t  n_pace = 0;
+    // The 65 mph question.
+    char     fast_road[24] = {};
+    float    fast_mi = 0.0f;
+    bool     fast_presumed = false;  // untagged divided highway, not a sign
+
+    // "Where to?" (core/route/search.hpp), spelled with the pod.
+    enum Search : uint8_t { SearchOff = 0, SearchTyping, SearchNumber };
+    static constexpr unsigned kMaxHits = 8;
+    struct Hit {
+        char    name[24] = {};
+        char    city[16] = {};
+        uint8_t kind = 0;          // core::route::Place
+        bool    numbers = false;   // a street with house numbers
+        float   dist_mi = 0.0f;
+    };
+    uint8_t  search = SearchOff;
+    bool     search_ok = false;    // the card has route/search.idx
+    bool     searching = false;    // an answer is on its way
+    char     query[25] = {};
+    uint64_t next = 0;             // bit i: core::route::kAlphabet[i] can come next
+    uint32_t matches = 0;
+    Hit      hits[kMaxHits];
+    uint8_t  n_hits = 0;
+    char     street[24] = {};      // SearchNumber: the street picked
+    char     digits[8] = {};       // and the number so far
+
+    // CONFIG -> SD card -> USB drive refused because the bike was moving
+    // (logic's parked check): counts up, and the screen says why.
+    uint16_t usb_refused_seq = 0;
 };
 
 // The hotspot, for the Update screen. Written by `wifi`.

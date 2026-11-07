@@ -13,12 +13,15 @@
 // | imu     |  0   |  15  | 200 Hz    | FIFO drain, attitude, jumps         |
 // | gnss    |  0   |  12  | UART      | NMEA parse, position                |
 // | logic   |  0   |  10  | 50 Hz     | lap timer, trip, command drain      |
-// | input   |  0   |   9  | 100 Hz    | pod poll, debounce                  |
-// | render  |  1   |   6  | 60 Hz     | snapshot, widgets, panel            |
-// | ble     |  1   |   4  | event     | media GATT server, BLE diag         |
-// | keeper  |  1   |   3  | 1 Hz      | NVS, health retry, VIN sense        |
-// | storage |  1   |   3  | 2 Hz      | card mount, hotplug, USB hand-off    |
-// | logger  |  1   |   2  | drain     | blackbox ring to SD                 |
+// | input   |  0   |   9  | 200 Hz    | pod poll, debounce                  |
+// | power   |  1   |  22  | 1 kHz     | VIN cut, battery samples            |
+// | render  |  1   |   6  | 120 Hz    | snapshot, widgets, panel            |
+// | ble     |  1   |   4  | event     | media, notify, heart rate, BLE diag |
+// | keeper  |  1   |   3  | 20 Hz     | health, retry, NVS, backlight level |
+// | storage |  1   |   3  | 2 Hz      | card mount, eject, track files      |
+// | wifi    |  1   |   3  | 4 Hz      | the update hotspot and its page     |
+// | ota     |  1   |   2  | event     | stable/dev slots                    |
+// | logger  |  1   |   2  | drain     | blackbox and detail rings to SD     |
 //
 // Core 0 is a real-time island: no radio, no filesystem. Anything added to
 // it above priority 18 breaks the 3 ms tach-to-lamp budget.
@@ -40,6 +43,7 @@
 #include "core/hr/hr.hpp"
 #include "core/flash/flash.hpp"
 #include "services/track_store.hpp"
+#include "services/route_store.hpp"
 #include "ui/screen.hpp"
 
 namespace services {
@@ -113,6 +117,20 @@ struct Deps {
     // Saved tracks, between `logic` (core 0) and `storage`, which owns the
     // card (services/track_store.hpp). In PSRAM: two lap traces' worth.
     TrackMailbox* tracks = nullptr;
+
+    // Routing, the same way (services/route_store.hpp): the mailbox with
+    // the two route buffers, and `storage`'s block cache and search. Both
+    // PSRAM, ~6 MB together.
+    RouteMailbox* route = nullptr;
+    RouteEngine*  route_engine = nullptr;
+    // The route for the MAP screen: `logic` writes, `render` reads.
+    RouteTrace*   route_trace = nullptr;
+
+    // The copy of the glass `render` keeps (ui::Shadow, 480 x 320 RGB565,
+    // PSRAM), for the USB console's `screen` (docs/console.md). `render`
+    // stores it once; the console only reads, and a frame read while
+    // render is mid-update can mix two frames: it is for debugging.
+    std::atomic<const ui::Color*> glass{nullptr};
 
     // Bytes of a firmware upload, from the Wi-Fi page to `ota`. A FreeRTOS
     // StreamBuffer, made by start_ota; void* so this header stays free of
@@ -258,6 +276,10 @@ void trace_pod(uint32_t ms);
 // decoded, and reach Doom, exactly as the pod's would. A mask not repeated
 // within a second is let go: a laptop unplugged mid-hold does not stick.
 void set_console_buttons(uint8_t mask);
+// Console `route bench`: `storage` times a Fayetteville -> Little Rock
+// route straight through the card, cold cache then warm, and logs both
+// (docs/navigation.md §9). No GPS fix needed.
+void bench_route();
 
 // Blocks until a button event arrives or `timeout_ms` passes. This is what
 // the render task waits on instead of a plain periodic delay: a press wakes

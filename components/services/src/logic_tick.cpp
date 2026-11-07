@@ -3,6 +3,9 @@
 #include "core/hr/hr.hpp"
 #include "core/log/log.hpp"
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace services {
 namespace {
@@ -443,7 +446,401 @@ void blackbox_row(Deps& d, LogicState& s, uint32_t now,
         (s.lap.state().phase == core::lap::Phase::Timing
              ? core::log::kFlagTiming : 0) |
         (e.ecu_online ? core::log::kFlagEcu : 0));
+    if (s.nav.following() && s.nav_progress.on) {
+        rec.nav_turn_ft = s.nav_progress.to_cue_dm * 0.328084f;
+        rec.nav_dest_mi = s.nav_progress.remain_dm / 16093.44f;
+        rec.limit_mph = s.nav_progress.mph;
+    }
     d.blackbox->push(rec);
+}
+
+// --- routing ---------------------------------------------------------------
+
+core::route::Point to_point(double lat, double lon) {
+    return {static_cast<int32_t>(std::lround(lat * 1e7)), static_cast<int32_t>(std::lround(lon * 1e7))};
+}
+
+// Where the bike is now: the last fix carried forward along its course at
+// the fused speed. The GPS is at 1 Hz (bringup), and a cue a second late
+// at 50 mph is 70 ft past the turn. Not past 2 s: a stale fix is not news.
+core::route::Point dead_reckon(const core::state::Gnss& g, const core::state::Fused& f, uint32_t now) {
+    double lat = g.lat, lon = g.lon;
+    const uint32_t age = now - g.rx_ms;
+    const float mph = f.speed_valid ? f.speed_mph : g.speed_mph;
+    constexpr float kMinCourseMph = 3.0f;    // below this the GPS course is noise
+    if (g.fix && mph > kMinCourseMph && age < 2000) {
+        constexpr double kPi = 3.14159265358979323846;
+        const double m = mph * 0.44704 * age / 1000.0;
+        const double c = g.course_deg * kPi / 180.0;
+        lat += m * std::cos(c) / 111195.0;
+        lon += m * std::sin(c) / (111195.0 * std::cos(g.lat * kPi / 180.0));
+    }
+    return to_point(lat, lon);
+}
+
+// The picker's list: the waypoints that are set, then what the card gave
+// (favourites, then the nearest fuel and food).
+// Out of line: its locals (a whole Nav) must not land in logic_tick's frame.
+__attribute__((noinline)) void build_nav_list(LogicState& s) {
+    using core::state::NavDest;
+    uint8_t n = 0;
+    // What the phone sent leads: it is the newest thing the rider asked for.
+    if (s.have_phone_dest) s.nav_list[n++] = s.phone_dest;
+    for (size_t i = 0; i < core::waypoint::kCount && n < core::state::Nav::kMaxDest; ++i) {
+        const core::state::Waypoint& w = s.waypoints.pts[i];
+        if (!w.set) continue;
+        NavDest& o = s.nav_list[n++];
+        o = NavDest{};
+        std::snprintf(o.name, sizeof o.name, "%s", core::waypoint::name(i));
+        const core::route::Point p = to_point(w.lat, w.lon);
+        o.lat_e7 = p.lat_e7;
+        o.lon_e7 = p.lon_e7;
+        o.kind = NavDest::Waypoint;
+        o.waypoint = static_cast<uint8_t>(i);
+    }
+    for (uint8_t i = 0; i < s.n_dests && n < core::state::Nav::kMaxDest; ++i) {
+        const core::route::Dest& d = s.dests[i];
+        NavDest& o = s.nav_list[n++];
+        o = NavDest{};
+        std::memcpy(o.name, d.name, sizeof o.name);
+        o.name[sizeof o.name - 1] = '\0';
+        o.lat_e7 = d.p.lat_e7;
+        o.lon_e7 = d.p.lon_e7;
+        o.kind = d.kind == core::route::PoiFuel ? NavDest::Fuel
+               : d.kind == core::route::PoiFood ? NavDest::Food
+               : d.kind == core::route::kDestRecent ? NavDest::Recent : NavDest::Favourite;
+    }
+    s.nav_list_n = n;
+}
+
+// The route into the MAP screen's buffer, in the trip trace's frame, every
+// nth point so it fits (the last one always); or empty, for no route. A
+// point's speed_mph is 65 when any of the route since the point before is
+// on a 65 mph road, so the map draws that stretch amber however thin.
+__attribute__((noinline)) void trace_route(Deps& d, LogicState& s, const core::route::Route* r) {
+    s.route_traced = r != nullptr;
+    if (!d.route_trace) return;
+    RouteTrace& t = *d.route_trace;
+    t.pts.clear();
+    if (r && r->n_pts >= 2) {
+        const auto ll = [&](uint32_t i) {
+            return core::geo::LatLon{r->pts[i].p.lat_e7 * 1e-7, r->pts[i].p.lon_e7 * 1e-7};
+        };
+        ensure_origin(s, ll(0));
+        const uint32_t step = (r->n_pts + RouteTrace::kPoints - 2) / (RouteTrace::kPoints - 1);
+        uint32_t prev = 0;
+        for (uint32_t i = 0;; i += step) {
+            if (i >= r->n_pts) i = r->n_pts - 1;
+            core::state::TrackPoint p;
+            to_local_ft(s.origin, ll(i), p.x_ft, p.y_ft);
+            for (uint32_t k = prev; k < i; ++k)   // segment k runs from point k to k+1
+                if (r->pts[k].flags & core::route::kAttrFast) p.speed_mph = 65.0f;
+            prev = i;
+            t.pts.push(p);
+            if (i == r->n_pts - 1) break;
+        }
+    }
+    t.gen.fetch_add(1, std::memory_order_release);
+}
+
+void search_go(LogicState& s, core::route::Point to, const char* name, const core::state::Gnss& g,
+               core::route::Point here);
+
+// Into the recent list on the card, on the next free turn of the mailbox.
+void remember(LogicState& s, core::route::Point to, const char* name) {
+    s.recent = core::route::Dest{};
+    std::snprintf(s.recent.name, sizeof s.recent.name, "%.15s", name);
+    s.recent.p = to;
+    s.recent_want = true;
+}
+
+// The mailbox: take an answer, then post the next job, one at a time.
+// Order: the map first, then a route the navigator wants, then a fresh
+// destination list.
+// Out of line: its locals (a whole Nav) must not land in logic_tick's frame.
+__attribute__((noinline)) void pump_route(Deps& d, LogicState& s, const core::state::Gnss& g,
+                core::route::Point here, uint32_t now) {
+    RouteMailbox* box = d.route;
+    if (!box) return;
+    using Op = RouteMailbox::Op;
+    if (box->answered()) {
+        s.nav.set_map(box->map_ok);
+        s.map_date = box->map_date;
+        if (box->op == Op::Destinations) {
+            s.n_dests = box->n_dests;
+            for (uint8_t i = 0; i < box->n_dests; ++i) s.dests[i] = box->dests[i];
+        } else if (box->op == Op::Search) {
+            s.searching = false;
+            s.search_ok = box->search_ok;
+            // An answer to what is still typed; otherwise ask again.
+            if (std::strcmp(box->query, s.query) == 0) {
+                s.search_next = box->next;
+                s.search_matches = box->matches;
+                s.n_hits = box->n_hits;
+                for (uint8_t i = 0; i < box->n_hits; ++i) s.hits[i] = box->hits[i];
+            } else {
+                s.search_want = true;
+            }
+        } else if (box->op == Op::SaveRecent) {
+            s.dests_asked = false;          // the picker shows it at once
+        } else if (box->op == Op::House) {
+            s.searching = false;
+            if (s.search == core::state::Nav::SearchNumber && box->house_at.lat_e7 != 0) {
+                char label[24];
+                std::snprintf(label, sizeof label, "%.7s %.15s", s.digits, s.picked.name);
+                search_go(s, box->house_at, label, g, here);
+            }
+        } else if (box->op == Op::Query) {
+            const uint8_t into = box->into & 1;
+            const core::route::Route& r = box->data[into].route;
+            if (s.nav.answered(box->status, r, now)) {
+                box->live = into;
+                trace_route(d, s, &r);
+                s.fast_presumed = false;
+                for (uint32_t i = 0; i < r.n_pts; ++i)
+                    if (r.pts[i].flags & core::route::kAttrFast) { s.fast_presumed = r.pts[i].mph == 0; break; }
+            }
+        }
+        box->release();
+    }
+    if (!s.nav.following()) {
+        box->live = 0xFF;
+        if (s.route_traced) trace_route(d, s, nullptr);
+    }
+    if (!box->free()) return;
+
+    // A card without a map is looked at again every 30 s: one put in, or a
+    // map copied on, is found without a restart.
+    if (!s.map_asked || (!s.nav.has_map() && now - s.map_asked_ms >= 30000)) {
+        s.map_asked = true;
+        s.map_asked_ms = now;
+        box->op = Op::Open;
+        box->post();
+        return;
+    }
+    core::route::Request q;
+    if (s.nav.take_request(q)) {
+        box->req = q;
+        box->into = box->live == 0 ? 1 : 0;
+        box->op = Op::Query;
+        box->post();
+        return;
+    }
+    if (s.recent_want) {
+        s.recent_want = false;
+        box->recent = s.recent;
+        box->op = Op::SaveRecent;
+        box->post();
+        return;
+    }
+    if (s.house_want) {
+        s.house_want = false;
+        s.searching = true;
+        box->house_entry = s.picked.entry;
+        box->house_number = static_cast<uint32_t>(std::atoi(s.digits));
+        box->op = Op::House;
+        box->post();
+        return;
+    }
+    if (s.search_want && s.search == core::state::Nav::SearchTyping) {
+        s.search_want = false;
+        s.searching = true;
+        std::memcpy(box->query, s.query, sizeof box->query);
+        box->near = here;
+        box->op = Op::Search;
+        box->post();
+        return;
+    }
+    // "Nearest" drifts as the bike moves: once a minute is plenty.
+    if (g.fix && s.nav.has_map() && (!s.dests_asked || now - s.dests_asked_ms >= 60000)) {
+        s.dests_asked = true;
+        s.dests_asked_ms = now;
+        box->near = here;
+        box->op = Op::Destinations;
+        box->post();
+    }
+}
+
+// "Where to?" ----------------------------------------------------------------
+
+// Route to a search result; the search closes once routing has begun.
+// Without a fix it stays open: the header says why.
+void search_go(LogicState& s, core::route::Point to, const char* name, const core::state::Gnss& g,
+               core::route::Point here) {
+    if (!s.nav.start(to, here, g.fix)) return;
+    std::snprintf(s.nav_target, sizeof s.nav_target, "%.15s", name);   // the target line is narrow
+    s.search = core::state::Nav::SearchOff;
+    remember(s, to, name);
+}
+
+__attribute__((noinline)) void search_command(LogicState& s, const core::state::Command& cmd,
+                                              const core::state::Gnss& g, core::route::Point here) {
+    using core::state::CommandId;
+    using core::state::Nav;
+    switch (cmd.id) {
+        case CommandId::NavSearch:
+            s.search = cmd.i ? Nav::SearchTyping : Nav::SearchOff;
+            s.query[0] = '\0';
+            s.n_hits = 0;
+            s.search_want = cmd.i != 0;
+            break;
+        case CommandId::NavSearchKey: {
+            const char c = static_cast<char>(cmd.i);
+            if (s.search == Nav::SearchTyping) {
+                size_t n = std::strlen(s.query);
+                if (c == 8) {
+                    if (n) s.query[n - 1] = '\0';
+                } else if (n < core::route::kKeyLen && c && std::strchr(core::route::kAlphabet, c) &&
+                           !(c == ' ' && (n == 0 || s.query[n - 1] == ' '))) {
+                    // A letter after a house number (3+ digits): the space
+                    // goes in by itself, "13511R" is "13511 R", as a
+                    // Garmin's address entry takes the number then the street.
+                    const bool letter = c >= 'A' && c <= 'Z';
+                    if (letter && n >= 3 && n + 1 < core::route::kKeyLen &&
+                        std::strspn(s.query, "0123456789") == n)
+                        s.query[n++] = ' ';
+                    s.query[n] = c;
+                    s.query[n + 1] = '\0';
+                }
+                s.search_want = true;
+            } else if (s.search == Nav::SearchNumber) {
+                size_t n = std::strlen(s.digits);
+                if (c == 8) {
+                    if (n) s.digits[n - 1] = '\0';
+                    else s.search = Nav::SearchTyping;     // delete past the number: back to the street
+                } else if (c >= '0' && c <= '9' && n + 1 < sizeof s.digits && !(n == 0 && c == '0')) {
+                    s.digits[n] = c;
+                    s.digits[n + 1] = '\0';
+                }
+            }
+            break;
+        }
+        case CommandId::NavSearchPick:
+            if (s.search != Nav::SearchTyping || cmd.i < 0 || cmd.i >= s.n_hits) break;
+            if (s.hits[cmd.i].kind == core::route::Place::Street && s.hits[cmd.i].nums_n) {
+                s.picked = s.hits[cmd.i];
+                s.digits[0] = '\0';
+                s.search = Nav::SearchNumber;
+            } else {
+                search_go(s, s.hits[cmd.i].p, s.hits[cmd.i].name, g, here);
+            }
+            break;
+        case CommandId::NavSearchGo:
+            if (s.search != Nav::SearchNumber) break;
+            if (s.digits[0]) s.house_want = true;               // the card places the number
+            else search_go(s, s.picked.p, s.picked.name, g, here);
+            break;
+        default:
+            break;
+    }
+}
+
+// A destination from the phone: into the picker, and routed to straight
+// away, since typing it was the rider asking to go there. Without a fix or
+// a map it waits in the list.
+__attribute__((noinline)) void phone_destination(Deps& d, LogicState& s, const core::state::Gnss& g,
+                                                 core::route::Point here) {
+    const core::state::PhoneDest pd = d.slots->phone_dest.get();
+    if (pd.seq == s.phone_seq) return;
+    s.phone_seq = pd.seq;
+    core::state::NavDest& o = s.phone_dest;
+    o = core::state::NavDest{};
+    std::memcpy(o.name, pd.name, sizeof o.name);
+    o.name[sizeof o.name - 1] = '\0';
+    o.lat_e7 = pd.lat_e7;
+    o.lon_e7 = pd.lon_e7;
+    o.kind = core::state::NavDest::Phone;
+    s.have_phone_dest = true;
+    if (s.nav.start(core::route::Point{o.lat_e7, o.lon_e7}, here, g.fix)) {
+        std::memcpy(s.nav_target, o.name, sizeof s.nav_target);
+        remember(s, core::route::Point{o.lat_e7, o.lon_e7}, o.name);
+    }
+}
+
+__attribute__((noinline)) void nav_go(Deps& d, LogicState& s, const core::state::Gnss& g,
+                                      int32_t i, uint32_t now) {
+    if (i < 0 || i >= s.nav_list_n) return;
+    const core::state::NavDest& to = s.nav_list[i];
+    const core::state::Fused fu = d.slots->fused.get();
+    if (s.nav.start(core::route::Point{to.lat_e7, to.lon_e7}, dead_reckon(g, fu, now), g.fix))
+        std::memcpy(s.nav_target, to.name, sizeof s.nav_target);
+}
+
+// Out of line: its locals (a whole Nav) must not land in logic_tick's frame.
+__attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
+    build_nav_list(s);
+    core::state::Nav n;
+    n.phase = static_cast<uint8_t>(s.nav.phase());
+    n.status = static_cast<uint8_t>(s.nav.status());
+    n.map_date = s.nav.has_map() ? s.map_date : 0;
+    n.avoid_dirt = s.nav.avoid_dirt();
+    for (uint8_t i = 0; i < s.nav_list_n; ++i) n.dest[i] = s.nav_list[i];
+    n.n_dest = s.nav_list_n;
+    std::memcpy(n.target, s.nav_target, sizeof n.target);
+    RouteMailbox* box = d.route;
+    const core::route::Progress& p = s.nav_progress;
+    if (box && box->live < 2 && s.nav.following()) {
+        const RouteData& rd = box->data[box->live];
+        n.following = true;
+        if (p.on || p.cue != core::route::kNone) {
+            if (p.cue < rd.route.n_cues) {
+                const core::route::Cue& c = rd.route.cues[p.cue];
+                n.cue_kind = static_cast<uint8_t>(c.kind);
+                n.cue_turn_deg = c.turn_deg;
+                std::memcpy(n.cue_road, rd.cue_names[p.cue], sizeof n.cue_road);
+                n.cue_road[sizeof n.cue_road - 1] = '\0';
+            }
+            n.to_cue_ft = p.to_cue_dm * 0.328084f;
+            n.remain_mi = p.remain_dm / 16093.44f;
+            n.remain_s = p.remain_ds / 10;
+            n.limit_mph = p.mph;
+            n.on_fast = p.flags & core::route::kAttrFast;
+            n.off_route = p.off_route;
+            if (p.on && !p.off_route) {
+                // The bends in the next 800 m (core/route/pace.hpp).
+                const size_t np = core::route::pace_notes(rd.route, p.along_dm, p.along_dm + 8000,
+                                                          s.pace, core::state::Nav::kMaxPace);
+                uint32_t prev_end = p.along_dm;
+                for (size_t i = 0; i < np; ++i) {
+                    const core::route::PaceNote& pn = s.pace[i];
+                    core::route::format_note(pn, n.pace[i], sizeof n.pace[i]);
+                    n.pace_gap_ft[i] = pn.at_dm > prev_end ? (pn.at_dm - prev_end) * 0.328084f : 0.0f;
+                    n.pace_into[i] = pn.flags & core::route::kPaceInto;
+                    prev_end = pn.at_dm + pn.len_dm;
+                }
+                n.n_pace = static_cast<uint8_t>(np);
+            }
+        } else {
+            // No fix yet on this route: the whole of it is ahead.
+            n.remain_mi = rd.route.total_dm / 16093.44f;
+            n.remain_s = rd.route.total_ds / 10;
+        }
+        std::memcpy(n.fast_road, rd.fast_name, sizeof n.fast_road);
+        n.fast_road[sizeof n.fast_road - 1] = '\0';
+        n.fast_mi = rd.route.fast_dm / 16093.44f;
+        n.fast_presumed = s.fast_presumed;
+    }
+    n.usb_refused_seq = s.usb_refused_seq;
+    n.search = s.search;
+    if (s.search != core::state::Nav::SearchOff) {
+        n.search_ok = s.search_ok;
+        n.searching = s.searching || s.search_want;
+        std::memcpy(n.query, s.query, sizeof n.query);
+        n.next = s.search_next;
+        n.matches = s.search_matches;
+        n.n_hits = s.n_hits < core::state::Nav::kMaxHits ? s.n_hits : core::state::Nav::kMaxHits;
+        for (uint8_t i = 0; i < n.n_hits; ++i) {
+            core::state::Nav::Hit& h = n.hits[i];
+            std::memcpy(h.name, s.hits[i].name, sizeof h.name);
+            std::memcpy(h.city, s.hits[i].city, sizeof h.city);
+            h.kind = static_cast<uint8_t>(s.hits[i].kind);
+            h.numbers = s.hits[i].nums_n != 0;
+            h.dist_mi = s.hits[i].dist_m / 1609.344f;
+        }
+        std::memcpy(n.street, s.picked.name, sizeof n.street);
+        std::memcpy(n.digits, s.digits, sizeof n.digits);
+    }
+    d.slots->nav.publish(n);
 }
 
 }  // namespace
@@ -526,6 +923,13 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 break;
             case core::state::CommandId::StuntReset:
                 s.stunt.reset_session();
+                break;
+            case core::state::CommandId::CrashTest:
+                s.crash.test(now);
+                break;
+            case core::state::CommandId::CrashCancel:
+                s.crash.cancel();
+                d.slots->crash.publish(s.crash.state());
                 break;
             case core::state::CommandId::LeanPeaksReset:
                 s.session_peaks.lean_left_deg = 0.0f;
@@ -625,6 +1029,24 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                     d.slots->waypoint.publish(s.waypoints);
                 }
                 break;
+            case core::state::CommandId::NavGo:
+                nav_go(d, s, g, cmd.i, now);
+                break;
+            case core::state::CommandId::NavCancel:
+                s.nav.cancel();
+                break;
+            case core::state::CommandId::NavAvoidFast:
+                s.nav.avoid_fast();
+                break;
+            case core::state::CommandId::NavKeepFast:
+                s.nav.keep_fast();
+                break;
+            case core::state::CommandId::NavSearch:
+            case core::state::CommandId::NavSearchKey:
+            case core::state::CommandId::NavSearchPick:
+            case core::state::CommandId::NavSearchGo:
+                search_command(s, cmd, g, dead_reckon(g, d.slots->fused.get(), now));
+                break;
             case core::state::CommandId::ImuCalibrate:
                 // `imu` has the samples; it answers with ConfigSets for the
                 // mount offset, which land back here.
@@ -635,6 +1057,22 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 d.slots->storage_request.publish(core::state::StorageRequest{
                     core::state::StorageRequest::Eject});
                 break;
+            case core::state::CommandId::StorageToHost: {
+                // Parked only: the card goes to the laptop and the logger
+                // stops while it is there. The fused speed when it is good;
+                // else the GPS's, and only from a good fix, since a parked
+                // receiver's drift reads a few mph.
+                const core::state::Fused fu = d.slots->fused.get();
+                const bool moving = fu.speed_valid ? fu.speed_mph >= 3.0f
+                                  : (g.fix && g.hdop <= 2.5f && g.speed_mph >= 3.0f);
+                if (!moving) {
+                    d.slots->storage_request.publish(core::state::StorageRequest{
+                        core::state::StorageRequest::UsbDrive});
+                } else {
+                    ++s.usb_refused_seq;
+                }
+                break;
+            }
             case core::state::CommandId::OtaInstallSd:
                 d.slots->ota_request.publish(core::state::OtaRequest{
                     core::state::OtaRequest::InstallSd});
@@ -716,6 +1154,20 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     fused.resets = fo.resets;
     fused.accel_bias_g = fo.bias_g;
     d.slots->fused.publish(fused);
+
+    // --- routing ----------------------------------------------------------
+    {
+        const core::route::Point here = dead_reckon(g, fused, now);
+        RouteMailbox* box = d.route;
+        const core::route::Route* live =
+            box && box->live < 2 ? &box->data[box->live].route : nullptr;
+        // The setting, kept in NVS by keeper like any other (CONFIG -> Nav).
+        if (d.settings) s.nav.set_avoid_dirt(d.settings->nav_avoid_dirt);
+        phone_destination(d, s, g, here);
+        s.nav_progress = s.nav.tick(live, here, g.fix, now);
+        pump_route(d, s, g, here, now);
+        if (scheduled) publish_nav(d, s);
+    }
 
     // Dead wheel sensors (core::fusion::WheelCheck) into the health table,
     // where DIAG -> Sensors, the cruise fault line and `ctrl`'s choice of
@@ -874,6 +1326,23 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         sti.gps_alt_m = g.alt_m;
         s.stunt.update(sti, core::stunt::Config{});
         d.slots->stunt.publish(s.stunt.publish());
+    }
+
+    // --- crash and SOS --------------------------------------------------
+    // Scheduled passes: its timers count ticks of real time, and `ble`
+    // sends what this publishes.
+    if (scheduled) {
+        core::crash::Input ci;
+        ci.t_ms = now;
+        ci.enabled = d.settings && d.settings->crash_sos;
+        ci.imu_ok = health.ok(core::state::Dev::Imu);
+        ci.mph = m.best_mph;
+        ci.hit_g = att.hit_g;
+        ci.hit_ms = att.hit_ms;
+        ci.g_lat = att.g_lat;
+        ci.g_lon = att.g_lon;
+        ci.g_vert = att.g_vert;
+        d.slots->crash.publish(s.crash.update(ci));
     }
 
     // --- lap ------------------------------------------------------------

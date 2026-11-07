@@ -1,10 +1,18 @@
 # K-line adapter (smaller, ESP-NOW) — netlist and plan review
 
+> **Status.** A separate board, not the dash: it reads the ECU's K-line and
+> would send it to the dash's C6 over ESP-NOW. Reviewed through revision 3
+> and an independent audit (2026-10-14, §16); the repo records no order or
+> bring-up. Nothing on the dash side is written: the dash still runs
+> `NullEngine` (architecture §10), and §10 and §16 list what the dash's C6
+> firmware and `wifi` would have to change. `gen_sch.py` and `pcb_drc.py`
+> beside this file generate and check the schematic and PCB.
+
 Source files, all 2026-10-13: `Sheet_1-copy_2026-10-13.net`,
 `PCB_PCB_K-Line-to-CAN-smaller_2026-10-13.json`, the Gerber zip and the BOM.
 14 parts, 41.7 × 22.2 mm.
 
-This supersedes `kline-can-adapter-netlist-review.md` for the new board. The
+This supersedes `docs/history/kline-can-adapter-netlist-review.md` for the new board. The
 SN65HVD230, the 120 Ω terminator and the TLV76133 are gone, so that review's
 §1 (no CAN on the dash), §3 (LDO pin 4) and §7 (R5) no longer apply. The
 link to the dash is now **ESP-NOW**, adapter C6 → dash C6.
@@ -384,8 +392,8 @@ on. Also measure K-line idle voltage, ECU on and off, before fitting R9.
   must run ESP-NOW and forward frames over peer data transfer, which is
   already enabled on both sides. Remove `example_peer_data_transfer_init()`,
   which uses handler slots.
-- `wifi_service.cpp` sets `WIFI_MODE_AP` (line 581) and calls
-  `esp_wifi_stop()` (539, 593). Either would kill ESP-NOW. The hotspot must
+- `wifi_service.cpp` sets `WIFI_MODE_AP` when the hotspot starts and calls
+  `esp_wifi_stop()` when it stops (grep for them; line numbers drift). Either would kill ESP-NOW. The hotspot must
   switch APSTA ↔ STA on channel 6 instead.
 
 **Adapter firmware rules:** TXD idle-high before EN high (TXD is pulled down

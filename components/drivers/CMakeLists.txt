@@ -11,9 +11,11 @@ idf_component_register(
          "src/sdcard.cpp"
          "src/sdcard_spi.cpp"
          "src/chip_temp.cpp"
+         "src/usb_drive.cpp"
     INCLUDE_DIRS "include"
     REQUIRES dash_hal bsp core
              esp_driver_spi esp_driver_i2c esp_driver_uart
              esp_driver_gpio esp_adc
              esp_lcd esp_timer nvs_flash
-             esp_driver_sdspi fatfs vfs esp_driver_tsens)
+             esp_driver_sdspi fatfs vfs esp_driver_tsens
+             espressif__esp_tinyusb sdmmc)

@@ -1,8 +1,11 @@
 # Dashboard v1 — netlist review and verified pin map
 
-> **Historical — the ESP32-S3 board.** That board is superseded by the P4
-> board (`p4-board-pin-map.md`). Kept for the reasoning; its pin map,
-> MCP23S17 notes and part numbers do not describe the current hardware.
+> **History: the ESP32-S3 board (v1 hardware), superseded by the P4 board.**
+> Its pin map, MCP23S17 notes and part numbers do not describe current
+> hardware. What still matters was carried over: VIN sense (§3 → pin-map §3),
+> the USB lamp-duty cap (§5), 35 V on the VIN bulk caps (§6), the tach
+> refractory window (§7), pod I2C at 100 kHz and polled (§8), neutral reads
+> LOW (§9). Kept for the reasoning.
 
 Source: `FInal_v1.net`. 167 parts, 110 nets.
 

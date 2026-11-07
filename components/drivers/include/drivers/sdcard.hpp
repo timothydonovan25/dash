@@ -75,6 +75,22 @@ private:
     Open* find_open(const char* path);
     void  close_open(Open& o);
     void  close_all();
+
+    // read_at()'s files, kept open between calls (the map and the search
+    // index: a route reads hundreds of 4 kB blocks, and an fopen each was
+    // 30 ms of FAT directory walk). Used only under the lock, so a FILE* is
+    // never in two tasks at once. Closed whenever that file is removed,
+    // renamed or written, and at unmount.
+    struct Reader {
+        void*    file = nullptr;     // FILE*
+        char     path[64] = {};
+        uint32_t used = 0;
+    };
+    static constexpr int kReaders = 2;
+    Reader*  reader(const char* path);
+    void     close_reader(const char* path);
+    Reader   readers_[kReaders];
+    uint32_t reads_ = 0;
     hal::Status sync_one(Open& o);
 
     StaticSemaphore_t lock_buf_;

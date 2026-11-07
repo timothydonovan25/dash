@@ -704,6 +704,13 @@ void MapView::set_source(const IPointSource* src) {
     touch();
 }
 
+void MapView::set_route(const IPointSource* route) {
+    route_ = route;
+    drawn_route_ = route ? route->total() : 0;
+    fit_stale_ = true;
+    touch();
+}
+
 void MapView::set_live(bool valid) {
     assign_t(valid_, valid);
     // The trace is redrawn as it grows, every 10 points (1 s at 10 Hz), or
@@ -716,6 +723,12 @@ void MapView::set_live(bool valid) {
         fit_stale_ = true;
         touch();
     }
+    const size_t rt = route_ ? route_->total() : 0;
+    if (rt != drawn_route_) {
+        drawn_route_ = rt;
+        fit_stale_ = true;
+        touch();
+    }
     if (fit_stale_) refit();
 }
 
@@ -723,12 +736,17 @@ void MapView::refit() {
     fit_stale_ = false;
     fit_ok_ = false;
     fit_n_ = src_ ? src_->count() : 0;
-    if (fit_n_ < 2) return;
-    // Fit the whole trace, walking it rather than keeping a copy. The buffer
-    // is the owner of these points (§4.4) and this is a reader.
-    for (size_t i = 0; i < fit_n_; ++i) {
+    fit_route_n_ = route_ ? route_->count() : 0;
+    if (fit_route_n_ < 2) fit_route_n_ = 0;
+    if (fit_n_ < 2 && fit_route_n_ == 0) return;
+    // Fit the whole trace and the route, walking them rather than keeping a
+    // copy. The buffers own these points (§4.4) and this is a reader. The
+    // route view fits the route alone, once there is one.
+    const size_t from = route_only_ && fit_route_n_ ? fit_n_ : 0;
+    for (size_t i = from; i < fit_n_ + fit_route_n_; ++i) {
         float x, y;
-        if (!src_->point(i, x, y)) continue;
+        const bool got = i < fit_n_ ? src_->point(i, x, y) : route_->point(i - fit_n_, x, y);
+        if (!got) continue;
         if (!fit_ok_) {
             fit_min_x_ = fit_max_x_ = x;
             fit_min_y_ = fit_max_y_ = y;
@@ -748,8 +766,8 @@ void MapView::render(Canvas& c) {
     c.fill_rect(bounds, color::kPanel);
     c.draw_rect(bounds, color::kGrid);
 
-    const size_t n = fit_n_;
-    if (n < 2) {
+    const size_t n = fit_n_ >= 2 ? fit_n_ : 0;
+    if (n < 2 && fit_route_n_ == 0) {
         c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - 3),
                     "no trace", color::kDim, 1, Align::Center);
         return;
@@ -767,6 +785,48 @@ void MapView::render(Canvas& c) {
     const float s = sx < sy ? sx : sy;          // square, or the track lies
     const float mid_x = (fit_min_x_ + fit_max_x_) / 2;
     const float mid_y = (fit_min_y_ + fit_max_y_) / 2;
+
+    // The route view fits the route, so the trace can run off the frame.
+    const ClipGuard frame_clip(c, bounds.inset(1));
+
+    // The route first, two pixels wide and dim (bright in the route view),
+    // its 65 mph stretches amber, so the ridden trace reads on top of it.
+    {
+        const Color line = route_only_ ? color::kAccent : color::kDim;
+        int16_t qx = 0, qy = 0;
+        bool prev = false;
+        for (size_t i = 0; i < fit_route_n_; ++i) {
+            float x, y;
+            bool fast;
+            if (!route_->route_point(i, x, y, fast)) { prev = false; continue; }
+            const int16_t dx = static_cast<int16_t>(in.cx() + (x - mid_x) * s);
+            const int16_t dy = static_cast<int16_t>(in.cy() - (y - mid_y) * s);
+            if (prev) {
+                const Rect seg{static_cast<int16_t>((qx < dx ? qx : dx) - 1),
+                               static_cast<int16_t>((qy < dy ? qy : dy) - 1),
+                               static_cast<int16_t>((qx < dx ? dx - qx : qx - dx) + 3),
+                               static_cast<int16_t>((qy < dy ? dy - qy : qy - dy) + 3)};
+                if (c.intersects(seg)) {
+                    const Color k = fast ? color::kWarn : line;
+                    // The second pixel across the line: beside a steep one, under a flat one.
+                    const bool flat = (qx < dx ? dx - qx : qx - dx) > (qy < dy ? dy - qy : qy - dy);
+                    const int16_t ox = flat ? 0 : 1, oy = flat ? 1 : 0;
+                    c.draw_line(qx, qy, dx, dy, k);
+                    c.draw_line(static_cast<int16_t>(qx + ox), static_cast<int16_t>(qy + oy),
+                                static_cast<int16_t>(dx + ox), static_cast<int16_t>(dy + oy), k);
+                }
+            }
+            qx = dx;
+            qy = dy;
+            prev = true;
+        }
+        // Where it ends.
+        if (route_only_ && prev) {
+            c.draw_circle(qx, qy, 6, color::kText);
+            c.draw_circle(qx, qy, 5, color::kText);
+        }
+    }
+    if (n < 2) return;
 
     int16_t px = 0, py = 0;
     bool have_prev = false;
@@ -816,7 +876,7 @@ void MapView::render(Canvas& c) {
 
         // Inside the frame: a pointer near the edge must not draw where the
         // next redraw of this widget would not clear it.
-        const ClipGuard clip(c, bounds.inset(1));
+        const Color bike = route_only_ ? color::kText : color::kWarn;
         if (heading) {
             // An arrowhead ahead of the dot: tip 11 px out, base corners 6 px
             // either side, 2 px behind the centre, so it reads as the dot's
@@ -830,9 +890,9 @@ void MapView::render(Canvas& c) {
             px_at(tip, 0.0f, x0, y0);
             px_at(-back, half, x1, y1);
             px_at(-back, -half, x2, y2);
-            c.fill_triangle(x0, y0, x1, y1, x2, y2, color::kWarn);
+            c.fill_triangle(x0, y0, x1, y1, x2, y2, bike);
         }
-        c.fill_circle(bx, by, 3, color::kWarn);
+        c.fill_circle(bx, by, 3, bike);
     }
 }
 
@@ -1551,8 +1611,9 @@ void MediaProgress::render(Canvas& c) {
 
 // --- AlertOverlay -------------------------------------------------------
 
-void AlertOverlay::show(const char* text, Color c) {
-    const bool a = text_.set(text);
+void AlertOverlay::show(const char* text, Color c, const char* hint) {
+    const bool h = hint_.set(hint);
+    const bool a = text_.set(text) | h;
     const bool b = assign_t(color_, c);
     const bool d = assign_t(active_, true);
     if (a || b || d) touch();
@@ -1568,7 +1629,7 @@ void AlertOverlay::render(Canvas& c) {
     c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - c.text_height(2) / 2),
                 text_.s, color_, 2, Align::Center);
     c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.bottom() - c.text_height(1) - 4),
-                "E to dismiss", color::kDim, 1, Align::Center);
+                hint_.s, color::kDim, 1, Align::Center);
 }
 
 // --- Toast --------------------------------------------------------------
@@ -1670,82 +1731,133 @@ void DevTag::render(Canvas& c) {
                 color::kBg, 1, Align::Center);
 }
 
+void FpsTag::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    char buf[24];   // any two unsigneds, so -Wformat-truncation has nothing to prove
+    std::snprintf(buf, sizeof buf, "%u/%u", static_cast<unsigned>(hz_ > 999 ? 999 : hz_),
+                  static_cast<unsigned>(sent_ > 999 ? 999 : sent_));
+    c.draw_text(bounds.cx(), static_cast<int16_t>(bounds.cy() - c.text_height(1) / 2), buf,
+                color::kAccent, 1, Align::Center);
+}
+
 }  // namespace ui
 
 namespace ui {
 
-void NavArrow::set(float rel_deg, bool heading_up, bool valid) {
-    // Two-degree steps: a parked GPS wanders, and an arrow that redraws on
-    // every fix for a change nobody could see costs a blit each time.
-    valid = usable(rel_deg, valid);     // lround(NaN) is undefined
-    const int16_t q = valid ? static_cast<int16_t>(std::lround(rel_deg / 2.0f) * 2) : 0;
-    assign_t(heading_up_, heading_up);
-    assign_t(valid_, valid);
-    // Turning only moves the chevron; damage() sends where it was and is.
-    if (rel_deg_ != q) {
-        rel_deg_ = q;
-        touch_part();
+char KeyGrid::key_char(int k) {
+    static const char kKeys[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";   // core::route::kAlphabet
+    return k >= 2 && k < KeyGrid::kKeys ? kKeys[k - 2] : '\0';
+}
+
+void KeyGrid::set(uint64_t enabled, int cursor, const char* second) {
+    assign_t(enabled_, enabled);
+    assign_t(cursor_, cursor);
+    if (std::strncmp(second_, second, sizeof second_) != 0) {
+        std::snprintf(second_, sizeof second_, "%s", second);
+        touch();
     }
 }
 
-Rect NavArrow::chevron_box(int16_t deg) const {
-    // render()'s four points, for the given angle.
-    const int16_t cx = bounds.cx();
-    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h / 2);
-    const int16_t r = static_cast<int16_t>((bounds.w < bounds.h ? bounds.w : bounds.h) / 2 - 2);
-    const float a = static_cast<float>(deg) * kPi / 180.0f;
-    Box b;
-    const auto pt = [&](float ang, float len) {
-        b.add(static_cast<int16_t>(cx + std::lround(std::sin(ang) * len)),
-              static_cast<int16_t>(cy - std::lround(std::cos(ang) * len)));
-    };
-    pt(a, r * 0.72f);
-    pt(a + 2.5f, r * 0.56f);
-    pt(a - 2.5f, r * 0.56f);
-    pt(a + kPi, r * 0.22f);
-    return b.rect(2).clipped_to(bounds);
-}
-
-int NavArrow::damage(Rect* out, int max) const {
-    if (whole_ || !valid_ || max < 2) {
-        out[0] = bounds;
-        return 1;
-    }
-    int n = 0;
-    const Rect was = chevron_box(sent_deg_), now = chevron_box(rel_deg_);
-    if (!was.empty()) out[n++] = was;
-    if (!now.empty()) out[n++] = now;
-    return n;
-}
-
-void NavArrow::render(Canvas& c) {
+void KeyGrid::render(Canvas& c) {
     c.fill_rect(bounds, color::kBg);
-    const int16_t cx = bounds.cx();
-    const int16_t cy = static_cast<int16_t>(bounds.y + bounds.h / 2);
-    const int16_t r = static_cast<int16_t>((bounds.w < bounds.h ? bounds.w : bounds.h) / 2 - 2);
-    c.draw_circle(cx, cy, r, theme::rule);
-    c.draw_circle(cx, cy, static_cast<int16_t>(r - 1), theme::rule);
-    // What "up" means, at the top of the ring.
-    c.draw_text(cx, static_cast<int16_t>(cy - r + 6), heading_up_ ? "^" : "N",
-                theme::secondary, 2, Align::Center);
-    if (!valid_) {
-        c.draw_text(cx, static_cast<int16_t>(cy - 14), "--", color::kDim, 4, Align::Center);
+    const int16_t w = static_cast<int16_t>(bounds.w / kCols);
+    const int16_t h = static_cast<int16_t>(bounds.h / 3);
+    for (int k = 0; k < kKeys; ++k) {
+        const Rect cell{static_cast<int16_t>(bounds.x + (k % kCols) * w), static_cast<int16_t>(bounds.y + (k / kCols) * h),
+                        static_cast<int16_t>(w - 2), static_cast<int16_t>(h - 2)};
+        const bool on = (enabled_ >> k) & 1;
+        const bool here = k == cursor_;
+        if (here) c.fill_round_rect(cell, 3, color::kAccent);
+        else if (on) c.draw_round_rect(cell, 3, theme::rule);
+        const Color ink = here ? color::kBg : on ? color::kText : color::kGrid;
+        char label[6];
+        uint8_t scale = 2;
+        if (k == 0) { std::snprintf(label, sizeof label, "DEL"); scale = 1; }
+        else if (k == 1) { std::snprintf(label, sizeof label, "%s", second_); scale = 1; }
+        else { label[0] = key_char(k) == ' ' ? '_' : key_char(k); label[1] = '\0'; }
+        c.draw_text(cell.cx(), static_cast<int16_t>(cell.y + (cell.h - 7 * scale) / 2), label, ink, scale,
+                    Align::Center);
+    }
+}
+
+void TurnArrow::set(uint8_t kind, int16_t turn_deg, bool valid) {
+    assign_t(kind_, kind);
+    assign_t(turn_deg_, static_cast<int16_t>((turn_deg / 5) * 5));
+    assign_t(valid_, valid);
+}
+
+namespace {
+// A segment `w` px wide, as two triangles, with a round end at b.
+void thick(Canvas& c, float ax, float ay, float bx, float by, float w, Color col) {
+    const float dx = bx - ax, dy = by - ay;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1.0f) return;
+    const float px = -dy / len * w / 2, py = dx / len * w / 2;
+    const auto r = [](float v) { return static_cast<int16_t>(std::lround(v)); };
+    c.fill_triangle(r(ax + px), r(ay + py), r(bx + px), r(by + py), r(bx - px), r(by - py), col);
+    c.fill_triangle(r(ax + px), r(ay + py), r(bx - px), r(by - py), r(ax - px), r(ay - py), col);
+    c.fill_circle(r(bx), r(by), static_cast<int16_t>(w / 2), col);
+}
+// An arrowhead at (x, y), pointing along `a` radians (0 = up, + clockwise).
+void head(Canvas& c, float x, float y, float a, float size, Color col) {
+    const auto pt = [&](float ang, float len, int16_t& ox, int16_t& oy) {
+        ox = static_cast<int16_t>(std::lround(x + std::sin(ang) * len));
+        oy = static_cast<int16_t>(std::lround(y - std::cos(ang) * len));
+    };
+    int16_t tx, ty, lx, ly, rx, ry;
+    pt(a, size, tx, ty);
+    pt(a + 2.4f, size * 0.9f, lx, ly);
+    pt(a - 2.4f, size * 0.9f, rx, ry);
+    c.fill_triangle(tx, ty, lx, ly, rx, ry, col);
+}
+}  // namespace
+
+void TurnArrow::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    if (!valid_) return;
+    const float s = static_cast<float>(bounds.w < bounds.h ? bounds.w : bounds.h);
+    const float cx = bounds.x + bounds.w / 2.0f;
+    const float cy = bounds.y + bounds.h * 0.55f;
+    const float w = s * 0.11f;
+    const Color col = color::kAccent;
+    const float bottom = bounds.y + bounds.h - w;
+    // core::route::CueKind: 7 UTurn, 8 Arrive, 9 Roundabout.
+    if (kind_ == 9) {
+        // In from below, round the ring, out at the exit's own angle.
+        const float rr = s * 0.17f;
+        thick(c, cx, bottom, cx, cy + rr, w, col);
+        c.fill_circle(static_cast<int16_t>(cx), static_cast<int16_t>(cy), static_cast<int16_t>(rr + w / 2), col);
+        c.fill_circle(static_cast<int16_t>(cx), static_cast<int16_t>(cy), static_cast<int16_t>(rr - w / 2), color::kBg);
+        const float a = turn_deg_ * 3.14159265f / 180.0f;
+        const float sx = cx + std::sin(a) * rr, sy = cy - std::cos(a) * rr;
+        const float ex = cx + std::sin(a) * s * 0.36f, ey = cy - std::cos(a) * s * 0.36f;
+        thick(c, sx, sy, ex, ey, w, col);
+        head(c, ex + std::sin(a) * s * 0.06f, ey - std::cos(a) * s * 0.06f, a, s * 0.2f, col);
         return;
     }
-    const float a = static_cast<float>(rel_deg_) * kPi / 180.0f;
-    const auto pt = [&](float ang, float len, int16_t& x, int16_t& y) {
-        x = static_cast<int16_t>(cx + std::lround(std::sin(ang) * len));
-        y = static_cast<int16_t>(cy - std::lround(std::cos(ang) * len));
-    };
-    // A chevron with a notch: the tip, two barbs, and a point behind the
-    // centre the two halves share, so the shape reads at a glance.
-    int16_t tx, ty, lx, ly, rx, ry, nx, ny;
-    pt(a, r * 0.72f, tx, ty);
-    pt(a + 2.5f, r * 0.56f, lx, ly);
-    pt(a - 2.5f, r * 0.56f, rx, ry);
-    pt(a + kPi, r * 0.22f, nx, ny);
-    c.fill_triangle(tx, ty, lx, ly, nx, ny, color::kAccent);
-    c.fill_triangle(tx, ty, nx, ny, rx, ry, color::kAccent);
+    if (kind_ == 8) {
+        c.fill_circle(static_cast<int16_t>(cx), static_cast<int16_t>(cy), static_cast<int16_t>(s * 0.30f), col);
+        c.fill_circle(static_cast<int16_t>(cx), static_cast<int16_t>(cy), static_cast<int16_t>(s * 0.20f), color::kBg);
+        c.fill_circle(static_cast<int16_t>(cx), static_cast<int16_t>(cy), static_cast<int16_t>(s * 0.10f), col);
+        return;
+    }
+    if (kind_ == 7) {
+        // Up the right, across, and back down the left: a U-turn in the US.
+        const float xr = cx + s * 0.18f, xl = cx - s * 0.18f, top = bounds.y + s * 0.2f;
+        thick(c, xr, bottom, xr, top, w, col);
+        thick(c, xr, top, xl, top, w, col);
+        thick(c, xl, top, xl, cy + s * 0.05f, w, col);
+        head(c, xl, cy + s * 0.05f + s * 0.12f, 3.14159265f, s * 0.2f, col);
+        return;
+    }
+    // The stem to the junction, then the arm at the turn's own angle.
+    thick(c, cx, bottom, cx, cy, w, col);
+    const float deg = turn_deg_ > 150 ? 150.0f : turn_deg_ < -150 ? -150.0f : static_cast<float>(turn_deg_);
+    const float a = deg * 3.14159265f / 180.0f;
+    const float arm = s * 0.30f;
+    const float ex = cx + std::sin(a) * arm, ey = cy - std::cos(a) * arm;
+    thick(c, cx, cy, ex, ey, w, col);
+    head(c, ex + std::sin(a) * s * 0.06f, ey - std::cos(a) * s * 0.06f, a, s * 0.2f, col);
 }
 
 }  // namespace ui

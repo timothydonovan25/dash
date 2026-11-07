@@ -119,6 +119,8 @@ public:
     // The heart-rate history STAT -> HEART graphs; the App writes it.
     void set_hr_history(core::hr::History* h) { hr_history_ = h; }
     void set_trip_source(const IPointSource* s);
+    // The planned route, for the trip map (core::route); null for none.
+    void set_route_source(const IPointSource* s) { route_src_ = s; }
     void set_track_source(const IPointSource* s);
     // `peaks`, when given, runs parallel to `laps`: each lap's top speed,
     // rpm and lean, for LAPS.
@@ -152,6 +154,7 @@ private:
 
     // What the screens are handed when they are built.
     const IPointSource*     trip_src_ = nullptr;
+    const IPointSource*     route_src_ = nullptr;
     const IPointSource*     track_src_ = nullptr;
     const uint32_t*         laps_ = nullptr;
     size_t                  lap_count_ = 0;
@@ -172,6 +175,10 @@ private:
     core::alert::Alerter alerter_;
     core::alert::Kind    alert_kind_ = core::alert::Kind::None;
     void             update_alert(const core::state::Frame& f);
+    // A crash's countdown and SOS (core::crash) take the alert box over
+    // any alert; the phase is kept so a press can cancel it.
+    core::crash::Phase   crash_phase_ = core::crash::Phase::Idle;
+    bool                 update_crash(const core::state::Frame& f);
 
     // Wheelspin and lockup (core/slip), over the top of every screen.
     SlipBar              slip_bar_;
@@ -185,6 +192,7 @@ private:
     bool                 toast_seen_init_ = false;
     uint16_t             seen_perf_ = 0, seen_stunt_ = 0, seen_notify_ = 0, seen_hrr_ = 0;
     uint16_t             seen_line_refused_ = 0;
+    uint16_t             seen_usb_refused_ = 0;
     // Two kinds of event, so a trick cannot bury a message: the phone's,
     // and the game's (a trick, a run).
     struct ToastEvent {
@@ -205,6 +213,10 @@ private:
     // A dev image (§11.7) wears this on every screen.
     DevTag           dev_tag_;
     bool             dev_running_ = false;
+    // CONFIG -> Diag -> FPS counter: the render rate, top-left, over
+    // everything (SystemInfo::render_hz_x10).
+    FpsTag           fps_tag_;
+    bool             fps_on_ = false;
     bool             needs_full_ = true;
     // CONFIG shows the gear calibration page instead while a run is open.
     bool             cal_active_ = false;

@@ -4,7 +4,7 @@
 The point of this is sequencing. The phone app and the dash's `ble` task are
 both unwritten and unproven, and debugging two unproven ends of one link is
 how you spend a weekend learning nothing. This advertises exactly what
-`docs/system-architecture.md` §11.1 specifies, so the phone app has a working
+`docs/radio-and-updates.md` §11.1 specifies, so the phone app has a working
 counterpart from its first run, and the dash later has a known-good client.
 
 It also enforces the parts of §11.1 that are easy to get wrong on the phone:

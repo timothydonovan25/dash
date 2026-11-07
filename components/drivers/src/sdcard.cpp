@@ -165,6 +165,7 @@ hal::Status SdCard::remove(const char* path) {
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !*path) return hal::Status::Unsupported;
     if (find_open(path)) return hal::Status::Busy;
+    close_reader(path);
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     return std::remove(full) == 0 ? hal::Status::Ok : hal::Status::NotPresent;
@@ -176,6 +177,8 @@ hal::Status SdCard::rename(const char* from, const char* to) {
     if (!mounted_) return hal::Status::NotPresent;
     if (!from || !*from || !to || !*to) return hal::Status::Unsupported;
     if (Open* o = find_open(from)) close_open(*o);
+    close_reader(from);
+    close_reader(to);
     char a[96], b[96];
     std::snprintf(a, sizeof a, "%s/%s", kMount, from);
     std::snprintf(b, sizeof b, "%s/%s", kMount, to);
@@ -191,6 +194,7 @@ hal::Status SdCard::write_file(const char* path, const void* data, size_t len) {
     if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
     // Never a file append() is holding open: that is a log.
     if (find_open(path)) return hal::Status::Busy;
+    close_reader(path);
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     FILE* f = std::fopen(full, "wb");
@@ -210,6 +214,7 @@ hal::Status SdCard::write_at(const char* path, size_t offset, const void* data,
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !*path || (!data && len)) return hal::Status::Unsupported;
     if (find_open(path)) return hal::Status::Busy;
+    close_reader(path);
     char full[96];
     std::snprintf(full, sizeof full, "%s/%s", kMount, path);
     // Only ever on the end: a piece that does not follow the last is an
@@ -257,11 +262,11 @@ hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
     if (!mounted_) return hal::Status::NotPresent;
     if (!path || !buf) return hal::Status::Unsupported;
     // Its own FILE*, never the logger's: the two run on different tasks,
-    // and FATFS in IDF is reentrant but a shared FILE* is not.
-    char full[96];
-    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
-    FILE* f = std::fopen(full, "rb");
-    if (!f) return hal::Status::NotPresent;
+    // and FATFS in IDF is reentrant but a shared FILE* is not. Kept open
+    // for the next read of the same file (see Reader).
+    Reader* rd = reader(path);
+    if (!rd) return hal::Status::NotPresent;
+    FILE* f = static_cast<FILE*>(rd->file);
     hal::Status s = hal::Status::Ok;
     if (std::fseek(f, static_cast<long>(offset), SEEK_SET) != 0) {
         s = hal::Status::IoError;
@@ -269,8 +274,42 @@ hal::Status SdCard::read_at(const char* path, size_t offset, void* buf,
         got = std::fread(buf, 1, len, f);
         if (got < len && std::ferror(f)) s = hal::Status::IoError;
     }
-    std::fclose(f);
+    if (!hal::ok(s)) close_reader(path);     // the next read opens it afresh
     return s;
+}
+
+SdCard::Reader* SdCard::reader(const char* path) {
+    ++reads_;
+    Reader* lru = &readers_[0];
+    for (Reader& r : readers_) {
+        if (r.file && std::strncmp(r.path, path, sizeof r.path) == 0) {
+            r.used = reads_;
+            return &r;
+        }
+        if (!r.file || r.used < lru->used) lru = &r;
+    }
+    if (lru->file) std::fclose(static_cast<FILE*>(lru->file));
+    lru->file = nullptr;
+    char full[96];
+    std::snprintf(full, sizeof full, "%s/%s", kMount, path);
+    // "rb": read-only, which is what lets FATFS seek through its cluster
+    // map (CONFIG_FATFS_USE_FASTSEEK) instead of walking the chain.
+    FILE* f = std::fopen(full, "rb");
+    if (!f) return nullptr;
+    lru->file = f;
+    std::snprintf(lru->path, sizeof lru->path, "%s", path);
+    lru->used = reads_;
+    return lru;
+}
+
+void SdCard::close_reader(const char* path) {
+    for (Reader& r : readers_) {
+        if (r.file && (!path || std::strncmp(r.path, path, sizeof r.path) == 0)) {
+            std::fclose(static_cast<FILE*>(r.file));
+            r.file = nullptr;
+            r.path[0] = '\0';
+        }
+    }
 }
 
 hal::Status SdCard::sync() {
@@ -311,6 +350,7 @@ void SdCard::close_open(Open& o) {
 
 void SdCard::close_all() {
     for (Open& o : open_) close_open(o);
+    close_reader(nullptr);
 }
 
 }  // namespace drivers

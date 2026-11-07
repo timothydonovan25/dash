@@ -36,9 +36,14 @@ struct SystemInfo {
     uint32_t uptime_s      = 0;
     uint32_t log_records   = 0;
     uint32_t log_dropped   = 0;
+    // The logger's card totals since boot, for keeper's 5 s console block.
+    uint32_t log_bytes     = 0;
+    uint32_t log_errors    = 0;
+    uint32_t log_max_ms    = 0;   // slowest write
     uint32_t gnss_sentences= 0;
     uint32_t gnss_bad_csum = 0;
     uint16_t render_hz_x10 = 0;
+    uint16_t render_sent_hz = 0;   // of those frames, the ones that sent anything
     uint16_t ctrl_late     = 0;    // ctrl ticks that missed their deadline
     // I2C0 bus recoveries, and how many of those failed to free SDA. The
     // difference is a pod that glitches versus a cable that is shorted.
@@ -60,6 +65,9 @@ struct SystemInfo {
     // CONFIG's Eject has unmounted the card and it is still in the socket:
     // safe to pull. Cleared when it comes out. Written by `storage`.
     bool     sd_ejected     = false;
+    // The card is the laptop's, as a USB drive (drivers::UsbDrive): no
+    // logging, no console. Written by `storage`.
+    bool     sd_usb         = false;
     // The P4's die temperature, from `keeper` once a second. Valid only
     // with chip_temp_ok: there is no number that means "not read".
     float    chip_temp_c    = 0.0f;

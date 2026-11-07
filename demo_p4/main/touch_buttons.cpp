@@ -1,6 +1,6 @@
 // See touch_buttons.hpp. Also unverified — the touch controller is assumed
 // to be a GT911, the common choice for this panel class, on its own I2C
-// bus. See docs/bringup-p4-demo.md.
+// bus. See demo_p4/README.md.
 #include "touch_buttons.hpp"
 #include "p4_pins.hpp"
 

@@ -126,9 +126,9 @@ float Bike::trick_pitch(uint32_t now_ms, float& land_g) {
         if (t < 3.7f) return 36.0f * (3.7f - t) / 0.3f;
         if (t < 3.87f) { land_g = 0.35f; return 0.0f; }
     } else {
-        if (t < 0.15f) return -16.0f * t / 0.15f;
-        if (t < 1.3f) return -16.0f + 2.0f * std::sin(t * 6.0f);
-        if (t < 1.5f) return -16.0f * (1.5f - t) / 0.2f;
+        if (t < 0.15f) return -26.0f * t / 0.15f;
+        if (t < 1.3f) return -26.0f + 2.0f * std::sin(t * 6.0f);
+        if (t < 1.5f) return -26.0f * (1.5f - t) / 0.2f;
         if (t < 1.65f) { land_g = 0.3f; return 0.0f; }
     }
     trick_at_ms_ = 0;

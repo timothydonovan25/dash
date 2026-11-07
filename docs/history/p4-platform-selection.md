@@ -1,8 +1,20 @@
 # Platform selection for the next board — ESP32-P4 + ESP32-C6
 
-> **Decided.** The P4 was chosen and the board is drawn:
-> `p4-board-pin-map.md`, audited in its §6. The status paragraph below is
-> as written before that decision.
+> **History: the argument for leaving the ESP32-S3, written before the P4
+> board was drawn.** What was built differs from most of its decisions:
+>
+> | Planned here | Built |
+> |---|---|
+> | P4 module + discrete C6-MINI-1, C6 owning the pod and neutral via a forked esp_hosted | The Guition JC-ESP32P4-M3-C6 module with its own C6 on SDIO, stock ESP-Hosted; pod and neutral on the P4 |
+> | 5" 800×480 LVDS panel, full-frame scan-out, dirty rects retired | 3.5" ILI9488 on 8-bit i80; dirty rects and `ui::Shadow` stay |
+> | Camera, H.264 recording, audio | Not built; the GoPro + RaceRender blackbox instead |
+> | eMMC for blackbox and config; LP-core supervisor | SD only; `power` task on core 1 for VIN cut |
+> | USB 2.0 HS mass storage | Not connected; Wi-Fi hotspot for offload |
+>
+> Still worth reading for its reasoning: §4 (choosing a sunlight-readable
+> panel: bonding, blackening, minimum dimming) and §7 (enclosure: ASA, no
+> fan, gaskets, isolators, recessed reset). Nothing else here describes
+> the current board.
 
 **Status.** This is a design argument, not a description of anything that
 exists. No P4 hardware has been ordered and no P4 code has been written.
@@ -60,7 +72,7 @@ Three things the S3 board cannot do at all:
 - **A bright panel worth reading.** Sunlight-readable panels in this size
   are LVDS or high-bandwidth parallel. The S3 can drive neither well.
 - **CAN.** Not the chip's fault — the S3 has TWAI — but the board has no
-  transceiver. See `docs/kline-can-adapter-netlist-review.md` §1.
+  transceiver. See `kline-can-adapter-netlist-review.md` §1.
 
 An S3 respin with an 8-bit parallel panel and a transceiver would fix the
 frame rate and the CAN, cheaply, and is the fallback if the camera
@@ -123,7 +135,7 @@ back a millisecond for nothing.
 Its own power domain, so it survives HP sleep. It owns the fast shutdown
 path: VIN sense on an ADC, brownout detect, signal the HP side to finalize
 the current fMP4 fragment, flush trip state, then cut. This finally closes
-the hole in `docs/dash-v1-netlist-review.md` §3 — the current board cannot
+the hole in `dash-v1-netlist-review.md` §3 — the current board cannot
 tell bike power from USB power and cannot see a shutdown coming.
 
 State handoff needs no new mechanism: the LP core writes into shared LP

@@ -1,9 +1,9 @@
 # K-line to CAN adapter — netlist review
 
-> **Dashboard update.** The dashboard is now the P4 board
-> (`p4-board-pin-map.md`), not the ESP32-S3 board described below. It has no
-> CAN transceiver either, so §1 still stands: the P4's TWAI controllers are
-> logic-level, the same as the S3's.
+> **History: the first K-line adapter (CAN output), superseded by the
+> ESP-NOW adapter in `kline-adapter/review.md`.** §1 still holds for the P4
+> dash: it has no CAN transceiver, and the P4's TWAI is logic-level only.
+> Kept for the reasoning.
 
 Source: `Sheet_1_202608121.net`, 24 parts. This matches the Aug 12 2026
 rev 2 board (35.43 × 20.32 mm).

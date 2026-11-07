@@ -1,6 +1,6 @@
 // panel_test — ILI9488 bring-up on a bare ESP32-S3 dev board.
 //
-// Answers docs/s3-parallel-respin.md §2: does this panel run on an 8-bit
+// Answers docs/history/s3-parallel-respin.md §2: does this panel run on an 8-bit
 // 8080 bus, are all eight data lines good, and how long does a frame take.
 // The same binary in SPI mode proves the panel and wiring are alive before
 // any of that is blamed on the parallel setup.

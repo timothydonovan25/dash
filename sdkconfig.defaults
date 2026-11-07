@@ -179,3 +179,16 @@ CONFIG_ESP_IPC_TASK_STACK_SIZE=1536
 # IMU stream unbroken, NimBLE retrying every 2 s, Bluetooth back only at
 # the next power-on (bringup §9).
 CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n
+
+# Routing reads the 120 MB map in 4 kB blocks at random places
+# (docs/navigation.md): fast seek follows FATFS's in-memory cluster map
+# instead of walking the cluster chain from the start on every backward
+# seek. Read-only files only; a file in more than ~127 pieces falls back.
+CONFIG_FATFS_USE_FASTSEEK=y
+CONFIG_FATFS_FAST_SEEK_BUFFER_SIZE=256
+
+# USB mass storage (drivers/usb_drive): TinyUSB's MSC class, named so the
+# laptop shows what it is.
+CONFIG_TINYUSB_MSC_ENABLED=y
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="CRF250F Dash"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="Dash SD card"

@@ -30,6 +30,9 @@ enum class Kind : uint8_t { Float = 0, Int, Bool, Enum, Action };
 
 // Every tunable in the firmware. Owned by main, passed by reference to the
 // services that need it. Trivially copyable so a task can take a snapshot.
+// CONFIG -> Nav -> Avoid dirt, which NAV's picker also switches (by key).
+inline constexpr uint16_t kKeyNavAvoidDirt = 0x1101;
+
 struct Settings {
     // Display
     uint8_t brightness_pct = 80;
@@ -44,16 +47,31 @@ struct Settings {
     // performance run ends (core::stunt, core::perf). Notifications have
     // their own switch, under Phone.
     bool    popups         = true;
+    // CONFIG -> Diag -> FPS counter: the render rate, small, in the top-left
+    // corner of every screen. For bring-up and tuning; off by default.
+    bool    show_fps       = false;
+    // CONFIG -> Diag -> Frame rate: render's frame deadline, as an index into
+    // kFrameRateHz (frame_rate_hz). 120 by default; Unlimited still yields a
+    // tick each frame so core 1's lower tasks run.
+    uint8_t frame_rate     = 4;
     // The phone's notifications (§11.1 `N`) as a toast; and whether the
     // message itself shows while moving, or only the sender until stopped.
     bool    notify_on      = true;
     bool    notify_text_moving = false;
+    // CONFIG -> Phone -> Crash SOS (core::crash): after a crash and a 30 s
+    // countdown nobody cancels, the phone is asked to text for help. The
+    // phone has its own switch and the contact; both must be on.
+    bool    crash_sos      = true;
     // Heart rate from the rider's watch over Bluetooth (core/hr): a Garmin
     // with Broadcast Heart Rate on, or any strap with the standard service.
     // Off until asked for: it keeps the radio scanning while no watch is
     // there. The maximum sets STAT -> HEART's zones.
     bool     hr_on      = false;
     uint16_t hr_max_bpm = 185;
+
+    // CRUISE -> NAV (core::route): routes keep off dirt roads (tracks and
+    // unpaved surfaces). Switched from NAV's picker as well as here.
+    bool     nav_avoid_dirt = false;
 
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.
@@ -214,6 +232,14 @@ size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n);
 // Called after any ConfigSet so nothing goes on using a stale threshold.
 struct ShiftView { uint16_t base_rpm, span_rpm, hysteresis_rpm, flash_rpm, lead_ms; };
 struct LapView   { double half_width_ft; float min_speed_mph; uint32_t min_lap_ms; };
+// The frame rate CONFIG offers, Hz, in the menu's order; 0 is Unlimited.
+inline constexpr uint16_t kFrameRateHz[] = {10, 20, 30, 60, 120, 0};
+inline constexpr uint8_t  kFrameRateCount = sizeof(kFrameRateHz) / sizeof(kFrameRateHz[0]);
+// The setting as a rate: 0 for Unlimited, 120 for an index out of range.
+inline uint16_t frame_rate_hz(const Settings& s) {
+    return s.frame_rate < kFrameRateCount ? kFrameRateHz[s.frame_rate] : 120;
+}
+
 ShiftView shift_view(const Settings& s);
 LapView   lap_view(const Settings& s);
 core::gear::Config gear_view(const Settings& s);

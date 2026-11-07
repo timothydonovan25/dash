@@ -2,12 +2,15 @@
 #include "core/stunt/stunt.hpp"
 #include "core/geo/geo.hpp"
 #include "core/health/health.hpp"
+#include "core/route/navigator.hpp"
+#include "core/route/search.hpp"
 #include "core/units/units.hpp"
 #include "core/waypoint/waypoint.hpp"
 #include "ui/chrome.hpp"
 #include "ui/theme.hpp"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 
 namespace ui {
@@ -543,126 +546,500 @@ constexpr Rect kTripHint {322, 252, 144, 16};
 
 // --- NAV ------------------------------------------------------------------
 
-constexpr Rect kNavArrow  { 14,  40, 236, 236};
-constexpr Rect kNavDist   {266,  50, 200,  44};
-constexpr Rect kNavUnit   {266,  98, 200,  16};
-constexpr Rect kNavBear   {266, 126, 200,  16};
-constexpr Rect kNavDrop   {266, 150, 200,  12};
-constexpr Rect kNavStatus {266, 168, 200,  12};
-constexpr Rect kNavActions{266, 190, 200, 100};
-
-void NavScreen::enter(Canvas&) {
-    arrow_.set_bounds(kNavArrow);
-    dist_.set_bounds(kNavDist);       dist_.configure("--", color::kText, 6, Align::Left);
-    dist_unit_.set_bounds(kNavUnit);  dist_unit_.configure("", color::kDim, 2, Align::Left);
-    bearing_.set_bounds(kNavBear);    bearing_.configure("", color::kText, 2, Align::Left);
-    dropped_.set_bounds(kNavDrop);    dropped_.configure("", color::kDim, 1, Align::Left);
-    status_.set_bounds(kNavStatus);   status_.configure("", color::kDim, 1, Align::Left);
-    actions_.set_bounds(kNavActions); actions_.configure(kActions, 2);
-    list_[0] = &arrow_;  list_[1] = &dist_;    list_[2] = &dist_unit_;
-    list_[3] = &bearing_; list_[4] = &dropped_; list_[5] = &status_;
-    list_[6] = &actions_;
-}
+// Each view tiles the whole body below the title rule (y 30..320) with no
+// gap and no overlap, every widget painting its own background: switching
+// views repaints every pixel the other view drew. Text sits at the top of
+// its tile.
+constexpr Rect kNavGutL   {  0,  30,  14, 290};
+constexpr Rect kNavGutR   {466,  30,  14, 290};
+// The picker.
+constexpr Rect kNavHead   { 14,  30, 452,  24};
+constexpr Rect kNavTable  { 14,  54, 452, 232};
+constexpr Rect kNavPHint  { 14, 286, 452,  34};
+// "Where to?"
+constexpr Rect kSrQuery   { 14,  30, 452,  24};
+constexpr Rect kSrStatus  { 14,  54, 452,  14};
+constexpr Rect kSrKeys    { 14,  68, 452,  90};
+constexpr Rect kSrTable   { 14, 158, 452, 128};
+// Guidance.
+constexpr Rect kNavArrow  { 14,  30, 200, 214};
+constexpr Rect kNavGutM   {214,  30,  16, 214};
+constexpr Rect kNavDist   {230,  30, 236,  66};
+constexpr Rect kNavUnit   {230,  96, 236,  26};
+constexpr Rect kNavRoad   {230, 122, 236,  34};
+constexpr Rect kNavLimCap {230, 156, 236,  16};
+constexpr Rect kNavLimit  {230, 172, 236,  72};
+constexpr Rect kNavMap    { 14,  30, 452, 214};   // the arrow, the gutter and the numbers
+constexpr Rect kNavRemain { 14, 244, 452,  24};
+constexpr Rect kNavStatus { 14, 268, 452,  24};
+constexpr Rect kNavHint   { 14, 292, 452,  28};
+constexpr Rect kNowhere   {  0,   0,   0,   0};
 
 namespace {
-// Feet (or metres) up close, where the last stretch is walked; miles (or
-// km) further out.
+// Feet (or metres) up close, where the turn is in sight; miles (or km)
+// further out.
 void nav_distance(char* num, size_t n, const char** unit, double dist_ft, u::System sys) {
     const bool metric = sys == u::System::Metric;
     const float mi = static_cast<float>(dist_ft / 5280.0);
     if (mi < 0.1f) {
         const float near = metric ? static_cast<float>(dist_ft * 0.3048) : static_cast<float>(dist_ft);
-        u::fmt_value(num, n, near, 0, true);
+        // To the nearest 50 ft (or 10 m): the number a rider can use.
+        const float step = metric ? 10.0f : 50.0f;
+        u::fmt_value(num, n, std::round(near / step) * step, 0, true);
         *unit = metric ? "m" : "ft";
     } else {
         const float far = u::distance_for_display(mi, sys, unit);
-        u::fmt_value(num, n, far, far < 10.0f ? 2 : 1, true);
+        u::fmt_value(num, n, far, far < 10.0f ? 1 : 0, true);
     }
 }
+
+// The pace notes as a rally co-driver reads them: the distance to the
+// first, each note, and the gap to the next unless it runs "into" it.
+// "300 R4 tightens 150 L3 into R5". Numbers without units, as on a pace
+// note card; a gap under 50 ft (10 m) is left out.
+void pace_line(char* out, size_t cap, const core::state::Nav& n, u::System sys) {
+    size_t w = 0;
+    out[0] = '\0';
+    const auto put = [&](const char* t) {
+        const int k = std::snprintf(out + w, cap - w, "%s%s", w ? " " : "", t);
+        if (k > 0) w = w + size_t(k) < cap ? w + size_t(k) : cap - 1;
+    };
+    for (uint8_t i = 0; i < n.n_pace && i < core::state::Nav::kMaxPace; ++i) {
+        if (!n.pace_into[i] && n.pace_gap_ft[i] >= 50.0f) {
+            char num[12];
+            const char* unit = "";
+            nav_distance(num, sizeof num, &unit, n.pace_gap_ft[i], sys);
+            put(num);
+        }
+        put(n.pace[i]);
+    }
+}
+
+constexpr uint16_t kAvoidDirtKey = core::config::kKeyNavAvoidDirt;
+
+bool nav_guiding(uint8_t phase) {
+    using core::route::Phase;
+    switch (static_cast<Phase>(phase)) {
+        case Phase::Routing: case Phase::AskFast: case Phase::NoSlowRoute:
+        case Phase::Guiding: case Phase::Rerouting: case Phase::Arrived:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
-void NavScreen::update(const Frame& f) {
-    const uint8_t sel = focus_ < kActions ? focus_ : 0;
-    const core::state::Waypoint& w = f.waypoint.pts[sel];
-    const bool fix = f.gnss.fix;
-    const bool live = w.set && fix;
-    const core::geo::LatLon here{f.gnss.lat, f.gnss.lon};
+void NavScreen::enter(Canvas&) {
+    gut_l_.set_bounds(kNavGutL);
+    gut_r_.set_bounds(kNavGutR);
+    head_.configure("", color::kDim, 1, Align::Left);
+    table_.configure(11, 2);
+    phint_.configure("", theme::secondary, 1, Align::Left);
+    squery_.configure("", color::kText, 2, Align::Left);
+    sstatus_.configure("", color::kDim, 1, Align::Left);
+    dist_.configure("--", color::kText, 6, Align::Left);
+    dist_unit_.configure("", color::kDim, 2, Align::Left);
+    road_.configure("", color::kText, 2, Align::Left);
+    limit_cap_.configure("", theme::secondary, 1, Align::Left);
+    limit_.configure("", color::kText, 3, Align::Left);
+    remain_.configure("", color::kText, 2, Align::Left);
+    status_.configure("", theme::warning, 2, Align::Left);
+    hint_.configure("", theme::secondary, 1, Align::Left);
+    lay_out(View::Picker);
+}
 
-    core::geo::Guide g;
-    if (live) {
-        g = core::geo::guide(here, f.gnss.course_deg, f.gnss.speed_mph,
-                             core::geo::LatLon{w.lat, w.lon});
+void NavScreen::lay_out(View v) {
+    view_ = v;
+    laid_out_ = true;
+    const bool pick = v == View::Picker, search = v == View::Search, guide = v == View::Guide;
+    gut_l_.touch();
+    gut_r_.touch();
+    head_.set_bounds(pick ? kNavHead : kNowhere);
+    table_.set_bounds(pick ? kNavTable : search ? kSrTable : kNowhere);
+    table_.configure(pick ? 11 : 6, 2);
+    table_.clear_rows();
+    phint_.set_bounds(pick || search ? kNavPHint : kNowhere);
+    squery_.set_bounds(search ? kSrQuery : kNowhere);
+    sstatus_.set_bounds(search ? kSrStatus : kNowhere);
+    keys_.set_bounds(search ? kSrKeys : kNowhere);
+    const bool turns = guide && !show_map_;
+    map_.set_bounds(guide && show_map_ ? kNavMap : kNowhere);
+    map_.set_route_only(true);
+    gut_m_.set_bounds(turns ? kNavGutM : kNowhere);
+    arrow_.set_bounds(turns ? kNavArrow : kNowhere);
+    dist_.set_bounds(turns ? kNavDist : kNowhere);
+    dist_unit_.set_bounds(turns ? kNavUnit : kNowhere);
+    road_.set_bounds(turns ? kNavRoad : kNowhere);
+    limit_cap_.set_bounds(turns ? kNavLimCap : kNowhere);
+    limit_.set_bounds(turns ? kNavLimit : kNowhere);
+    remain_.set_bounds(guide ? kNavRemain : kNowhere);
+    status_.set_bounds(guide ? kNavStatus : kNowhere);
+    hint_.set_bounds(guide ? kNavHint : kNowhere);
+    n_list_ = 0;
+    list_[n_list_++] = &gut_l_;
+    list_[n_list_++] = &gut_r_;
+    if (guide && show_map_) {
+        Widget* const g[] = {&map_, &remain_, &status_, &hint_};
+        for (Widget* w : g) list_[n_list_++] = w;
+    } else if (guide) {
+        Widget* const g[] = {&gut_m_, &arrow_, &dist_, &dist_unit_, &road_, &limit_cap_, &limit_,
+                             &remain_, &status_, &hint_};
+        for (Widget* w : g) list_[n_list_++] = w;
+    } else if (search) {
+        Widget* const g[] = {&squery_, &sstatus_, &keys_, &table_, &phint_};
+        for (Widget* w : g) list_[n_list_++] = w;
+    } else {
+        list_[n_list_++] = &head_;
+        list_[n_list_++] = &table_;
+        list_[n_list_++] = &phint_;
     }
-    arrow_.set(static_cast<float>(g.rel_deg), g.heading_up, live);
+    focus_ = 0;
+    in_list_ = false;
+    reset_focus_ = 0;
+    cursor_ = -1;
+}
 
+uint8_t NavScreen::focus_count() const {
+    switch (view_) {
+        case View::Picker: return rows_;
+        // The keys are the screen's own (C/D move cursor_); the results are nav's.
+        case View::Search: return in_list_ ? n_hits_ : 0;
+        default:           return 0;
+    }
+}
+
+// After the keys on offer change, the cursor stays on its key if it can
+// still be pressed, else goes to the nearest one that can (forward first
+// on a tie): typing in the digits keeps it in the digits. With no key yet,
+// the first letter or digit.
+void NavScreen::place_cursor() {
+    const auto on = [&](int k) { return k >= 0 && k < KeyGrid::kKeys && ((enabled_ >> k) & 1); };
+    if (on(cursor_)) return;
+    if (cursor_ < 0) {
+        for (int k = 2; k < KeyGrid::kKeys; ++k) if (on(k)) { cursor_ = k; return; }
+        cursor_ = on(1) ? 1 : on(0) ? 0 : -1;
+        return;
+    }
+    for (int d = 1; d < KeyGrid::kKeys; ++d) {
+        if (on(cursor_ + d)) { cursor_ += d; return; }
+        if (on(cursor_ - d)) { cursor_ -= d; return; }
+    }
+    cursor_ = -1;
+}
+
+void NavScreen::update(const Frame& f) {
+    const core::state::Nav& n = f.nav;
+    phase_ = n.phase;
+    avoid_dirt_ = n.avoid_dirt;
+    const View v = nav_guiding(n.phase) ? View::Guide
+                 : n.search != core::state::Nav::SearchOff ? View::Search : View::Picker;
+    // The 65 mph question shows where the fast part is; otherwise the
+    // rider's choice.
+    using core::route::Phase;
+    const bool asking = n.phase == uint8_t(Phase::AskFast) || n.phase == uint8_t(Phase::NoSlowRoute);
+    const bool map = v == View::Guide && (asking || want_map_);
+    if (v != view_ || map != show_map_) {
+        show_map_ = map;
+        lay_out(v);
+    } else if (n.search != search_) {
+        // Spelling to the house number, or back: the cursor to the first key.
+        focus_ = 0;
+        in_list_ = false;
+        reset_focus_ = 0;
+        cursor_ = -1;
+    }
+    search_ = n.search;
+    switch (view_) {
+        case View::Picker: update_picker(f); break;
+        case View::Search: update_search(f); break;
+        case View::Guide:  update_guide(f); break;
+    }
+    if (show_map_) map_.set_live(f.gnss.fix);
+}
+
+void NavScreen::update_picker(const Frame& f) {
+    using core::route::Phase;
+    const core::state::Nav& n = f.nav;
+    const Phase ph = static_cast<Phase>(n.phase);
+    char head[64];
+    if (ph == Phase::NoMap) {
+        std::snprintf(head, sizeof head, "NO MAP: copy route/map.rgf to the card");
+    } else if (ph == Phase::Failed) {
+        std::snprintf(head, sizeof head, "NO ROUTE: %s",
+                      core::route::to_string(static_cast<core::route::Status>(n.status)));
+    } else {
+        std::snprintf(head, sizeof head, "MAP %04u-%02u-%02u%s", unsigned(n.map_date / 10000),
+                      unsigned(n.map_date / 100 % 100), unsigned(n.map_date % 100),
+                      f.gnss.fix ? "" : "   waiting for a GPS fix");
+    }
+    head_.set_text(head);
+    n_dest_ = n.n_dest < core::state::Nav::kMaxDest ? n.n_dest : core::state::Nav::kMaxDest;
+    const core::route::Point here{static_cast<int32_t>(std::lround(f.gnss.lat * 1e7)),
+                                  static_cast<int32_t>(std::lround(f.gnss.lon * 1e7))};
+    // No map, no rows: nothing to pick and nothing to switch.
+    rows_ = ph == Phase::NoMap ? 0 : static_cast<uint8_t>(n_dest_ + 2);
+    if (rows_) table_.set_row(0, "Where to?", "search");
+    for (uint8_t i = 0; i < n_dest_ && rows_; ++i) {
+        const core::state::NavDest& d = n.dest[i];
+        kind_[i] = d.kind;
+        waypoint_[i] = d.waypoint;
+        char right[16] = "";
+        if (f.gnss.fix) {
+            char num[12];
+            const char* unit = "";
+            nav_distance(num, sizeof num, &unit,
+                         core::route::dist_m(here, core::route::Point{d.lat_e7, d.lon_e7}) * 3.28084, units());
+            std::snprintf(right, sizeof right, "%s %s", num, unit);
+        }
+        table_.set_row(i + 1u, d.name, right);
+    }
+    if (rows_) table_.set_row(n_dest_ + 1u, "Dirt roads", n.avoid_dirt ? "avoid" : "allowed");
+    table_.set_row_count(rows_);
+    table_.set_focus(rows_ ? (focus_ < rows_ ? focus_ : 0) : -1);
+    const bool on_dest = focus_ >= 1 && focus_ <= n_dest_;
+    phint_.set_text(ph == Phase::NoMap ? ""
+                    : focus_ == 0 ? "C/D pick   E spell an address, town or place"
+                    : on_dest && kind_[focus_ - 1] == core::state::NavDest::Waypoint
+                        ? "C/D pick   E go   hold E put this waypoint here"
+                    : focus_ == n_dest_ + 1 ? "C/D pick   E switch"
+                                            : "C/D pick   E go");
+}
+
+void NavScreen::update_search(const Frame& f) {
+    const core::state::Nav& n = f.nav;
+    const bool number = n.search == core::state::Nav::SearchNumber;
+    // No index on the card: nothing can match, so every key would be grey
+    // and C/D would have nowhere to go. Say so where the eye lands.
+    const bool no_index = !number && !n.search_ok && !n.searching;
+    char q[48];
+    if (number) std::snprintf(q, sizeof q, "%.18s #%s_", n.street, n.digits);
+    else if (no_index) std::snprintf(q, sizeof q, "No search index on card");
+    else std::snprintf(q, sizeof q, "Where to? %s_", n.query);
+    squery_.set_text(q);
+
+    // What the keys can do. Typing: DEL once there is something to
+    // delete, LIST once there are results, and the letters that lead
+    // somewhere. A number: DEL (past the first digit, back to the street),
+    // GO, and the digits (no leading 0).
+    uint64_t en = 0;
+    if (number) {
+        en = 3;
+        for (int dgt = 0; dgt < 10; ++dgt)
+            if (dgt || n.digits[0]) en |= uint64_t(1) << (2 + 26 + dgt);
+    } else {
+        if (n.query[0]) en |= 1;
+        if (n.n_hits) en |= 2;
+        en |= (n.next & ((uint64_t(1) << core::route::kAlphabetLen) - 1)) << 2;
+    }
+    enabled_ = en;
+    n_hits_ = number ? 0 : n.n_hits;
+    if (in_list_ && n_hits_ == 0) in_list_ = false;
+    place_cursor();
+    keys_.set(en, in_list_ ? -1 : cursor_, number ? "GO" : "LIST");
+
+    char st[64];
+    if (no_index)
+        std::snprintf(st, sizeof st, "Copy route/search.idx to the card (build_maps.sh)");
+    else if (number)
+        std::snprintf(st, sizeof st, "House number, or GO for the street itself");
+    else if (n.searching)
+        std::snprintf(st, sizeof st, "Looking...");
+    else if (!n.query[0])
+        std::snprintf(st, sizeof st, "Spell a street, town or place, or a house number first");
+    else if (std::strspn(n.query, "0123456789") == std::strlen(n.query) && !n.n_hits)
+        std::snprintf(st, sizeof st, "House number %.6s: now spell the street", n.query);
+    else if (n.matches == 0)
+        std::snprintf(st, sizeof st, "Nothing by that name");
+    else if (!n.n_hits)
+        std::snprintf(st, sizeof st, "%u matches: keep spelling", unsigned(n.matches));
+    else
+        std::snprintf(st, sizeof st, "%u matches, nearest first", unsigned(n.matches));
+    sstatus_.set_text(st);
+
+    for (uint8_t i = 0; i < n_hits_; ++i) {
+        const core::state::Nav::Hit& h = n.hits[i];
+        char num[12];
+        const char* unit = "";
+        nav_distance(num, sizeof num, &unit, h.dist_mi * 5280.0, units());
+        char right[32];   // the table keeps 13 characters of it
+        std::snprintf(right, sizeof right, "%s%s %.6s", num, unit, h.city);
+        table_.set_row(i, h.name, right);
+    }
+    table_.set_row_count(n_hits_);
+    table_.set_focus(in_list_ ? (focus_ < n_hits_ ? focus_ : 0) : -1);
+    phint_.set_text(no_index ? "hold E: back"
+                    : in_list_ ? "C/D pick  E go  hold E: keys"
+                    : number ? "C/D move  E press  GO: go  hold E: close"
+                             : "C/D move  E press  LIST: results  hold E: close");
+}
+
+void NavScreen::update_guide(const Frame& f) {
+    using core::route::Phase;
+    const core::state::Nav& n = f.nav;
+    const Phase ph = static_cast<Phase>(n.phase);
+    const bool live = n.following && ph != Phase::Routing && ph != Phase::NoSlowRoute;
+    arrow_.set(n.cue_kind, n.cue_turn_deg, live);
     char num[12] = "--";
     const char* unit = "";
-    if (live) nav_distance(num, sizeof num, &unit, g.dist_ft, units());
+    if (live) nav_distance(num, sizeof num, &unit, n.to_cue_ft, units());
     dist_.set_text(num);
     dist_unit_.set_text(unit);
+    char road[24];
+    std::snprintf(road, sizeof road, "%.19s", live ? n.cue_road : n.target);
+    road_.set_text(road);
+    char lim[8] = "";
+    if (live && n.limit_mph) std::snprintf(lim, sizeof lim, "%u", unsigned(n.limit_mph));
+    limit_cap_.set_text(live && n.limit_mph ? "LIMIT" : "");
+    limit_.set_text(lim);
 
-    char bear[24] = "";
-    if (live) {
-        static const char* const kPoints[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
-        const int b = static_cast<int>(std::lround(g.bearing_deg)) % 360;
-        std::snprintf(bear, sizeof bear, "%03d %s", b, kPoints[((b + 22) / 45) % 8]);
-    }
-    bearing_.set_text(bear);
-
-    char when[32] = "";
-    if (w.set) {
-        char clock[12];
-        u::fmt_clock(clock, sizeof clock, w.utc_ms,
-                     has_ctx() && ctx().settings ? ctx().settings->tz_offset_h : 0, true,
-                     has_ctx() && ctx().settings && ctx().settings->clock_12h);
-        std::snprintf(when, sizeof when, "%s set %s", core::waypoint::name(sel), clock);
-    }
-    dropped_.set_text(when);
-
-    status_.set_text(!fix          ? "waiting for a GPS fix"
-                     : !w.set      ? (sel == core::waypoint::Start ? "START sets at the first fix"
-                                                                    : "not set: E puts it here")
-                     : g.heading_up ? "up = straight ahead"
-                                    : "up = north (under 3 mph)");
-
-    // Every waypoint and how far it is, so the list is also the answer to
-    // "how far back to the truck?" without picking it.
-    for (uint8_t i = 0; i < kActions; ++i) {
-        const core::state::Waypoint& p = f.waypoint.pts[i];
-        char right[16] = "--";
-        if (p.set && fix) {
-            char d[12];
-            const char* du = "";
-            nav_distance(d, sizeof d, &du,
-                         core::geo::distance_ft(here, core::geo::LatLon{p.lat, p.lon}), units());
-            std::snprintf(right, sizeof right, "%s %s", d, du);
-        } else if (p.set) {
-            std::snprintf(right, sizeof right, "set");
+    char remain[64] = "";
+    if (n.following) {
+        char d[12];
+        const char* du = "";
+        nav_distance(d, sizeof d, &du, n.remain_mi * 5280.0, units());
+        // The arrival time on the clock, as a Garmin shows it, when the
+        // GPS has told us the time.
+        char eta[12] = "";
+        if (f.gnss.utc_ms != 0 || f.gnss.fix) {
+            const bool have = has_ctx() && ctx().settings;
+            const uint32_t at = static_cast<uint32_t>((uint64_t(f.gnss.utc_ms) + uint64_t(n.remain_s) * 1000u) % 86400000u);
+            u::fmt_clock(eta, sizeof eta, at, have ? ctx().settings->tz_offset_h : 0, true,
+                         have && ctx().settings->clock_12h);
         }
-        actions_.set_row(i, core::waypoint::name(i), right);
+        // 37 characters fit: "12.4 mi  18min  arr 2:35  Little Roc".
+        std::snprintf(remain, sizeof remain, "%s %s  %umin%s%s  %.10s", d, du,
+                      unsigned((n.remain_s + 59) / 60), eta[0] ? "  arr " : "", eta, n.target);
     }
-    actions_.set_row_count(kActions);
-    actions_.set_focus(sel);
+    remain_.set_text(remain);
+
+    char status[48] = "";
+    const char* hint = show_map_ ? "E turns   hold E stop" : "E route   hold E stop";
+    switch (ph) {
+        case Phase::Routing:
+            std::snprintf(status, sizeof status, "Routing to %s...", n.target);
+            break;
+        case Phase::Rerouting:
+            std::snprintf(status, sizeof status, "Off route: rerouting...");
+            break;
+        case Phase::AskFast:
+            // "M-59: 0.6 mi at 65 mph (likely)": which road, how much of
+            // it, and whether that is a sign or a guess (an untagged
+            // divided highway).
+            std::snprintf(status, sizeof status, "%.14s: %.*f mi at 65 mph%s",
+                          n.fast_road[0] ? n.fast_road : "Route", n.fast_mi < 10.0f ? 1 : 0,
+                          static_cast<double>(n.fast_mi < 0.1f ? 0.1f : n.fast_mi),
+                          n.fast_presumed ? " (likely)" : "");
+            hint = "E avoid 65 mph roads   hold E keep them";
+            break;
+        case Phase::NoSlowRoute:
+            std::snprintf(status, sizeof status, "No route without 65 mph roads");
+            hint = "E use them anyway   hold E stop";
+            break;
+        case Phase::Arrived:
+            std::snprintf(status, sizeof status, "Arrived: %s", n.target);
+            break;
+        default:
+            if (n.off_route) std::snprintf(status, sizeof status, "Off route");
+            else if (n.on_fast) std::snprintf(status, sizeof status, "65 mph road");
+            else pace_line(status, sizeof status, n, units());
+            break;
+    }
+    status_.set_text(status);
+    hint_.set_text(hint);
+}
+
+bool NavScreen::handle_search(const core::nav::InputEvent& e) {
+    using core::nav::Button;
+    using core::state::Command;
+    using core::state::CommandId;
+    const bool number = search_ == core::state::Nav::SearchNumber;
+    const bool hold = e.press != core::nav::Press::Short;
+    if (in_list_) {
+        if (e.button != Button::E) return false;          // C/D: nav moves through the results
+        if (hold) {                          // back to the keys
+            in_list_ = false;
+            return true;
+        }
+        if (focus_ >= n_hits_) return true;
+        const int32_t pick = focus_;
+        in_list_ = false;
+        focus_ = 0;
+        reset_focus_ = 0;
+        return post(Command(CommandId::NavSearchPick, pick));
+    }
+    if (e.button == Button::C || e.button == Button::D) {
+        // The next key on offer that way, round the grid.
+        if (enabled_ == 0) return true;
+        const int step = e.button == Button::D ? 1 : -1;
+        int k = cursor_ < 0 ? 0 : cursor_;
+        for (int i = 0; i < KeyGrid::kKeys; ++i) {
+            k = (k + step + KeyGrid::kKeys) % KeyGrid::kKeys;
+            if ((enabled_ >> k) & 1) break;
+        }
+        cursor_ = k;
+        keys_.set(enabled_, cursor_, number ? "GO" : "LIST");
+        return true;
+    }
+    if (e.button != Button::E) return false;
+    if (hold) return post(Command(CommandId::NavSearch, int32_t{0}));
+    const int k = cursor_;
+    if (k < 0 || !((enabled_ >> k) & 1)) return true;
+    if (k == 0) return post(Command(CommandId::NavSearchKey, int32_t{8}));
+    if (k == 1) {
+        if (number) return post(Command(CommandId::NavSearchGo));
+        in_list_ = true;                     // LIST: the cursor to the results
+        focus_ = 0;
+        reset_focus_ = 0;
+        return true;
+    }
+    // The cursor stays on this key; place_cursor() moves it only if the
+    // next keys on offer leave it out.
+    return post(Command(CommandId::NavSearchKey, static_cast<int32_t>(KeyGrid::key_char(k))));
 }
 
 bool NavScreen::handle(const core::nav::InputEvent& e) {
     using core::nav::Button;
     using core::nav::Press;
+    using core::route::Phase;
+    using core::state::Command;
+    using core::state::CommandId;
+    if (view_ == View::Search) return handle_search(e);
     if (e.button != Button::E) return false;
-    // `logic` decides whether the fix is good enough, as for the lap line.
-    const int32_t which = focus_ < kActions ? focus_ : 0;
-    return post(core::state::Command(e.press == Press::Short
-                                         ? core::state::CommandId::NavDropWaypoint
-                                         : core::state::CommandId::NavClearWaypoint,
-                                     which));
+    const bool hold = e.press != Press::Short;
+    if (view_ == View::Guide) {
+        switch (static_cast<Phase>(phase_)) {
+            case Phase::AskFast:
+                return post(Command(hold ? CommandId::NavKeepFast : CommandId::NavAvoidFast));
+            case Phase::NoSlowRoute:
+                return post(Command(hold ? CommandId::NavCancel : CommandId::NavKeepFast));
+            default:
+                if (hold) return post(Command(CommandId::NavCancel));
+                want_map_ = !want_map_;      // the route view, or back to the turns
+                return true;
+        }
+    }
+    if (rows_ == 0) return false;
+    if (focus_ == 0) {
+        if (!hold) post(Command(CommandId::NavSearch, int32_t{1}));
+        return true;
+    }
+    if (focus_ == n_dest_ + 1)   // a setting, so a ConfigSet: `logic` is its one writer
+        return post(Command::config_set(kAvoidDirtKey, avoid_dirt_ ? 0.0f : 1.0f));
+    if (focus_ > n_dest_ + 1) return false;
+    const uint8_t i = static_cast<uint8_t>(focus_ - 1);
+    if (hold) {
+        // `logic` decides whether the fix is good enough, as for the lap line.
+        // Taken on any row, as the old NAV did: a long E nav got would
+        // open the overlay menu instead.
+        if (kind_[i] == core::state::NavDest::Waypoint)
+            post(Command(CommandId::NavDropWaypoint, static_cast<int32_t>(waypoint_[i])));
+        return true;
+    }
+    return post(Command(CommandId::NavGo, static_cast<int32_t>(i)));
 }
 
-void NavScreen::draw_background(Canvas& c) {
-    c.draw_text(kNavActions.x, static_cast<int16_t>(kNavActions.bottom() + 6),
-                "C/D pick  E here  hold E clear", theme::secondary, 1, Align::Left);
-}
-
-WidgetList NavScreen::widgets() { return WidgetList{list_, 7}; }
+WidgetList NavScreen::widgets() { return WidgetList{list_, n_list_}; }
 
 void TripScreen::enter(Canvas&) {
     odo_.set_bounds(kTripOdo.inset(8));    odo_.configure("ODOMETER", "mi", 1, 5);

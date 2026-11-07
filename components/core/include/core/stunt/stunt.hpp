@@ -43,9 +43,9 @@ enum Kind : uint8_t { None = 0, Wheelie = 1, Stoppie = 2, Looped = 3 };
 enum Landing : uint8_t { Plain = 0, Smooth = 1, Slammed = 2 };
 
 struct Config {
-    float    start_deg   = 10.0f;
+    float    start_deg   = 20.0f;
     float    end_deg     = 4.0f;
-    uint32_t confirm_ms  = 250;
+    uint32_t confirm_ms  = 400;
     uint32_t end_hold_ms = 120;     // under end_deg this long to be over
     float    min_mph     = 3.0f;
     uint32_t min_scored_ms = 500;

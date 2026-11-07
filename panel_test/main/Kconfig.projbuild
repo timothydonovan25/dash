@@ -24,7 +24,7 @@ menu "Panel test"
         config PANEL_TEST_BOARD_RESPIN
             bool "Respin pin map (bare S3 dev board)"
             help
-                docs/s3-parallel-respin.md §3. Needs a board that breaks
+                docs/history/s3-parallel-respin.md §3. Needs a board that breaks
                 out GPIO 3, 45, 46 and 48, such as a DevKitC-1.
         config PANEL_TEST_BOARD_FEATHER_RTFT
             bool "Adafruit Feather ESP32-S3 Reverse TFT"

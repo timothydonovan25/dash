@@ -42,6 +42,16 @@ enum class CommandId : uint8_t {
     TrackForget,      // delete the saved track this line belongs to (core::track)
     PerfReset,        // PERF's E: forget the performance timers' bests
     StuntReset,       // STUNT's E: a new session score (core::stunt)
+    CrashCancel,      // any button in the crash countdown; E once the SOS is out: "I'm OK"
+    CrashTest,        // console `crash test`: the countdown now, as if after a crash
+    NavGo,            // i: route to Frame::nav.dest[i] (core::route)
+    NavCancel,        // stop routing
+    NavAvoidFast,     // the 65 mph question: route without those roads
+    NavKeepFast,      // ... or keep them
+    NavSearch,        // i: 1 open "Where to?", 0 close it
+    NavSearchKey,     // i: a character of core::route::kAlphabet to add, or 8 to delete one
+    NavSearchPick,    // i: Frame::nav.hits[i]
+    NavSearchGo,      // go to the street picked, at the number typed (none: the street)
 };
 
 struct Command {

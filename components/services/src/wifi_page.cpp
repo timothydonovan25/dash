@@ -81,6 +81,18 @@ engine off. Then on the dash: DIAG &rarr; Update &rarr; Boot dev once.</div>
 </div>
 </div>
 
+<h2>Map</h2>
+<div class="card">
+<div class="row"><span>Routing map</span><span id="mapdate" class="dim">&hellip;</span></div>
+<div class="dim">map.rgf (the roads) or search.idx (addresses and places for
+Where to?), built by tools/routegraph (docs/navigation.md). Each replaces the
+one on the card once all of it has arrived.</div>
+<input type="file" id="mfile" accept=".rgf,.idx">
+<button id="mup" disabled>Upload</button>
+<progress id="mprog" value="0" max="100" hidden></progress>
+<div class="msg" id="mmsg"></div>
+</div>
+
 <h2>Settings</h2>
 <div class="card" id="settings"><span class="dim">&hellip;</span></div>
 
@@ -100,6 +112,7 @@ async function status(){
     $('run').textContent=s.running+' '+s.running_date+' ('+s.role+', '+s.slot+')';
     $('dev').textContent=s.other?s.other+' '+s.other_date:'empty';
     if(s.games&&$('gameswrap').hidden){$('gameswrap').hidden=false;games()}
+    const m=s.map;$('mapdate').textContent=m?'OSM '+String(m).replace(/(\d{4})(\d\d)(\d\d)/,'$1-$2-$3'):'none';
   }catch(e){}
 }
 async function games(){
@@ -132,6 +145,22 @@ $('gup').onclick=()=>{
   };
   x.onerror=()=>{m.className='msg bad';m.textContent='Connection lost.';$('gup').disabled=false};
   x.open('PUT','/games/'+encodeURIComponent(f.name));x.send(f);
+};
+$('mfile').onchange=()=>{$('mup').disabled=!$('mfile').files.length;$('mmsg').textContent=''};
+$('mup').onclick=()=>{
+  const f=$('mfile').files[0];if(!f)return;
+  const x=new XMLHttpRequest(),p=$('mprog'),m=$('mmsg');
+  $('mup').disabled=true;p.hidden=false;p.value=0;m.className='msg dim';m.textContent='Sending…';
+  x.upload.onprogress=e=>{if(e.lengthComputable)p.value=100*e.loaded/e.total;
+    if(e.loaded===e.total)m.textContent='Writing to the card…'};
+  x.onload=()=>{
+    let r={};try{r=JSON.parse(x.responseText)}catch(e){r={ok:false,error:x.responseText||x.status}}
+    m.className='msg '+(r.ok?'good':'bad');
+    m.textContent=r.ok?'On the card. NAV picks it up within a minute.':'Failed: '+r.error;
+    $('mup').disabled=false;status();
+  };
+  x.onerror=()=>{m.className='msg bad';m.textContent='Connection lost.';$('mup').disabled=false};
+  x.open('PUT',f.name.toLowerCase().endsWith('.idx')?'/route/search.idx':'/route/map.rgf');x.send(f);
 };
 async function logs(){
   const el=$('logs');

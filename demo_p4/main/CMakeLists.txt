@@ -12,8 +12,8 @@ idf_component_register(
          # Hardware-free real firmware code, reused by source rather than by
          # depending on the components/services or components/drivers IDF
          # components — those REQUIRE bsp/drivers, which are wired for the
-         # real board's S3 pin map and would have no business in a P4 build.
-         # See docs/bringup-p4-demo.md.
+         # bike board's pins and buses and have no business on the demo.
+         # See demo_p4/README.md.
          "../../components/services/src/queues.cpp"
          "../../components/services/src/logic_tick.cpp"
          # The production services this board can run as they are: the

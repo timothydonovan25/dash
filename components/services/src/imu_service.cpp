@@ -6,6 +6,7 @@
 #include "services/services.hpp"
 #include "core/attitude/attitude.hpp"
 #include "core/fixtime/fixtime.hpp"
+#include "core/crash/crash.hpp"
 #include "core/jump/jump.hpp"
 
 #include "bsp/pins.hpp"
@@ -65,6 +66,7 @@ void imu_task(void* arg) {
     core::attitude::Config   acfg;
     core::jump::Detector     jumps;
     core::jump::Config       jcfg;
+    core::crash::PeakHold    hits;     // a crash's hit, for logic (Attitude::hit_g)
     // Its own, so the slide check compares the gyro with when each fix was
     // taken rather than when it arrived. `logic` keeps another for laps.
     core::fixtime::Clock     fix_clock;
@@ -250,6 +252,7 @@ void imu_task(void* arg) {
                     const float mag = std::sqrt(a.ax_g * a.ax_g + a.ay_g * a.ay_g +
                                                 a.az_g * a.az_g);
                     jumps.update(mag, batch[i].t_ms, jcfg);
+                    hits.update(mag, batch[i].t_ms);
                 }
 
                 // A new fix, after the samples up to its arrival, so the
@@ -266,6 +269,8 @@ void imu_task(void* arg) {
                 core::state::Attitude out;
                 filter.publish_into(out);
                 jumps.publish_into(out);
+                out.hit_g = hits.g();
+                out.hit_ms = hits.ms();
                 out.imu_temp_c = imu_temp_c;
                 d.slots->attitude.publish(out);
                 woke_n += n;

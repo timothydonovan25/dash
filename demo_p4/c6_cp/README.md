@@ -1,3 +1,12 @@
+> **In this repo:** the C6 co-processor firmware for both boards — Espressif's
+> ESP-Hosted `slave` example, copied wholesale and configured for SDIO with
+> BLE and Wi-Fi (`sdkconfig.defaults`). Build with
+> `idf.py -C demo_p4/c6_cp set-target esp32c6 build`, put it in the P4's
+> `slave_fw` with `idf.py -p /dev/ttyACM0 c6-flash` (from the root or
+> `demo_p4/`), and the dash pushes it to the C6 over SDIO
+> (`docs/features.md` §24.1). A C6 with blank flash needs
+> `docs/c6-uart-flash.md` first. Below is Espressif's own README.
+
 # ESP-Hosted-MCU Slave example
 
 This document details the **ESP-Hosted MCU Slave Example**, demonstrating the slave firmware that provides Wi-Fi and Bluetooth connectivity to host MCUs via ESP32 series co-processors.

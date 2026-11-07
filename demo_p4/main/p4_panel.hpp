@@ -1,7 +1,7 @@
 // The demo board's panel: an ST7701-family MIPI-DSI IPS panel, portrait
 // 480x800 native, physically rotated 90 degrees into a landscape case.
 //
-// UNPROVEN — see docs/bringup-p4-demo.md. This dropship board has no
+// UNPROVEN — see demo_p4/README.md. This dropship board has no
 // published schematic, so the controller IC, its init sequence, and every
 // pin in p4_pins.hpp are a best guess for this board class rather than a
 // verified fact the way components/bsp/pins.hpp is for the real dash.

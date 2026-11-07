@@ -11,6 +11,7 @@
 #include "core/fusion/speed.hpp"
 #include "core/gearcal/gearcal.hpp"
 #include "services/services.hpp"
+#include "core/crash/crash.hpp"
 #include "core/delta/delta.hpp"
 #include "core/geo/geo.hpp"
 #include "core/lap/lap.hpp"
@@ -18,6 +19,8 @@
 #include "core/fixtime/fixtime.hpp"
 #include "core/hr/hr.hpp"
 #include "core/perf/perf.hpp"
+#include "core/route/navigator.hpp"
+#include "core/route/pace.hpp"
 #include "core/session/session.hpp"
 #include "core/stunt/stunt.hpp"
 #include "core/track/track.hpp"
@@ -79,6 +82,47 @@ struct LogicState {
     core::state::Waypoints waypoints;
     bool start_checked = false;
 
+    // Turn-by-turn (core::route, services::RouteMailbox). The routes
+    // themselves are the mailbox's, in PSRAM; this is the state machine and
+    // what the card said last.
+    core::route::Navigator nav;
+    core::route::Progress  nav_progress;
+    core::route::PaceNote  pace[core::state::Nav::kMaxPace];   // publish_nav's, here not on its stack
+    bool     map_asked = false;
+    uint32_t map_asked_ms = 0;
+    uint32_t map_date = 0;
+    bool     dests_asked = false;
+    uint32_t dests_asked_ms = 0;
+    core::route::Dest dests[RouteMailbox::kMaxDests];
+    uint8_t  n_dests = 0;
+    // The list as last published: NavGo's index is into this.
+    core::state::NavDest nav_list[core::state::Nav::kMaxDest];
+    uint8_t  nav_list_n = 0;
+    char     nav_target[16] = {};
+    bool     fast_presumed = false;   // the adopted route's first 65 mph road has no sign
+    bool     route_traced = false;    // RouteTrace holds a route
+    // "Where to?" (core/route/search.hpp): what has been typed, and what
+    // the card said about it.
+    uint8_t  search = core::state::Nav::SearchOff;
+    char     query[core::route::kKeyLen + 1] = {};
+    bool     search_want = false;         // the query changed: ask the card
+    bool     search_ok = false;
+    bool     searching = false;
+    uint64_t search_next = 0;
+    uint32_t search_matches = 0;
+    core::route::SearchHit hits[RouteMailbox::kMaxHits];
+    uint8_t  n_hits = 0;
+    core::route::SearchHit picked;        // the street a number is for
+    char     digits[8] = {};
+    bool     house_want = false;
+    uint16_t usb_refused_seq = 0;         // USB drive asked for while moving
+    // A place found and gone to: to the card's recent list (route/recent.csv).
+    core::route::Dest recent{};
+    bool     recent_want = false;
+    uint32_t phone_seq = 0;           // the last PhoneDest acted on
+    core::state::NavDest phone_dest;  // and where it was, for the picker
+    bool     have_phone_dest = false;
+
     // Which ticks get a blackbox row. The rate is a setting, so this is not
     // simply every tick.
     core::log::Decimator log_gate;
@@ -120,6 +164,8 @@ struct LogicState {
     core::stunt::Scorer stunt;
     // Heart-rate recovery when parked after a ride (STAT -> HEART).
     core::hr::Recovery  hr_recovery;
+    // A crash, its countdown and the SOS (core::crash).
+    core::crash::Detector crash;
 
     // Gear calibration: the guided run, and the learner that runs the rest
     // of the time (core/gearcal). `logic` is the one writer of both and of

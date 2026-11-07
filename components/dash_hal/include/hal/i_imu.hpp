@@ -1,9 +1,10 @@
 // The IMU: six numbers and a temperature.
 //
 // Axis convention is core/attitude's, and satisfying it is this driver's
-// job: x forward, y right, z up, in the bike's frame. Upright at rest reads
-// az = +1 g. Leaning right puts a positive number on ay. Get this wrong and
-// the lean gauge is smooth, confident and backwards.
+// job: x forward, y LEFT, z up, right-handed, in the bike's frame. Upright at
+// rest reads az = +1 g. Leaning right puts a positive number on ay; gz > 0 is
+// yawing left (attitude.hpp has the full table). Get this wrong and the lean
+// gauge is smooth, confident and backwards.
 #pragma once
 #include <cstddef>
 #include <cstdint>

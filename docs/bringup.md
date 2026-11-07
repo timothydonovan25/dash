@@ -13,12 +13,18 @@ Every driver was written against a datasheet and a netlist, which is not
 the same as correct. The places that can only be settled here are marked
 `BRINGUP` in the source and collected in §10 below.
 
+**Sections:** 0 before power · 1 rails · 2 boot (chip rev, watchdog, boot
+time) · 3 panel · 4 DIAG Sensors/Bus · 5 pod, neutral · 6 IMU · 7 GPS ·
+8 tach, wheels, lamps · 8.1 power-fail · 9 SD, then the radio · 9.1 OTA
+slots · 10 BRINGUP markers · 11 `sdkconfig` traps. Elsewhere:
+`c6-uart-flash.md` (a blank C6), `console.md` (testing over USB).
+
 **The first board arrived on 2026-10-28.** Where it has got to:
 
 | § | Status | Notes |
 |---|---|---|
 | 0–1 Before power, rails | Done | Rails in spec |
-| 2 Boots | Done | P4 silicon **v3.2**, so the build is for v3.1+, at 400 MHz. Boot time and the watchdog test not done |
+| 2 Boots | Done | P4 silicon **v3.2**, so the build is for v3.1+, at 400 MHz. Boot time and the watchdog test not done. **2026-11-06: the ROM SHA boot loop seen on the demo board (`components/p4_restart_fix`) hit this board too**: during a scripted Where to? session the dash reset, left the core-dump partition erased, then looped `rst:0x7 HP_SYS_HP_WDT_RESET` / Store/AMO fault at MTVAL 0x50091000 until power-cycled. The first reset's cause was not captured. Fix in 2.6 (2026-11-06): the core dump's ROM `ets_sha_disable()` is a no-op and SHA is readied around the dump write; console `panic` three times since, each saved its dump (checksum correct at boot) and booted. The first reset left no dump, so it may not have been a panic at all (brownout, hardware watchdog): not explained |
 | 3 Panel | Done (HT035) | IPS init, mirrored on both axes, 25 MHz write clock. The VIEWE UEED035HV probe is not run |
 | 4 DIAG → Sensors, Bus | Not done | |
 | 5 Pod, neutral | Neutral done; pod on the demo only | Neutral works on the bike. The pod works on the demo; its GH1.25 connector for this board is not fitted yet. Until it is, `tools/pod_keys.py` presses the buttons from the laptop over USB (§5) |
@@ -27,7 +33,9 @@ the same as correct. The places that can only be settled here are marked
 | 8 Tach, wheels, lamps | Not working / not done | Tach wrap fitted, **no signal** (the filter, §8). Wheel sensors not fitted. Backlight lights, so the PCA9955B answers; the lamps are untested. On the first rides (s156, s157, 2026-10-29) the speedo read 0 while GPS saw up to 50 mph: a **fusion deadlock**, fixed in 1.60 (`docs/fusion.md`, replayed over both rides; not yet ridden). The absent wheel sensors read 0 and are always offered and accepted, so the filter grows sure of 0, gates out the first fix at ~20 mph, and GPS goes suspect; the all-suspect restart never fires because the wheels are never suspect. The board was also not held rigidly (up to 15 g and 1100 dps; gravity 60° apart between parked spells), so lean and pitch from those rides are meaningless |
 | 8.1 Power-fail | Not done | |
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
-| 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried. The Wi-Fi hotspot comes up (2026-11-01: 20 on/off cycles from CONFIG, internal RAM back to 301 kB each time, 9 kB kept by the first start; off on 10 idle minutes); no phone has joined it or uploaded |
+| — Screen over USB, SD as USB drive (2.6) | Bench: works | Console `screen` (tools/dash_screen.py, pod_keys.py --screen): a whole frame in 0.22 s. **USB drive** (CONFIG → SD card → USB drive, console `usb drive`): the laptop mounts the card ("Dash SD card") and reads ~620 KB/s. Found on the bike: (1) a port powered off by the laptop (udisksctl power-off) suspends the bus instead of disconnecting, and the dash stayed in drive mode; suspend now counts as let go (seen working). (2) OTG's pads stayed on when it went back to PHY 1, the panel's D6/D7: now switched off first. (3) With `auto_mount_off`, esp_tinyusb ignores the laptop's Eject and says nothing; with it on, an Eject is seen and the console comes back 5 s later. (4) That console came back enumerated but silent (the USB serial driver does not survive its pads going off and on), so the dash now restarts after a drive session. **Verified 2026-11-05:** drive on, the laptop mounts and reads it, Eject, and 3.7 s later the dash has rebooted with the console, its card (new log session) and the phone's BLE link back. **Screen garbled while flashing** (top-left quarter, the moving widgets showing through, clears when the new image boots): the P4 sits in the ROM loader ~25 s with the panel's CS and WR undriven, and the panel takes noise as writes. Harmless; a pull-up on CS (GPIO50) would stop it (board item) |
+| — Routing from the card (2.5) | Bench: routes | `route bench` (USB console): Fayetteville → Little Rock, 181 mi, 393 nodes, 906 4 kB block reads: **4.5 s cold, 2.8 s warm**. It was 28.3 s with an `fopen` per read; the driver now keeps read files open (`SdCard::Reader`) and FATFS fast seek is on (`main.cpp` refuses a stale sdkconfig). **Phone → bike works** (2026-11-05): an address sent from the app shows up and the dash routes to it. **Where to? works on the bike** (2026-11-05, with `route/search.idx` on the card): 1-3-5-1-1-R-Y-A-N lists 13511 Ryan Rd, Pea Ridge first and routes there. Before the index was on the card every key was grey and C/D did nothing (the screen now says "No search index on card"). 2026-11-06 (2.6): Where to? scripted over USB for a town, a street, a house number and a place, each routed (navigation §9); a route used to raise LOG STOPPED: it starved the logger of the card (fixed: `storage` at priority 1) and stopped the storage loop's SD keepalive (fixed: the route's reads count as one); the 65 mph prompt and its "avoid" reroute (4.3 s) checked on the bike |
+| 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (`c6-uart-flash.md`). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried. The Wi-Fi hotspot comes up (2026-11-01: 20 on/off cycles from CONFIG, internal RAM back to 301 kB each time, 9 kB kept by the first start; off on 10 idle minutes); no phone has joined it or uploaded. Crash SOS (features §24.3) ran end to end on 2026-11-03: Test crash → countdown → `X` → the Android app texted → `K` → SOS TEXTED → "I'm OK" |
 | 9.1 OTA slots | Steps 1, 4, 5, 6 done | 2026-11-01: `flash_dev.py` to ota_1 with stable untouched; Boot dev once from DIAG → Update ran ota_1 as dev; a reset, and a panic in dev (console `panic`), both came back stable on ota_0 with no input; the panic's core dump decoded with `idf.py coredump-info` (needs GDB on PATH, Build). Not done: install from SD, the refusals, Promote, a card pulled mid-install |
 
 **The order matters more than the speed.** Each session below assumes the
@@ -53,7 +61,7 @@ air); `main.cpp` will not build with a stale `sdkconfig` that says 0x8000.
 Secure boot and flash encryption stay off: see `sdkconfig.defaults`.
 
 **Rollback has to be in the first bootloader.** Stable/dev firmware
-(architecture §11.7) depends on `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, and
+(`radio-and-updates.md` §11.7) depends on `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, and
 the bootloader is never updated over the air. `main.cpp` refuses to build
 without it; if it errors, delete `sdkconfig` and rebuild (§11).
 
@@ -122,7 +130,7 @@ starting (`ctrl`, `imu`, `gnss`, `logic`, `input` on core 0; `render`,
 `logger`, `storage`, `keeper`, `power`, `ota`, `ble`, `wifi` on core 1),
 then `running`.
 `wifi` is silent until the hotspot is turned on; when it is, check its
-`up: internal free` line before uploading anything (architecture §11.7.1).
+`up: internal free` line before uploading anything (`radio-and-updates.md` §11.7.1).
 `ota: running <version> from ota_0, stable; other slot empty` says the
 rollback bookkeeping is reading the bootloader's state. If the config
 table is malformed it says so here rather than weeks later as a setting
@@ -445,10 +453,9 @@ and you want the diag screens working before you touch it.
 **First board (2026-10-28):** the tach wrap was fitted and gave **no
 signal**; the R34/C19 filter below is the suspect, a hardware fix still to
 make. No wheel sensors were fitted. The backlight lights, so the PCA9955B
-answers on I2C1; the lamps are untested. On that ride the speedo read 0
-with 9–13 satellites; a host test (`test_fusion`) shows fusion following
-GPS with no wheels, so the cause is elsewhere and the logs on the card
-are the next thing to read.
+answers on I2C1; the lamps are untested. On those rides the speedo read 0
+with 9–13 satellites: the fusion deadlock in the status table, fixed in
+1.60 (`fusion.md`) and replayed over both rides, not yet ridden.
 
 **Scope the tach before trusting the reading.** The pickup is an
 inductive wrap on the spark plug lead, 5–10 V at most. It goes through
@@ -548,83 +555,13 @@ Do BLE **last**, and after the real-time path is known good — so that if
 the shift-light timing changes, the radio is the only suspect. The P4 has
 no radio of its own: BLE runs on the module's ESP32-C6 over its internal
 SDIO via ESP-Hosted, as `demo_p4/` does on the demo board
-(`bringup-p4-demo.md`). The C6 is a MINI-1U with an IPEX connector, so it
+(`../demo_p4/README.md`). The C6 is a MINI-1U with an IPEX connector, so it
 **needs an external antenna** fitted before range means anything.
 
-The C6 has its own reset (GPIO54, U16-74) and boot (U16-18, R1) lines.
-Its UART is on test pads **H1 = U0RXD** (U16-16, into the C6) and
-**H3 = U0TXD** (U16-17, out of it); its boot pin has no pad, so forcing it
-into download mode means clipping onto R1.
-
-**Found on the first board (2026-10-28): the C6 does not speak ESP-Hosted.**
-`sdmmc_card_init` succeeds and the very next CCCR read times out
-(`sdio_card_fn_init failed`, `0x107`), the same at 40 MHz 4-bit and 5 MHz
-1-bit, with the demo's identical ESP-Hosted settings. So it is the
-module's C6, not the link, and the SDIO push from `slave_fw` cannot reach
-it. **Its flash was blank** (2026-10-31: the 4 MB read back held 24 bytes
-that were not 0xFF, no bootloader, no partition table): on its UART it
-printed `invalid header: 0xffffffff` and watchdog-reset (`TG0_WDT_HPSYS`,
-`LP_WDT_SYS`) several times a second. Expect the same on the next module.
-Flash the C6 over its own UART once:
-
-With an FTDI TTL-232R-3V3: **black** GND, **yellow** its RXD, **orange**
-its TXD. **Red is 5 V: leave it unconnected.** It ends up as
-`/dev/ttyUSB0`. Source ESP-IDF (`export.sh`) and run from the repo root.
-`tools/c6_uart.py` does steps 1, 4, 6 and 7 (`listen`, `wait`, `backup`,
-`flash`); `flash` refuses to run until a 4 MB backup exists, and
-`inspect` reads the backup offline: bootloader, partition table, each app's
-project, version (ESP-Hosted's own, for a `network_adapter`) and IDF, and
-whether it was built for SDIO or SPI.
-
-1. **Listen.** Board off. Black to GND, **yellow to H3** (the C6's TX).
-   Open `idf.py -C demo_p4/c6_cp -p /dev/ttyUSB0 monitor --no-reset`, then
-   power the board. Do not open the P4's `/dev/ttyACM0` meanwhile: that
-   resets the P4, which resets the C6. The text is the first evidence of
-   what Guition put on it; keep it.
-2. **Wire for flashing.** **Orange to H1** (the C6's RX).
-3. **Find R1's IO9 end.** Board off, meter on continuity: the end of R1
-   that beeps to a 3.3 V point (VCC) is the wrong one; the other is IO9.
-   Ground the IO9 end **through a 1 kΩ resistor**, not a bare wire: it
-   still reads low (0.3 V against the 10 kΩ pull-up), and the wrong end
-   would only pass 3.3 mA instead of shorting VCC.
-4. **Download mode.** The C6's net names: **C6_BOOT is IO9** (on R1),
-   **C6_RST is EN** (on R22, 10 kΩ pull-up and 1 µF). IO8 has no net; the
-   module holds it high. With the 1 kΩ on C6_BOOT (it reads ~0.3 V),
-   **tap C6_RST's signal end of R22 to GND** for half a second. The C6's
-   own watchdog resets do not re-read the straps, so a blank C6 cycling
-   through them stays at `boot:0xc (SPI_FAST_FLASH_BOOT)` however long you
-   wait; only EN (or power-on) brings `rst:0x1 (POWERON),boot:0x4
-   (DOWNLOAD(USB/UART0/SDIO_FEI_FEO))` and `waiting for download`. Only tap:
-   the P4 drives GPIO54 too. Check with
-   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset chip-id`.
-   `boot:` on the C6's UART is the strap reading: 0xc is both high,
-   0x4 is IO9 low.
-5. **Park the P4.** On the first board the P4 kept resetting the C6
-   through GPIO54, a pair of power-on resets every ~14 s, and each one
-   killed a long esptool read part way (`No more data to read from the
-   serial port`). Put the P4 in its own ROM bootloader, where GPIO54 is
-   left alone:
-   `python -m esptool --chip esp32p4 -p /dev/ttyACM0 --before default-reset --after no-reset chip-id`.
-   Listen to the C6's UART for 20 s: no new `ESP-ROM` banner means
-   nothing is resetting it.
-6. **Back up what is there**, 4 MB. At 115200 it took 6.5 minutes;
-   460800 failed once, before the P4 was parked, so which of the two was
-   to blame is not known:
-   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 115200 --before no-reset --after no-reset read-flash 0 0x400000 c6_factory_backup.bin`
-   (`tools/c6_uart.py backup` does the same at 460800).
-   `tools/c6_uart.py inspect` says whether it holds anything.
-7. **Flash ESP-Hosted** (`demo_p4/c6_cp`, 2.12.8, Wi-Fi and BLE; build it
-   first with `idf.py -C demo_p4/c6_cp build`), about 70 s at 115200:
-   `cd demo_p4/c6_cp/build && python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 115200 --before no-reset --after no-reset write-flash "@flash_args"`
-8. **Run it.** Unclip the 1 kΩ from R1, unplug and replug the board (the
-   P4 is parked), and read the P4's console. Expect `transport: Identified
-   slave [esp32c6]` and the C6 reporting 2.12.8, then `ble: advertising`.
-   The yellow wire can stay on to watch the C6's side at the same time.
-   First board, 2026-10-31: all of that, SDIO at 40 MHz 4-bit, and the
-   P4 booted once with no loop.
-9. **Then `idf.py -p /dev/ttyACM0 c6-flash`**, so `slave_fw` holds the same
-   image and later C6 updates go over SDIO, as on the demo. The boot log
-   then says `c6_fw: C6 runs 2.12.8 #…, slave_fw has 2.12.8 #…: current`.
+The C6 has its own reset (GPIO54, U16-74) and boot (U16-18, R1) lines and
+its UART on test pads H1/H3. **The first board's C6 had blank flash** and
+could not be reached over SDIO; `c6-uart-flash.md` is how it was flashed
+over its own UART (2026-10-31). Expect the same on the next module.
 
 The `ble` service is built in (`services/src/ble_service.cpp`) and starts
 last at boot. On the first board (2026-10-31) the Android app bonded and its
@@ -671,7 +608,7 @@ Feed lines arrived (`phone connected, waiting for encryption`, then
    log line before it says which.
 4. **Poke it from nRF Connect** before trusting the phone app. Connect,
    and accept the pairing request: Feed needs a bonded, encrypted link
-   (architecture §11.3), and a write before that is refused. DIAG → Radio
+   (`radio-and-updates.md` §11.3), and a write before that is refused. DIAG → Radio
    should say Phone **bonded**, Bonds **1**. Find service `6e5f0001-…`,
    write the text `T hello` to `6e5f0002-…`. The title appears on SPEED
    and MEDIA, and DIAG → Radio's last tag reads `T`. Disconnect: the title
@@ -684,9 +621,10 @@ Feed lines arrived (`phone connected, waiting for encryption`, then
    again.
 6. **NimBLE runs on FreeRTOS timers**, not esp_timer
    (`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, so its timeouts are not above
-   `ctrl` on core 0). No board has run NimBLE this way. Try it on the demo
-   first: bond, disconnect, walk out of range and back, reconnect without
-   pairing again, and let the 30 s encrypt deadline expire on a phone that
+   `ctrl` on core 0), with the link-time mend for IDF v6.0.2's callouts
+   (features §24.1). Both boards have bonded this way. Still to try on the
+   bike: disconnect, walk out of range and back, reconnect without pairing
+   again, and let the 30 s encrypt deadline expire on a phone that
    connects and never pairs. Any stall here is the FreeRTOS timer task
    (priority 1) not getting time.
 7. **Re-measure tach to lamp with a phone connected and streaming**, on
@@ -719,8 +657,8 @@ the flash calls are not.
 
 1. **USB flash**, and confirm `ota: ... stable`. DIAG → Update shows the
    version, `ota_0`, and Other slot `empty`.
-2. **Install from SD.** Build a second image with a visible change (tag it:
-   the version string is `git describe`), copy `build/dash.bin` to the
+2. **Install from SD.** Build a second image with a visible change (bump
+   `firmware.txt`: the version string comes from it), copy `build/dash.bin` to the
    card as `update/dash.bin`, then Install from SD, parked. Expect a
    percentage, then "installed". Other slot shows the new version.
 3. **Refusals.** Spin the rear wheel (or set rpm) and try again: "failed:
@@ -750,16 +688,23 @@ the flash calls are not.
 
 ## 10. Every BRINGUP marker, in one place
 
+`grep -rn BRINGUP components main` finds them; line numbers drift, so this
+table names the file and the thing.
+
 | Where | What |
 |---|---|
-| `icm42688p.cpp:202` | IMU axis mapping, checked on the bench only; the riding check (§6 step 7) is to do |
-| `icm42688p.cpp:137` | IMU data-ready interrupt configuration, from the register map only |
-| `engine_sense.cpp:133` | Wheel-Hall debounce window, 200 µs, unconfirmed |
-| `bsp/pins.hpp:99` | `kTachRefractoryUs` 1500 µs — "tune on the bench" |
-| `ili9488.cpp:281` | A strip's head relies on the panel continuing a 0x2C write with 0x3C: wrong colours at a strip's left edge mean it does not |
-| `drivers.hpp:10` | The general warning: what has run is in the status table at the top |
+| `icm42688p.cpp`, axis mapping | Checked on the bench only; the riding check (§6 step 7) is to do |
+| `icm42688p.cpp`, data-ready interrupt | Configuration from the register map only |
+| `engine_sense.cpp`, wheel Halls | Debounce window, 200 µs, unconfirmed |
+| `bsp/pins.hpp` `kTachRefractoryUs` | 1500 µs — "tune on the bench" |
+| `ili9488.cpp`, strip head | Relies on the panel continuing a 0x2C write with 0x3C: wrong colours at a strip's left edge mean it does not |
+| `render_service.cpp` `overhead_px` | The per-transfer overhead in `ui::wire` is a guess until scoped |
+| `core/shift/shift.hpp` | The real tach's jitter against the hysteresis |
+| `core/config/config.hpp` | Revs per spark: compare against a known idle |
+| `core/attitude/attitude.hpp` | Steering geometry (rake, wheelbase) and the slide gate: guesses, tune from a log |
+| `drivers.hpp` | The general warning: what has run is in the status table at the top |
 | `ble_service.cpp` `kHostedPrio` | ESP-Hosted's tasks lowered from 23 to 8. Check SDIO keeps up and `ctrl` is unaffected |
-| `ota_service.cpp` | Rollback, install and promote: never run against the real bootloader (§9.1) |
+| `ota_service.cpp` | Rollback and boot-dev-once have run against the real bootloader; install from SD, the refusals and Promote have not (§9.1) |
 | `icm42688p.cpp:221` `chip_ts` | Whether the FIFO carries the part's timestamp: read `Hdr` (§6) |
 | `bsp/pins.hpp` `kGpsRxFullBytes` | UART1 hands on bytes after 8 / 2 idle characters: checksums and `ctrl` overruns (§7) |
 | `services/watchdog.cpp` | Task-watchdog panic: trigger it once, time the reboot (§2) |
@@ -784,6 +729,14 @@ change something in `sdkconfig.defaults`, either delete `sdkconfig` and
 let it regenerate, or set it in `sdkconfig` too — and check it read back.
 The chip-revision setting in §2 is exactly this kind of change.
 
+**`main.cpp` stops a stale build with an `#error`** for the settings this
+has mattered for, naming the one to fix: rollback, the partition-table
+offset, secure boot and flash encryption off, `CONFIG_ESP_TASK_WDT_PANIC`,
+`CONFIG_BT_NIMBLE_USE_ESP_TIMER=n`, and since 1.61
+`CONFIG_ESP_IPC_TASK_STACK_SIZE=1536` and
+`CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE` off. Delete `sdkconfig`
+and rebuild (or set the one named). `sdkconfig` is per machine, not in git.
+
 Beware also that some Kconfig symbols are **derived**:
 `CONFIG_BT_CTRL_PINNED_TO_CORE` is an int computed from the
 `..._TO_CORE_0` / `..._TO_CORE_1` choice, so editing the int by hand looks
@@ -794,61 +747,6 @@ build. Set the choice.
 
 ## 12. Testing from the laptop, hands off
 
-What 2026-10-31/11-01 used to test the first board with nobody at it. All of
-it is the USB console (`main/serial_buttons.cpp`) plus esptool.
-
-**Opening the port without resetting the board.** pyserial lowers DTR before
-RTS, and DTR low with RTS high is the USB-Serial-JTAG's reset. Open with both
-`True`, then set `rts = False` before `dtr = False` (`tools/pod_keys.py`).
-The reverse order (DTR low, then RTS low) is how to reset it on purpose.
-
-**Console commands.** `btn A`..`btn E`, `long A`..`long E` (the pod, after
-debounce); `c6 hold` / `c6 release` (the C6 in reset: what a dead radio
-does); `panic` (abort(): the core dump, the reboot, dev falling back to
-stable). Send a bare newline first: half a line from an earlier session is
-dropped after 500 ms, but only if nothing follows it sooner.
-
-**Menu routes** (from anywhere; `long A` is CRUISE screen 0; presses 350 ms
-apart; the sim shows the same screens, `simshot`-style, if one stops working):
-
-| What | Presses |
-|---|---|
-| Wi-Fi on/off | `long A`, A×4, D×13, E, E — then E again toggles |
-| Eject card | `long A`, A×4, D×12, E, E |
-| DIAG → Update | `long A`, A×3, D×7, E |
-| Boot dev once | then D, E |
-
-**Before fuzzing the menus, back up NVS** (settings, the phone's bond, trip,
-waypoints): `esptool read-flash 0x11000 0x10000 nvs.bin` twice and compare;
-afterwards `esptool write-flash 0x11000 nvs.bin` and read it back. Random
-presses reach Forget phone, Calibrate level, the trip and gear resets.
-Tracks need a fix, so indoors they are safe. **They reach the slots too:**
-Boot dev once and Promote to stable each act on one short E, no confirmation,
-and a 20 min run did both (dev booted at 6 min, promoted at 14), leaving the
-older dev image as stable. Afterwards check the boot line `ota: running ...
-from ota_N` and, if it moved, `idf.py flash` (it rewrites otadata, so stable
-is `ota_0` again). Whether a rider should get a confirm step there is open.
-
-**The console's 10 s summary** (`keeper`) is what a soak watches: `heap`
-(internal free; a leak is it falling), `imu` (most samples found waiting at
-one wake, and how many wakes found over 64 and over 100; the FIFO holds ~128), `timing` (ctrl late ticks, render rate),
-`gnss`, `power`, and `logger`'s bytes, slowest write, and rows each ring
-dropped since boot (blackbox/imu/tach/det/evt). At boot `sd` gives the card's
-size and free space, and `logger` the session picked and how long the scan took.
-
-**What it found on the first board:** 19 min and 2337 random presses, no
-reset; Wi-Fi 20 on/off cycles with RAM back each time; Eject flushing ~20 kB
-the logger used to drop; a lost C6 no longer rebooting the dash; dev boot,
-reset and panic all falling back to stable; a 40 min soak on 1.61 with the heap flat at 306 kB free, 0 late ctrl ticks, render at 120 Hz, 76 MB to the card with 0 errors, the IMU at most 77 samples behind.
-Then 2 h clean (heap flat, ctrl late 0), but the IMU reached 116 behind after
-~1.4 h, a card write holding SPI2 near the FIFO's ~680 ms. An A/B of the raw
-IMU log's block, one hour each on the same card: 16 kB peaked at 144 (drained
-over several reads, each waiting out SD commands, so not all queued at once),
-6 wakes over 64, 4 over 100, slowest write 925 ms; 8 kB peaked at 83, 4 over
-64, none over 100, slowest 742 ms, the same bytes written. 8 kB it is, but
-a second hour at 8 kB peaked at 130 (3 over 64, 1 over 100, slowest 788 ms,
-no ring dropped a row): it makes the long holds rarer, not impossible. The
-FIFO is stream mode (`FIFO_CONFIG` 0x40): a full one drops whole old packets,
-and samples are dated from the newest, so an overflow is a gap in `_imu`, not
-scrambled data. One run each; the card's own garbage collection still sets
-the worst case.
+Moved to `console.md`: opening the port without a reset, the console
+commands, `pod_keys.py`, menu routes, backing up NVS before fuzzing, the
+5 s status block, and what the soaks found.

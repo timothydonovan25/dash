@@ -42,7 +42,7 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # BLE, over the ESP32-C6 co-processor: the P4 itself has no radio, so
 # NimBLE runs here as the "host" and the actual controller runs on the C6,
 # reached over SDIO via ESP-Hosted's VHCI transport. See ble_media.cpp,
-# demo_p4/c6_cp/ (the C6's own firmware), and docs/bringup-p4-demo.md.
+# demo_p4/c6_cp/ (the C6's own firmware), and demo_p4/README.md.
 #
 # The top-level gate (a plain menuconfig bool, off by default). The whole
 # "ESP-Hosted config" submenu below — interface, SDIO pins, CP target —
@@ -63,7 +63,7 @@ CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
 # above experience — the choice defaults in this component don't reliably
 # favor this board's actual chips. CLK18/CMD19/D0-3=14/15/16/17, C6
 # reset=GPIO54 active-HIGH: confirmed against this exact board's published
-# field notes (docs/bringup-p4-demo.md), and they also happen to be this
+# field notes (demo_p4/README.md), and they also happen to be this
 # component's own generic-ESP32P4 SDIO defaults once slot 1 is selected —
 # but selected explicitly, not trusted to fall out of a choice default.
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
