@@ -58,7 +58,8 @@ PARTS = [
     ("D9 SMB", 69.98, 16.64, 90, 5.3, 3.6, 2.5, False),
 ]
 KEEP = 1.0           # air the tray keeps around every part, each way
-WIRE_WINDOW = (27.0, 68.5, 21.5)   # x0, x1, y1: one opening over U11 and CN1-CN3, no slivers between
+WIRE_WINDOW = (27.0, 105.0, 21.5)  # x0, x1, y1: the bottom edge is open between the cross bars: wires
+# from U11 and CN1-CN3 leave freely and F1 can be pulled; the screwed PCB closes the U
 BALL_HEAD_D, BALL_HEAD_L = 10.0, 5.0   # MEASURE: ball head below the tray's plate, toward the board
 
 # ---- panel: MEASURE it; the board has no outline for it ------------------------
@@ -73,7 +74,7 @@ PILOT_M25 = 2.2      # M2.5 self-tapping pilot (PETG), screws in from the rider 
 DAMP = [(22.0, 30.0), (22.0, 64.0), (112.0, 30.0), (112.0, 64.0)]  # clear of parts > 6 mm
 # Balls bought 2026-11-07: FOYTOKI "heavy duty" 10-pack. The listing's only size is
 # 9 x 5 x 5 mm, which is not a gimbal ball: measure one before printing.
-DAMP_HOLE = 6.5      # MEASURE: the hole your balls snap into
+DAMP_HOLE = 3.25     # the hole the balls snap into; 6.5 printed far too loose (2026-11-07)
 DAMP_GAP = 10.0      # MEASURE: plate face to plate face across a seated ball
 DAMP_PLATE = 2.0     # plate thickness at the ball hole (the ball's neck length)
 DAMP_CB = 12.0       # counterbore that thins a plate down to DAMP_PLATE
@@ -94,7 +95,7 @@ ANT_BODY_D, ANT_BODY_L = 10.0, 12.0   # MEASURE: bulkhead body and crimp below t
 # edge, tilted up so the top rows stay visible from above, and two 45-degree cheeks that
 # brace it. The tray prints back face down: the visor is a wall growing up, the cheeks'
 # lower edges rise at 45 degrees, no supports. Tilt the dash on the bar to look at it square.
-HOOD_L = 22.0        # visor length from the board's face toward the rider
+HOOD_L = 30.0        # visor length from the board's face toward the rider
 HOOD_TILT = 20.0     # degrees up from the screen's normal
 HOOD_T = 2.0         # wall thickness
 HOOD_CHEEK = 16.0    # cheek reach down the sides: stops above FPC1's fold round the right edge (y < 61)
