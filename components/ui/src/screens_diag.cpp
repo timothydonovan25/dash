@@ -556,7 +556,44 @@ void BusScreen::update(const Frame& f) {
     };
 
     table_.set_row(0, "SPI2 imu", state_text(f.health[Dev::Imu].state));
-    table_.set_row(1, "I2C1 leds",state_text(f.health[Dev::LedDriver].state));
+    // The chip answering is one thing; its own flags say whether a lamp or a
+    // backlight string is open or shorted, or it has shut down hot. Backlight
+    // shorts are left out: on a 5 V anode they may read on a healthy string.
+    {
+        const core::shift::LedFaults& lf = f.engine.led_faults;
+        const bool faulted = lf.overtemp || lf.lamp_open || lf.lamp_short || lf.backlight_open;
+        if (f.health[Dev::LedDriver].state != core::state::DevState::Ok || !faulted) {
+            table_.set_row(1, "I2C1 leds", state_text(f.health[Dev::LedDriver].state));
+        } else if (lf.overtemp) {
+            table_.set_row(1, "I2C1 leds", "OVERTEMP");
+        } else {
+            // "open 1+4 short 2 BL 3": lamps from 1, then backlight strings open.
+            size_t at = 0;
+            v[0] = '\0';
+            // snprintf returns what it would have written: clamp, so a full
+            // buffer truncates instead of running `at` past the end.
+            const auto add = [&](const char* a, const char* b) {
+                const int w = std::snprintf(v + at, sizeof v - at, "%s%s", a, b);
+                if (w > 0) at += static_cast<size_t>(w);
+                if (at >= sizeof v) at = sizeof v - 1;
+            };
+            const auto put = [&](const char* label, uint8_t m) {
+                if (!m) return;
+                add(at ? " " : "", label);
+                bool first = true;
+                for (int n = 0; n < 8; ++n) {
+                    if (!((m >> n) & 1u)) continue;
+                    const char digit[2] = {static_cast<char>('1' + n), '\0'};
+                    add(first ? " " : "+", digit);
+                    first = false;
+                }
+            };
+            put("open", lf.lamp_open);
+            put("short", lf.lamp_short);
+            put("BL", lf.backlight_open);
+            table_.set_row(1, "I2C1 leds", v);
+        }
+    }
     table_.set_row(2, "SPI2 sd",  state_text(f.health[Dev::Sd].state));
     table_.set_row(3, "i80 tft",  state_text(f.health[Dev::Display].state));
     table_.set_row(4, "I2C0 pod", state_text(f.health[Dev::McpPod].state));

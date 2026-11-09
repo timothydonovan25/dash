@@ -706,38 +706,27 @@ public:
 Implementations, in the order you will need them:
 
 - `NullEngine` — always offline. Used now. Stat and Diag show `--`.
-- `UartEngine` — framed serial from the adapter. See §10.1.
-- `CanEngine` — TWAI driver. Needs a transceiver the dash does not have.
-- `BleEngine` — the adapter as another BLE peripheral. No wires.
+- `EspNowEngine` — the K-line adapter's frames, adapter C6 → dash C6 over
+  ESP-NOW. Not written; see §10.1.
 
 Only one is compiled in at a time. Nothing above `IEngine` changes when
 you swap them.
 
-### 10.1 The dash cannot receive CAN
+### 10.1 The K-line adapter talks ESP-NOW, not CAN or UART
 
-**The P4 dashboard board has no CAN transceiver**, and neither did the
-S3 board before it. Its part list has no SN65HVD230, no TJA1050, no
-MCP2551. The ESP32-P4 has TWAI controllers, but TWAI is logic-level TX/RX
-only. It cannot drive a
-differential pair, and CAN levels on a 3.3 V GPIO may damage the pin.
+**The P4 dashboard board has no CAN transceiver**, and the ESP32-P4's TWAI
+is logic-level only: it cannot drive a differential pair, and CAN levels on
+a 3.3 V GPIO may damage the pin. The board has no spare routed pins either
+(`p4-board-pin-map.md` §2.1), so a wired UART link is out too.
 
-So the K-line adapter, as built, has no one to talk to until dash v2.
-
-The adapter's own `CANH`/`CANL` nets run through R5 and the SN65HVD230
-before they reach the output block, so you cannot repurpose those two
-wires as a UART without cutting the adapter board. A serial link means an
-adapter respin. Options, ranked by what they cost you today:
-
-| Option | Cost | When |
-|---|---|---|
-| Stay on `NullEngine` | Nothing | Now. The screens already handle it. |
-| `BleEngine` | Firmware both ends | Now, if you accept the adapter using its radio |
-| `UartEngine` | Adapter respin, 2 dash spare pins | Next adapter revision |
-| `CanEngine` | Transceiver on dash v2 | Correct end state |
-
-The P4 board leaves module pins unconnected (`p4-board-pin-map.md`
-§2.1), which is enough for a UART pair or for TWAI TX/RX into a dead-bug
-transceiver if you want to prove the path before a respin.
+The adapter that answers this is `kline-adapter/review.md`: a separate
+board with its own ESP32-C6 that sends the ECU's data to the dash's C6
+over **ESP-NOW**. It needs no dash pins. It does need work on the dash
+side: ESP-Hosted 2.12.8 has no ESP-NOW RPCs, so the C6 firmware
+(`demo_p4/c6_cp`) must run ESP-NOW itself and forward frames, and Wi-Fi
+must sit on a fixed channel (review §10). The earlier CAN adapter is
+`history/kline-can-adapter-netlist-review.md`. The repo records no order
+for either board.
 
 Design the frame format now, whichever transport wins. The transport is
 20 lines; the decode and the interface are the part worth getting right.

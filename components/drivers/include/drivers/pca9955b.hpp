@@ -47,11 +47,18 @@ public:
     hal::Status blank_lamps();
 
     // MODE, LEDOUT and IREF, which a brown-out resets. Not the duty
-    // registers, which have their own writers.
+    // registers, which have their own writers. The MODE2 write also clears
+    // the error flags (CLRERR), so each read_faults() sees only what the
+    // chip found since the last refresh.
     hal::Status refresh_config();
+
+    // MODE2 (OVERTEMP, ERROR) and EFLAG0..3, raw. core::shift::
+    // decode_led_faults() says what they mean; this only fetches them.
+    hal::Status read_faults(uint8_t& mode2, uint8_t eflag[4]);
 
 private:
     hal::Status write(uint8_t reg, const uint8_t* data, size_t n);
+    hal::Status read(uint8_t reg, uint8_t* data, size_t n);
 
     void*   bus_ = nullptr;   // i2c_master_bus_handle_t
     void*   dev_ = nullptr;   // i2c_master_dev_handle_t

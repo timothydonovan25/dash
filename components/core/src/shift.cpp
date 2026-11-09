@@ -84,4 +84,25 @@ uint8_t hold_lamp(uint16_t peak_rpm, const Config& c) {
     return 0;
 }
 
+LedFaults decode_led_faults(uint8_t mode2, const uint8_t eflag[4],
+                            int lamp0, int lamps, int backlight0, int backlights) {
+    LedFaults f;
+    f.overtemp = (mode2 & 0x80u) != 0;
+    const auto code = [&](int ch) -> uint8_t {
+        if (ch < 0 || ch > 15) return 0;
+        return static_cast<uint8_t>((eflag[ch / 4] >> (2 * (ch % 4))) & 0x3u);
+    };
+    for (int i = 0; i < lamps && i < 8; ++i) {
+        const uint8_t c = code(lamp0 + i);
+        if (c == 0b01) f.lamp_short |= static_cast<uint8_t>(1u << i);
+        if (c == 0b10) f.lamp_open |= static_cast<uint8_t>(1u << i);
+    }
+    for (int i = 0; i < backlights && i < 8; ++i) {
+        const uint8_t c = code(backlight0 + i);
+        if (c == 0b01) f.backlight_short |= static_cast<uint8_t>(1u << i);
+        if (c == 0b10) f.backlight_open |= static_cast<uint8_t>(1u << i);
+    }
+    return f;
+}
+
 }  // namespace core::shift

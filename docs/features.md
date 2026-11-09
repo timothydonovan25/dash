@@ -456,7 +456,7 @@ bike only while it is still, reading "parked only" otherwise.
 | **FUSION** | Fused road speed and its sigma. For each source (IMU, front wheel, rear wheel, GPS): its reading, its residual, and whether it is used, gated or suspect. Accelerometer bias, the wheel verdicts, filter restarts |
 | **SYSTEM** | Heap free and low-water mark, PSRAM free, the tightest task's stack, uptime, P4 die temperature (1 Hz), IMU temperature, render rate, log rows and drops, the last crash dump (the task, labelled CRASHED if this boot was the crash), SD card state including "safe to pull" after an eject |
 | **POWER** | Supply (bike or USB), VIN, battery volts (with trim), the rest voltage at key-on, cranking low, charging voltage and a verdict (§21) |
-| **BUS** | Each bus's state: I2C0 pod, I2C1 LEDs, SPI2 IMU, SPI2 SD, UART1 GPS, i80 TFT. Counters: pod NACKs, I2C recoveries (and "still stuck"), IMU missed interrupts and errors, GPS bad checksums, `ctrl` overruns. The neutral input and VIN sense |
+| **BUS** | Each bus's state: I2C0 pod, I2C1 LEDs (or the LED driver's own lamp/backlight faults, §12.2), SPI2 IMU, SPI2 SD, UART1 GPS, i80 TFT. Counters: pod NACKs, I2C recoveries (and "still stuck"), IMU missed interrupts and errors, GPS bad checksums, `ctrl` overruns. The neutral input and VIN sense |
 | **RADIO** | The BLE host, bonds, pairing window, the connected phone and its RSSI, whether it has subscribed, media feed state, the Wi-Fi hotspot |
 | **UPDATE** | Version and build date of both firmware slots, which one is running, and three actions: install from SD, boot dev once, promote to stable. Shows the Wi-Fi password while the hotspot is on (§25, §26) |
 
@@ -544,6 +544,17 @@ holds at its peak for 0.7 s. CONFIG → Display → Slip bar turns it off.
 - **Re-init.** The PCA9955B's reset is tied to the P4's EN, so a software
   reset does not reset it. `init()` rewrites every register, and `ctrl`
   refreshes the config once a second.
+- **Lamp and backlight faults (2.10).** Just before that refresh, `ctrl`
+  reads the chip's own flags (MODE2, EFLAG0–3) and the refresh clears them,
+  so each read covers one second. `core::shift::decode_led_faults` sorts
+  them into lamps open/short, backlight strings open/short and
+  overtemperature, published as `Engine::led_faults`. DIAG → BUS shows
+  them on the I2C1 row (`open 1+4`, `short 2`, `BL 3`, `OVERTEMP`) and
+  `_evt` logs a `led_fault` line on each change. Health only: nothing is
+  switched off over one. The chip tests an output only while it is lit at
+  PWM 8..254, so 100 % is 254, and a lamp is checked once the rpm lights
+  it. Backlight shorts are unproven on a 5 V anode and kept out of DIAG
+  (`datasheets/PCA9955B-USAGE.md`).
 - The on-screen ShiftStrip and RACE's RevBar mirror the lamp colour.
 - **Bike board:** the backlight lights, so the PCA9955B answers; the lamps
   are untested. The tach wrap gave no signal through the as-built R34/C19
@@ -798,7 +809,7 @@ one producer through its own ring.
 | `_imu` | 200 Hz | `imu` | Every raw sample in sensor axes, before mount and bias; FIFO backlog per read |
 | `_tach` | 50 Hz | `ctrl` | Per-window pulse intervals, extra and missed pulses, refractory rejects and how long after the spark, edge-to-ctrl and edge-to-lamp latency, tick work time |
 | `_det` | 50 Hz | `logic` | Every speed source and fusion's verdict, the attitude filter's internals, stunt lift, rpm/mph |
-| `_evt` | events | `logic` | Every command, health change, fix, lap, jump, trick, gear and engine change, power cut and ring drop. The file opens with the firmware, the reset reason and every setting |
+| `_evt` | events | `logic` | Every command, health change, fix, lap, jump, trick, gear and engine change, power cut, ring drop and LED-driver fault change (`led_fault`). The file opens with the firmware, the reset reason and every setting |
 | `_diag` | 1 Hz | `logger` | Heap, stacks, timing, temperatures, battery, device states, rows and drops per stream, the card's own write times |
 
 CONFIG → Log → Detail log, on by default, about 130 MB an hour. `SdCard`
@@ -836,7 +847,7 @@ response): check the C6's antenna. The watch has run on the demo.
   across an ESP-Hosted major version from a dev image. A C6 with no Wi-Fi in
   its firmware gets it replaced the same way. DIAG → Update shows
   `2.12.8 #<id>`. A C6 with **blank flash** (the first bike board's) cannot
-  be reached over SDIO: flash it over its UART once (`docs/c6-uart-flash.md`).
+  be reached over SDIO: flash it over its UART once (`docs/bringup.md` §9.2).
 - **A lost C6 does not reboot the dash** (1.61,
   `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n`). `ble` hears
   `ESP_HOSTED_EVENT_TRANSPORT_FAILURE` on the default event loop (which it
@@ -1046,7 +1057,7 @@ sets the level, as a percentage of CONFIG → Display → Brightness, and
   38 kB internal at constructor time instead of ~125 kB); it falls back to
   internal RAM **silently** if PSRAM fails, so check that first if the boot
   loop returns. After adding statics, `nm build/dash.elf | grep _heap_start`:
-  the bike is at 0x4FF51240 (1.62; Doom is ~64 kB of it), the demo at
+  the bike is at 0x4FF54960 (2.10; Doom is ~64 kB of it), the demo at
   0x4FF2A680 (1.40). Big buffers go in PSRAM with `EXT_RAM_BSS_ATTR` or on a
   task stack, never in a plain static. The SDIO link, lwIP and NimBLE share
   what is left at run time; `wifi` logs free internal RAM at every change.
@@ -1097,7 +1108,7 @@ python3 sim/dash_sim.py
 | **Host tests** (`test/`, ctest) | One `test_*.cpp` per module over `core/`, `ui/` and `logic_tick`, using a 40-line harness (`test/check.hpp`); `check_no_esp_headers.sh` enforces rule 3. The fast loop |
 | **`tools/pod_keys.py`** | Laptop keys 1–5 (shift for long) press the pod's buttons over the USB console; `docs/console.md` |
 | **`tools/imu_view.py`** | Live pitch/lean/heading from `keeper`'s USB stream, for checking the IMU axes |
-| **`tools/c6_uart.py`** | Listen to, back up, inspect and flash the C6 over its own UART (`docs/c6-uart-flash.md`) |
+| **`tools/c6_uart.py`** | Listen to, back up, inspect and flash the C6 over its own UART (`docs/bringup.md` §9.2) |
 | **`tools/replay`** | Runs `core::fusion::SpeedFilter` over a blackbox log or a synthetic ride with a known truth (`--scenario`). Tune the filter's noise and gate settings on a laptop. `plot.py` draws the output |
 | **`tools/ridelog/ridelog.py`** | Reads a session off the card (blackbox plus detail log) and reports, one section per firmware assumption, what the ride measured, most suspect first, with verdicts. Optional numpy vibration spectrum and matplotlib plots |
 | **`tools/flash_dev.py`** | Writes the dev slot over USB |

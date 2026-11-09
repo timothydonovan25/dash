@@ -208,6 +208,7 @@ const char* ev_name(Ev e) {
         case Ev::Drop:        return "drop";
         case Ev::Heart:       return "heart";
         case Ev::HrRecovery:  return "hr_recovery";
+        case Ev::LedFault:    return "led_fault";
     }
     return "?";
 }
@@ -612,6 +613,27 @@ size_t format_event(char* buf, size_t n, const EventRow& e) {
             o.kv("drop_1min"); o.i(e.i);
             if (e.a) { o.kv("drop_2min"); o.i(static_cast<int32_t>(e.x)); }
             break;
+        case Ev::LedFault: {
+            // Lamp and string numbers from 1, joined by '+'; "none" for none.
+            const auto bits = [&](const char* key, uint32_t m) {
+                o.kv(key);
+                if (!m) { o.s("none"); return; }
+                bool first = true;
+                for (uint32_t n = 0; n < 8; ++n) {
+                    if (!((m >> n) & 1u)) continue;
+                    if (!first) o.c('+');
+                    o.u(n + 1);
+                    first = false;
+                }
+            };
+            const uint32_t i = static_cast<uint32_t>(e.i);
+            bits("lamp_open", e.a);
+            bits("lamp_short", e.b);
+            bits("backlight_open", i & 0xFFu);
+            bits("backlight_short", (i >> 8) & 0xFFu);
+            o.kv("overtemp"); o.u((i >> 16) & 1u);
+            break;
+        }
         case Ev::None:
             break;
     }
@@ -653,6 +675,16 @@ size_t EventWatcher::watch(const Watched& w, uint32_t t, EventRow* out, size_t m
             e->a = w.fix ? 1 : 0;
             e->b = w.sats;
             e->x = w.hdop;
+        }
+    }
+    if (w.led_faults != p.led_faults) {
+        if (EventRow* e = emit(Ev::LedFault)) {
+            const shift::LedFaults& f = w.led_faults;
+            e->a = f.lamp_open;
+            e->b = f.lamp_short;
+            e->i = static_cast<int32_t>(f.backlight_open |
+                                        (static_cast<uint32_t>(f.backlight_short) << 8) |
+                                        (f.overtemp ? 1u << 16 : 0u));
         }
     }
     if (w.power_fail != p.power_fail) {

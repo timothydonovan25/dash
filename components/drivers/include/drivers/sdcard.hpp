@@ -4,8 +4,10 @@
 //
 // Not SDMMC: the card socket is wired to the same three SPI pins as the IMU,
 // with its own chip select. That is slower than a 4-bit SDMMC bus and it is
-// what the board has. On the P4 it also keeps the card off the SDMMC
-// controller, which the module uses for its link to the C6.
+// what the board has. The SDMMC controller has two slots: slot 1 is the
+// module's link to the C6, slot 0 (GPIO39-44) is free but not routed on
+// this board. The demo runs a card on slot 0 beside the C6 link, so a
+// respin could move the card there and off the IMU's bus.
 //
 // The reason this sits behind an interface and gets drained by its own
 // low-priority task: **an SD card can stall for hundreds of milliseconds**

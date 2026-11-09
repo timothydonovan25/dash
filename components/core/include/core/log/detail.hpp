@@ -249,6 +249,7 @@ enum class Ev : uint8_t {
     Drop,         // a: Stream; i: rows dropped so far
     Heart,        // a: core::state::Heart::Link; b: bpm then (0 none)
     HrRecovery,   // a: 1 with the two-minute fall; b: bpm at the stop; i: fall at 1 min; x: at 2
+    LedFault,     // a: lamps open; b: lamps short; i: backlight open | short << 8 | overtemp << 16
 };
 
 struct EventRow {
@@ -321,6 +322,7 @@ struct Watched {
     int16_t  hrr_drop1 = 0;
     int16_t  hrr_drop2 = 0;
     bool     hrr_has2 = false;
+    shift::LedFaults led_faults;   // core::state::Engine::led_faults
 };
 
 // Turns one pass's Watched into the events since the last. The first call

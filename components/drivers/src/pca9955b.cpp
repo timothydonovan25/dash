@@ -23,8 +23,12 @@ constexpr int kTimeoutMs = 2;
 
 // Register map, datasheet Rev. 2.3 Table 7.
 constexpr uint8_t kMode1   = 0x00;
+constexpr uint8_t kMode2   = 0x01;
 constexpr uint8_t kPwm0    = 0x08;
 constexpr uint8_t kIref0   = 0x18;
+constexpr uint8_t kEflag0  = 0x46;
+// MODE2 bit 4, write-only and self-clearing: clears EFLAGn and ERROR.
+constexpr uint8_t kClrErr  = 0x10;
 // Bit 7 of the register byte sets the auto-increment flag. With MODE1's
 // AI1:AI0 left at 00 the pointer runs 00h..43h, so one transfer covers any
 // contiguous run of registers.
@@ -34,9 +38,12 @@ constexpr uint8_t kAutoInc = 0x80;
 // mode used; 00b is off for the outputs nothing is wired to.
 constexpr uint8_t kLdrPwm  = 0b10;
 
+// 100 % is 254, not 255: the chip skips its open/short test on an output at
+// PWM 255 (datasheet §7.3.15), so full brightness would never be checked.
+// One step in 255 is not visible.
 uint8_t duty_of(uint8_t percent) {
     if (percent > 100) percent = 100;
-    return static_cast<uint8_t>((255u * percent) / 100u);
+    return static_cast<uint8_t>((254u * percent) / 100u);
 }
 
 }  // namespace
@@ -56,13 +63,29 @@ hal::Status Pca9955b::write(uint8_t reg, const uint8_t* data, size_t n) {
     return err == ESP_ERR_TIMEOUT ? hal::Status::Timeout : hal::Status::IoError;
 }
 
+hal::Status Pca9955b::read(uint8_t reg, uint8_t* data, size_t n) {
+    if (!dev_) return hal::Status::NotPresent;
+    const uint8_t addr = static_cast<uint8_t>(kAutoInc | reg);
+    const esp_err_t err = i2c_master_transmit_receive(
+        static_cast<i2c_master_dev_handle_t>(dev_), &addr, 1, data, n, kTimeoutMs);
+    if (err == ESP_OK) return hal::Status::Ok;
+    return err == ESP_ERR_TIMEOUT ? hal::Status::Timeout : hal::Status::IoError;
+}
+
+hal::Status Pca9955b::read_faults(uint8_t& mode2, uint8_t eflag[4]) {
+    hal::Status s = read(kMode2, &mode2, 1);
+    if (!hal::ok(s)) return s;
+    return read(kEflag0, eflag, 4);
+}
+
 hal::Status Pca9955b::refresh_config() {
     // MODE1 = 0: normal mode, auto-increment over the whole map, and no
     // answer to the sub-call or all-call addresses — this is the only
     // device on its bus, and a group address nobody uses is just another
-    // way to write it by accident. MODE2 = 0: outputs change on STOP, so the
-    // eight lamp duties in one transfer land together.
-    uint8_t head[6] = {0x00, 0x00, 0, 0, 0, 0};
+    // way to write it by accident. MODE2: outputs change on STOP, so the
+    // eight lamp duties in one transfer land together, and CLRERR, so the
+    // error flags start again from here (read_faults).
+    uint8_t head[6] = {0x00, kClrErr, 0, 0, 0, 0};
     for (int ch = 0; ch < 16; ++ch) {
         const bool lamp = ch >= bsp::kLedLamp0 &&
                           ch < bsp::kLedLamp0 + bsp::kLedLampCount;

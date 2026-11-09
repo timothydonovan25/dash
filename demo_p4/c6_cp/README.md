@@ -5,7 +5,7 @@
 > `slave_fw` with `idf.py -p /dev/ttyACM0 c6-flash` (from the root or
 > `demo_p4/`), and the dash pushes it to the C6 over SDIO
 > (`docs/features.md` §24.1). A C6 with blank flash needs
-> `docs/c6-uart-flash.md` first. Below is Espressif's own README.
+> `docs/bringup.md` §9.2 first. Below is Espressif's own README.
 
 # ESP-Hosted-MCU Slave example
 

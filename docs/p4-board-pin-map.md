@@ -203,8 +203,11 @@ Checked against the datasheet (Rev. 2.3, September 2024):
 **Firmware:** `drivers/` gains a PCA9955B driver behind the shift-lamp and
 backlight interfaces. `ctrl` writes the eight lamp PWM registers in one
 auto-increment transfer, about 0.1 ms at 1 MHz, inside the 3 ms budget.
-The driver reports open and shorted LEDs as health; the firmware decides
-what to do (rule 5).
+Once a second `ctrl` reads MODE2 and EFLAG0–3 (open, short, overtemperature)
+and publishes them in `Engine::led_faults`; DIAG → Bus and `_evt` show them,
+and nothing turns an output off over one (rule 5). The chip tests an output
+only while it is lit at a PWM of 8..254, so the driver's 100 % is 254
+(`datasheets/PCA9955B-USAGE.md`).
 
 **REXT is shared by all sixteen outputs.** 1.91 kΩ caps every channel at
 30 mA in hardware, which is both the lamps' chosen maximum and the
@@ -470,7 +473,9 @@ show rpm. **Not yet run on the bike, and the pickup is still not scoped**:
 2. Check the reading against a known idle: the firmware assumes one spark
    per revolution; a wasted-spark-free ignition reads double.
 3. Ringing gives several edges per spark, and 47 pF no longer filters it.
-   The PCNT glitch filter plus `bsp::kTachRefractoryUs` handle that. At
+   `bsp::kTachRefractoryUs` (1.5 ms, a software window in the GPIO ISR,
+   `engine_sense.cpp`) handles that; there is no PCNT or hardware glitch
+   filter on the tach. At
    13 500 rpm, one spark per revolution is a 4.4 ms period.
 
 ### 6.4 Numbers from the audit

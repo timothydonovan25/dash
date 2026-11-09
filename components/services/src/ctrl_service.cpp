@@ -77,6 +77,8 @@ void ctrl_task(void* arg) {
     uint8_t lit_mask = 0;
     uint8_t last_master = 0xFF;      // nothing valid yet, so the first pass writes
     uint8_t backlight_sent = 0xFF;   // likewise
+    // The LED driver's own fault flags, as of the last once-a-second read.
+    core::shift::LedFaults led_faults;
     // The backlight and the configuration registers are not hal::IShiftLamps
     // business; they are this driver's. Every write to I2C1 is made from this
     // task, so the bus has one user and the lamps never queue behind another.
@@ -294,8 +296,20 @@ void ctrl_task(void* arg) {
 
         // A browned-out LED driver acknowledges with every IREF at zero and
         // looks alive. Its configuration goes again once a second, whether
-        // or not it has complained (about 0.3 ms of I2C).
+        // or not it has complained (about 0.3 ms of I2C). Its fault flags are
+        // read first (about 0.1 ms more): they hold what it found over the
+        // last second, and the refresh clears them.
         if (leds && may_try() && phase == 2 * kResendTicks / 3) {
+            uint8_t mode2 = 0;
+            uint8_t eflag[4] = {};
+            const hal::Status fs = leds->read_faults(mode2, eflag);
+            if (hal::ok(fs)) {
+                led_faults = core::shift::decode_led_faults(
+                    mode2, eflag, bsp::kLedLamp0, bsp::kLedLampCount,
+                    bsp::kLedBacklight0, bsp::kLedBacklightCount);
+            } else {
+                failed(fs);
+            }
             const hal::Status cs = leds->refresh_config();
             if (!hal::ok(cs)) failed(cs);
             wrote = true;
@@ -335,6 +349,7 @@ void ctrl_task(void* arg) {
         e.shift_mask = prev_mask;   // what the rpm lights; the held lamp apart
         e.shift_hold = static_cast<uint8_t>(hold_bits & ~prev_mask);
         e.rpm_peak = rpm_peak;
+        e.led_faults = led_faults;
         e.shift_flash = core::shift::over_limit(lamp_rpm, sc);
         e.rpm = tach.rpm();
         e.neutral = c.neutral;

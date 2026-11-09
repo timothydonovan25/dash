@@ -10,6 +10,34 @@ namespace core::shift {
 
 inline constexpr int kLampCount = 8;
 
+// What the PCA9955B says about its outputs (datasheet §7.3.15–16), sorted
+// into the lamps and the backlight. Bit n of a lamp mask is lamp n+1, as in
+// pattern(); bit n of a backlight mask is string n+1. Health, not policy:
+// nothing here turns anything off.
+//
+// The chip only tests an output that is on, at a PWM of 8..254, so a lamp
+// that has not been lit since the last clear reads clean whatever its state.
+struct LedFaults {
+    uint8_t lamp_open = 0;
+    uint8_t lamp_short = 0;
+    uint8_t backlight_open = 0;
+    uint8_t backlight_short = 0;   // see datasheets/PCA9955B-USAGE.md: unproven
+    bool    overtemp = false;      // the chip has blanked every output itself
+
+    bool operator==(const LedFaults& o) const {
+        return lamp_open == o.lamp_open && lamp_short == o.lamp_short &&
+               backlight_open == o.backlight_open &&
+               backlight_short == o.backlight_short && overtemp == o.overtemp;
+    }
+    bool operator!=(const LedFaults& o) const { return !(*this == o); }
+};
+
+// MODE2 (01h) and EFLAG0..3 (46h..49h) as read, and where the lamps and the
+// backlight strings sit among OUT0..15. Two bits per output: 01b short,
+// 10b open; 00b and the undefined 11b are not reported.
+LedFaults decode_led_faults(uint8_t mode2, const uint8_t eflag[4],
+                            int lamp0, int lamps, int backlight0, int backlights);
+
 struct Config {
     uint16_t base_rpm       = 6000;   // lamp 1 lights here
     uint16_t span_rpm       = 2400;   // lamp 8 lights at base + span

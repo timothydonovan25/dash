@@ -305,6 +305,31 @@ int main() {
         CHECK(n == 1 && out[0].kind == Ev::Fix && out[0].a == 0);
     }
 
+    CASE("the watcher logs the LED driver's fault flags on change");
+    {
+        EventWatcher ew;
+        EventRow out[EventWatcher::kMaxPerPass];
+        Watched w;
+        CHECK(ew.watch(w, 100, out, EventWatcher::kMaxPerPass) == 0);   // clean at key-on: nothing
+        w.led_faults.lamp_open = 0x09;          // lamps 1 and 4
+        w.led_faults.backlight_short = 0x04;    // string 3
+        w.led_faults.overtemp = true;
+        size_t n = ew.watch(w, 120, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::LedFault);
+        char b[200];
+        format_event(b, sizeof b, out[0]);
+        CHECK(contains(b, "led_fault"));
+        CHECK(contains(b, "lamp_open=1+4"));
+        CHECK(contains(b, "lamp_short=none"));
+        CHECK(contains(b, "backlight_open=none"));
+        CHECK(contains(b, "backlight_short=3"));
+        CHECK(contains(b, "overtemp=1"));
+        CHECK(ew.watch(w, 140, out, EventWatcher::kMaxPerPass) == 0);   // unchanged: nothing
+        w.led_faults = {};                       // cleared: logged, so the log shows it ended
+        n = ew.watch(w, 160, out, EventWatcher::kMaxPerPass);
+        CHECK(n == 1 && out[0].kind == Ev::LedFault && out[0].a == 0 && out[0].i == 0);
+    }
+
     CASE("the watcher: engine stop keeps the last rpm; gear, lap, drop, trick");
     {
         EventWatcher ew;

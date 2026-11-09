@@ -11,6 +11,7 @@
 #include "core/gearcal/gearcal.hpp"
 #include "core/lap/lap.hpp"
 #include "core/ota/ota.hpp"
+#include "core/shift/shift.hpp"
 #include "core/wifi/wifi.hpp"
 
 namespace core::state {
@@ -43,6 +44,11 @@ struct Engine {
     // stopped, or a ratio that matches nothing. Neutral is separate, above,
     // because that one really is sensed.
     uint8_t gear = 0;
+
+    // What the PCA9955B last said about its outputs, read once a second by
+    // `ctrl`. A lamp is tested only while lit, so a fault shows up the first
+    // time the rider revs into it, not at key-on.
+    shift::LedFaults led_faults;
 };
 
 struct Motion {

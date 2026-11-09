@@ -16,8 +16,8 @@ the same as correct. The places that can only be settled here are marked
 **Sections:** 0 before power · 1 rails · 2 boot (chip rev, watchdog, boot
 time) · 3 panel · 4 DIAG Sensors/Bus · 5 pod, neutral · 6 IMU · 7 GPS ·
 8 tach, wheels, lamps · 8.1 power-fail · 9 SD, then the radio · 9.1 OTA
-slots · 10 BRINGUP markers · 11 `sdkconfig` traps. Elsewhere:
-`c6-uart-flash.md` (a blank C6), `console.md` (testing over USB).
+slots · 9.2 a blank C6 · 10 BRINGUP markers · 11 `sdkconfig` traps.
+Elsewhere: `console.md` (testing over USB).
 
 **The first board arrived on 2026-10-28.** Where it has got to:
 
@@ -35,7 +35,7 @@ slots · 10 BRINGUP markers · 11 `sdkconfig` traps. Elsewhere:
 | 9 SD | Done on 12 V | Mounts and writes ~32 kB/s with no errors; on USB alone it did not mount |
 | — Screen over USB, SD as USB drive (2.6) | Bench: works | Console `screen` (tools/dash_screen.py, pod_keys.py --screen): a whole frame in 0.22 s. **USB drive** (CONFIG → SD card → USB drive, console `usb drive`): the laptop mounts the card ("Dash SD card") and reads ~620 KB/s. Found on the bike: (1) a port powered off by the laptop (udisksctl power-off) suspends the bus instead of disconnecting, and the dash stayed in drive mode; suspend now counts as let go (seen working). (2) OTG's pads stayed on when it went back to PHY 1, the panel's D6/D7: now switched off first. (3) With `auto_mount_off`, esp_tinyusb ignores the laptop's Eject and says nothing; with it on, an Eject is seen and the console comes back 5 s later. (4) That console came back enumerated but silent (the USB serial driver does not survive its pads going off and on), so the dash now restarts after a drive session. **Verified 2026-11-05:** drive on, the laptop mounts and reads it, Eject, and 3.7 s later the dash has rebooted with the console, its card (new log session) and the phone's BLE link back. **Screen garbled while flashing** (top-left quarter, the moving widgets showing through, clears when the new image boots): the P4 sits in the ROM loader ~25 s with the panel's CS and WR undriven, and the panel takes noise as writes. Harmless; a pull-up on CS (GPIO50) would stop it (board item) |
 | — Routing from the card (2.5) | Bench: routes | `route bench` (USB console): Fayetteville → Little Rock, 181 mi, 393 nodes, 906 4 kB block reads: **4.5 s cold, 2.8 s warm**. It was 28.3 s with an `fopen` per read; the driver now keeps read files open (`SdCard::Reader`) and FATFS fast seek is on (`main.cpp` refuses a stale sdkconfig). **Phone → bike works** (2026-11-05): an address sent from the app shows up and the dash routes to it. **Where to? works on the bike** (2026-11-05, with `route/search.idx` on the card): 1-3-5-1-1-R-Y-A-N lists 13511 Ryan Rd, Pea Ridge first and routes there. Before the index was on the card every key was grey and C/D did nothing (the screen now says "No search index on card"). 2026-11-06 (2.6): Where to? scripted over USB for a town, a street, a house number and a place, each routed (navigation §9); a route used to raise LOG STOPPED: it starved the logger of the card (fixed: `storage` at priority 1) and stopped the storage loop's SD keepalive (fixed: the route's reads count as one); the 65 mph prompt and its "avoid" reroute (4.3 s) checked on the bike |
-| 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (`c6-uart-flash.md`). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried. The Wi-Fi hotspot comes up (2026-11-01: 20 on/off cycles from CONFIG, internal RAM back to 301 kB each time, 9 kB kept by the first start; off on 10 idle minutes); no phone has joined it or uploaded. Crash SOS (features §24.3) ran end to end on 2026-11-03: Test crash → countdown → `X` → the Android app texted → `K` → SOS TEXTED → "I'm OK" |
+| 9 Radio | Phone linked | The C6 came with **blank flash**; flashed over its UART 2026-10-31 (§9.2). SDIO 40 MHz 4-bit, ESP-Hosted 2.12.8, `slave_fw` current, advertising as CRF250F-Dash. The Android app bonded and sent Feed lines (2026-10-31). Signal is weak: the laptop hears it at −90 dBm beside the board and the phone never gets the scan response, so **check the antenna is on the IPEX**. No watch, iPhone or nRF Connect tried. The Wi-Fi hotspot comes up (2026-11-01: 20 on/off cycles from CONFIG, internal RAM back to 301 kB each time, 9 kB kept by the first start; off on 10 idle minutes); no phone has joined it or uploaded. Crash SOS (features §24.3) ran end to end on 2026-11-03: Test crash → countdown → `X` → the Android app texted → `K` → SOS TEXTED → "I'm OK" |
 | 9.1 OTA slots | Steps 1, 4, 5, 6 done | 2026-11-01: `flash_dev.py` to ota_1 with stable untouched; Boot dev once from DIAG → Update ran ota_1 as dev; a reset, and a panic in dev (console `panic`), both came back stable on ota_0 with no input; the panic's core dump decoded with `idf.py coredump-info` (needs GDB on PATH, Build). Not done: install from SD, the refusals, Promote, a card pulled mid-install |
 
 **The order matters more than the speed.** Each session below assumes the
@@ -176,11 +176,13 @@ If a backtrace is unreadable during bring-up, a `-Og` build
 (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`) reads better; go back before riding,
 so the detail log's timings are the build that rides.
 
-**QIO flash, on the demo board first.** Both projects flash in DIO at
-80 MHz. QIO roughly halves a cache refill from flash (`render` and the
-350 kB font notice). It needs the module's flash to have its QE bit set:
-try `CONFIG_ESPTOOLPY_FLASHMODE_QIO` on the demo, boot it cold several
-times, and only then on the bike.
+**QIO flash.** Both projects flash in QIO at 80 MHz
+(`CONFIG_ESPTOOLPY_FLASHMODE_QIO` in each `sdkconfig.defaults`, since 1.55),
+which roughly halves a cache refill from flash (`render` and the 350 kB font
+notice). The image header still says `dio`: IDF writes that for QIO and the
+bootloader switches to quad itself. If a new module will not boot, its
+flash's QE bit is the first suspect; the boot log's `SPI Mode` line says
+which mode it ran.
 
 **If nothing enumerates on USB**, hold BOOT (SW1, GPIO35) and tap reset
 (SW3) for download mode. GPIO36 must be high for that, which R20 does.
@@ -560,7 +562,7 @@ SDIO via ESP-Hosted, as `demo_p4/` does on the demo board
 
 The C6 has its own reset (GPIO54, U16-74) and boot (U16-18, R1) lines and
 its UART on test pads H1/H3. **The first board's C6 had blank flash** and
-could not be reached over SDIO; `c6-uart-flash.md` is how it was flashed
+could not be reached over SDIO; §9.2 is how it was flashed
 over its own UART (2026-10-31). Expect the same on the next module.
 
 The `ble` service is built in (`services/src/ble_service.cpp`) and starts
@@ -685,6 +687,86 @@ the flash calls are not.
    late count); that is why it is parked only.
 
 ---
+
+### 9.2 A C6 with blank flash: flash it over its UART
+
+The module's ESP32-C6 normally gets its firmware from the P4 over SDIO
+(`slave_fw`, `core/c6`), which needs the C6 to already speak ESP-Hosted.
+**The first board's C6 came with blank flash** and had to be flashed over
+its own UART once (2026-10-31). Expect the same on the next module.
+`tools/c6_uart.py` automates most of this.
+
+**Symptom.** From the P4's console, `sdmmc_card_init` succeeds and the very
+next CCCR read times out (`sdio_card_fn_init failed`, `0x107`), at 40 MHz
+4-bit and at 5 MHz 1-bit alike, with the demo's identical ESP-Hosted
+settings: the module's C6, not the link. On the C6's own UART: `invalid
+header: 0xffffffff` and watchdog resets (`TG0_WDT_HPSYS`, `LP_WDT_SYS`)
+several times a second. On the first board the 4 MB read back held 24 bytes
+that were not 0xFF: no bootloader, no partition table.
+
+**Its lines.** Reset on GPIO54 (U16-74), boot on U16-18 (R1). Its UART is on
+test pads **H1 = U0RXD** (U16-16, into the C6) and **H3 = U0TXD** (U16-17,
+out of it); the boot pin has no pad, so download mode means clipping onto
+R1.
+
+With an FTDI TTL-232R-3V3: **black** GND, **yellow** its RXD, **orange**
+its TXD. **Red is 5 V: leave it unconnected.** It ends up as
+`/dev/ttyUSB0`. Source ESP-IDF (`export.sh`) and run from the repo root.
+`tools/c6_uart.py` does steps 1, 4, 6 and 7 (`listen`, `wait`, `backup`,
+`flash`); `flash` refuses to run until a 4 MB backup exists, and
+`inspect` reads the backup offline: bootloader, partition table, each app's
+project, version (ESP-Hosted's own, for a `network_adapter`) and IDF, and
+whether it was built for SDIO or SPI.
+
+1. **Listen.** Board off. Black to GND, **yellow to H3** (the C6's TX).
+   Open `idf.py -C demo_p4/c6_cp -p /dev/ttyUSB0 monitor --no-reset`, then
+   power the board. Do not open the P4's `/dev/ttyACM0` meanwhile: that
+   resets the P4, which resets the C6. The text is the first evidence of
+   what Guition put on it; keep it.
+2. **Wire for flashing.** **Orange to H1** (the C6's RX).
+3. **Find R1's IO9 end.** Board off, meter on continuity: the end of R1
+   that beeps to a 3.3 V point (VCC) is the wrong one; the other is IO9.
+   Ground the IO9 end **through a 1 kΩ resistor**, not a bare wire: it
+   still reads low (0.3 V against the 10 kΩ pull-up), and the wrong end
+   would only pass 3.3 mA instead of shorting VCC.
+4. **Download mode.** The C6's net names: **C6_BOOT is IO9** (on R1),
+   **C6_RST is EN** (on R22, 10 kΩ pull-up and 1 µF). IO8 has no net; the
+   module holds it high. With the 1 kΩ on C6_BOOT (it reads ~0.3 V),
+   **tap C6_RST's signal end of R22 to GND** for half a second. The C6's
+   own watchdog resets do not re-read the straps, so a blank C6 cycling
+   through them stays at `boot:0xc (SPI_FAST_FLASH_BOOT)` however long you
+   wait; only EN (or power-on) brings `rst:0x1 (POWERON),boot:0x4
+   (DOWNLOAD(USB/UART0/SDIO_FEI_FEO))` and `waiting for download`. Only tap:
+   the P4 drives GPIO54 too. Check with
+   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset chip-id`.
+   `boot:` on the C6's UART is the strap reading: 0xc is both high,
+   0x4 is IO9 low.
+5. **Park the P4.** On the first board the P4 kept resetting the C6
+   through GPIO54, a pair of power-on resets every ~14 s, and each one
+   killed a long esptool read part way (`No more data to read from the
+   serial port`). Put the P4 in its own ROM bootloader, where GPIO54 is
+   left alone:
+   `python -m esptool --chip esp32p4 -p /dev/ttyACM0 --before default-reset --after no-reset chip-id`.
+   Listen to the C6's UART for 20 s: no new `ESP-ROM` banner means
+   nothing is resetting it.
+6. **Back up what is there**, 4 MB. At 115200 it took 6.5 minutes;
+   460800 failed once, before the P4 was parked, so which of the two was
+   to blame is not known:
+   `python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 115200 --before no-reset --after no-reset read-flash 0 0x400000 c6_factory_backup.bin`
+   (`tools/c6_uart.py backup` does the same at 460800).
+   `tools/c6_uart.py inspect` says whether it holds anything.
+7. **Flash ESP-Hosted** (`demo_p4/c6_cp`, 2.12.8, Wi-Fi and BLE; build it
+   first with `idf.py -C demo_p4/c6_cp build`), about 70 s at 115200:
+   `cd demo_p4/c6_cp/build && python -m esptool --chip esp32c6 -p /dev/ttyUSB0 -b 115200 --before no-reset --after no-reset write-flash "@flash_args"`
+8. **Run it.** Unclip the 1 kΩ from R1, unplug and replug the board (the
+   P4 is parked), and read the P4's console. Expect `transport: Identified
+   slave [esp32c6]` and the C6 reporting 2.12.8, then `ble: advertising`.
+   The yellow wire can stay on to watch the C6's side at the same time.
+   First board, 2026-10-31: all of that, SDIO at 40 MHz 4-bit, and the
+   P4 booted once with no loop.
+9. **Then `idf.py -p /dev/ttyACM0 c6-flash`**, so `slave_fw` holds the same
+   image and later C6 updates go over SDIO, as on the demo. The boot log
+   then says `c6_fw: C6 runs 2.12.8 #…, slave_fw has 2.12.8 #…: current`.
 
 ## 10. Every BRINGUP marker, in one place
 

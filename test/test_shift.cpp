@@ -215,5 +215,29 @@ int main() {
         CHECK(w.apply(0xFF, true, 5, c) == 0xFF);
     }
 
+    // The PCA9955B's fault flags, laid out as the board has them: lamps on
+    // OUT0..7, backlight on OUT8..10.
+    {
+        using core::shift::decode_led_faults;
+        using core::shift::LedFaults;
+        const uint8_t clean[4] = {};
+        CHECK(decode_led_faults(0x01, clean, 0, 8, 8, 3) == LedFaults{});  // reserved bit 0 reads 1
+        // Lamp 1 short (OUT0 = 01b), lamp 4 open (OUT3 = 10b), lamp 8 open (OUT7).
+        const uint8_t lamps[4] = {0b10000001, 0b10000000, 0, 0};
+        LedFaults f = decode_led_faults(0x40, lamps, 0, 8, 8, 3);
+        CHECK(f.lamp_short == 0x01);
+        CHECK(f.lamp_open == 0x88);
+        CHECK(f.backlight_open == 0 && f.backlight_short == 0 && !f.overtemp);
+        // Backlight string 2 (OUT9) open, string 3 (OUT10) short; the
+        // spare outputs above (OUT11..15) and 11b are never reported.
+        const uint8_t back[4] = {0, 0, 0b11011000, 0xFF};
+        f = decode_led_faults(0xC0, back, 0, 8, 8, 3);
+        CHECK(f.backlight_open == 0x02);
+        CHECK(f.backlight_short == 0x04);
+        CHECK(f.lamp_open == 0 && f.lamp_short == 0);
+        CHECK(f.overtemp);
+        CHECK(f != LedFaults{});
+    }
+
     return check::report("shift");
 }

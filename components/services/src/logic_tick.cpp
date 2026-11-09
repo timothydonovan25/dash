@@ -311,6 +311,7 @@ void detail_log(Deps& d, LogicState& s, uint32_t now, bool scheduled,
         w.rest_v = bat.rest_v;
         w.crank_v = bat.crank_min_v;
         w.gear = e.gear;
+        w.led_faults = e.led_faults;
         w.rpm = e.rpm;
         w.mph = m.best_mph;
         w.moving = !still;

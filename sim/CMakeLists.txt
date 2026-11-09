@@ -33,7 +33,7 @@ add_library(core STATIC
     ${CORE}/src/perf.cpp ${CORE}/src/stunt.cpp ${CORE}/src/hr.cpp ${CORE}/src/crash.cpp
     ${CORE}/src/route_graph.cpp ${CORE}/src/route_query.cpp ${CORE}/src/route_follow.cpp
     ${CORE}/src/route_navigator.cpp ${CORE}/src/route_dest.cpp
-    ${CORE}/src/route_search.cpp)
+    ${CORE}/src/route_search.cpp ${CORE}/src/route_pace.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 add_library(ui STATIC
