@@ -60,6 +60,12 @@ Gradle/Kotlin tree. The only thing shared is the §11.1 GATT contract in
 moves by commit, push and pull — commit and push before switching machines,
 `git pull` on arrival.
 
+**Check for other Claude sessions in this clone before editing**
+(`ListAgents`). If one is active, message it (`SendMessage`) with the files
+you will touch and ask for its own; agree who owns a file before editing it.
+Two sessions sharing `build/` or `sdkconfig`, or both bumping
+`firmware.txt`, will clash: give one of them a worktree.
+
 Host tests — **no ESP-IDF, the fast loop**:
 
 ```bash
