@@ -238,11 +238,13 @@ void App::bind_settings(core::config::Settings* s) {
 }
 
 void App::begin(Canvas& c) {
+    c.set_palette(palette_);
     enter_current(c);
 }
 
 void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     if (!active_) return;
+    c.set_palette(palette_);
 
     // A crash countdown takes any button, and cancels: whatever the press
     // was meant for, a rider who can press one is not hurt badly enough to
@@ -647,6 +649,12 @@ void App::update(const core::state::Frame& f) {
         dev_running_ = dev;
         needs_full_ = true;
     }
+    // CONFIG -> Display -> Palette: every pixel on the glass changes colour.
+    const uint8_t pal = ctx_.settings ? ctx_.settings->palette : 0;
+    if (pal != palette_) {
+        palette_ = pal;
+        needs_full_ = true;
+    }
     // The FPS counter: turned on, it is drawn as damage; turned off, the
     // patch it covered is painted back, like a dismissed alert.
     const bool fps = ctx_.settings && ctx_.settings->show_fps;
@@ -781,6 +789,7 @@ void App::paint_region(Canvas& c) {
 
 void App::render(Canvas& c, bool full) {
     if (!active_) return;
+    c.set_palette(palette_);
     if (cal_swap_) {
         cal_swap_ = false;
         enter_current(c);
@@ -879,6 +888,7 @@ size_t App::damage(Damage* out, size_t max) {
 }
 
 void App::draw_damage(Canvas& c, const Damage& d) {
+    c.set_palette(palette_);
     if (d.region) {
         paint_region(c);
         return;

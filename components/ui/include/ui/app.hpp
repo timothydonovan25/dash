@@ -217,6 +217,7 @@ private:
     // everything (SystemInfo::render_hz_x10).
     FpsTag           fps_tag_;
     bool             fps_on_ = false;
+    uint8_t          palette_ = 0;   // the canvas palette, from Settings::palette
     bool             needs_full_ = true;
     // CONFIG shows the gear calibration page instead while a run is open.
     bool             cal_active_ = false;

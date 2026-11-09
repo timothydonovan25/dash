@@ -1,5 +1,6 @@
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/font_aa.hpp"
+#include "ui/theme.hpp"
 #include <cmath>
 
 namespace ui {
@@ -61,11 +62,13 @@ Color FrameBufferCanvas::pixel(int16_t x, int16_t y) const {
 }
 
 void FrameBufferCanvas::fill(Color c) {
+    c = theme::palette_color(c, palette_);
     for (int16_t y = 0; y < h_; ++y)
         for (int16_t x = 0; x < w_; ++x) px_[y * stride_ + x] = c;
 }
 
 void FrameBufferCanvas::fill_rect(const Rect& r, Color c) {
+    c = theme::palette_color(c, palette_);
     if (r.empty()) return;
     // The clip is applied here as well as in put(), because draw_text at any
     // scale above 1 draws its pixels as rectangles and would otherwise walk
@@ -87,6 +90,7 @@ void FrameBufferCanvas::fill_rect(const Rect& r, Color c) {
 }
 
 void FrameBufferCanvas::draw_rect(const Rect& r, Color c) {
+    c = theme::palette_color(c, palette_);
     if (r.empty()) return;
     fill_rect(Rect{r.x, r.y, r.w, 1}, c);
     fill_rect(Rect{r.x, static_cast<int16_t>(r.bottom() - 1), r.w, 1}, c);
@@ -107,6 +111,7 @@ inline int16_t corner_dx(int16_t radius, int16_t dy) {
 }  // namespace
 
 void FrameBufferCanvas::draw_round_rect(const Rect& r, int16_t radius, Color c) {
+    c = theme::palette_color(c, palette_);
     if (r.empty()) return;
     const int16_t max_r = (r.w < r.h ? r.w : r.h) / 2;
     if (radius > max_r) radius = max_r;
@@ -136,6 +141,7 @@ void FrameBufferCanvas::draw_round_rect(const Rect& r, int16_t radius, Color c) 
 }
 
 void FrameBufferCanvas::fill_round_rect(const Rect& r, int16_t radius, Color c) {
+    c = theme::palette_color(c, palette_);
     if (r.empty()) return;
     const int16_t max_r = (r.w < r.h ? r.w : r.h) / 2;
     if (radius > max_r) radius = max_r;
@@ -156,6 +162,7 @@ void FrameBufferCanvas::fill_round_rect(const Rect& r, int16_t radius, Color c) 
 void FrameBufferCanvas::fill_triangle(int16_t x0, int16_t y0, int16_t x1,
                                       int16_t y1, int16_t x2, int16_t y2,
                                       Color c) {
+    c = theme::palette_color(c, palette_);
     // Scanline fill. Used for the angled cut across the tach bar, where a
     // rectangle would look like a mistake.
     int16_t min_y = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
@@ -185,6 +192,7 @@ void FrameBufferCanvas::fill_triangle(int16_t x0, int16_t y0, int16_t x1,
 void FrameBufferCanvas::fill_arc(int16_t cx, int16_t cy, int16_t r_outer,
                                  int16_t r_inner, float start_deg,
                                  float end_deg, Color c) {
+    c = theme::palette_color(c, palette_);
     if (r_outer <= 0 || end_deg <= start_deg) return;
     if (r_inner < 0) r_inner = 0;
 
@@ -268,6 +276,7 @@ void FrameBufferCanvas::fill_arc(int16_t cx, int16_t cy, int16_t r_outer,
 
 void FrameBufferCanvas::draw_line(int16_t x0, int16_t y0, int16_t x1,
                                   int16_t y1, Color c) {
+    c = theme::palette_color(c, palette_);
     // Bresenham. Integer only — there is no FPU time to spare in a render
     // pass that redraws a track map.
     int dx = x1 - x0, dy = y1 - y0;
@@ -287,6 +296,7 @@ void FrameBufferCanvas::draw_line(int16_t x0, int16_t y0, int16_t x1,
 
 void FrameBufferCanvas::draw_circle(int16_t cx, int16_t cy, int16_t radius,
                                     Color c) {
+    c = theme::palette_color(c, palette_);
     if (radius <= 0) return;
     int x = radius, y = 0, err = 1 - radius;
     while (x >= y) {
@@ -306,6 +316,7 @@ void FrameBufferCanvas::draw_circle(int16_t cx, int16_t cy, int16_t radius,
 
 void FrameBufferCanvas::fill_circle(int16_t cx, int16_t cy, int16_t radius,
                                     Color c) {
+    c = theme::palette_color(c, palette_);
     if (radius <= 0) return;
     for (int16_t dy = static_cast<int16_t>(-radius); dy <= radius; ++dy) {
         const int span = radius * radius - dy * dy;
@@ -319,6 +330,7 @@ void FrameBufferCanvas::fill_circle(int16_t cx, int16_t cy, int16_t radius,
 
 void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
                                   Color c, uint8_t scale, Align align) {
+    c = theme::palette_color(c, palette_);
     if (!text || !*text) return;
     if (scale == 0) scale = 1;
     const Font& f = font_5x7();
@@ -370,6 +382,7 @@ void FrameBufferCanvas::draw_text(int16_t x, int16_t y, const char* text,
 
 void FrameBufferCanvas::draw_bitmap(int16_t x, int16_t y, const uint8_t* bits,
                                     int16_t w, int16_t h, Color c) {
+    c = theme::palette_color(c, palette_);
     if (!bits || w <= 0 || h <= 0) return;
     // Rows are byte-aligned, so a 13-wide icon still steps two bytes a row.
     const int16_t stride = static_cast<int16_t>((w + 7) / 8);

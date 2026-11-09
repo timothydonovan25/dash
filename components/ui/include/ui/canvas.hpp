@@ -42,6 +42,11 @@ public:
     // puts it back. A canvas without smoothed glyphs ignores it.
     virtual void set_smooth_small(bool) {}
 
+    // CONFIG -> Display -> Palette (ui::theme::palette_color): every colour
+    // drawn after this goes through that palette. The App sets it before
+    // each draw; a canvas that records calls ignores it.
+    virtual void set_palette(uint8_t) {}
+
     virtual void fill(Color c) = 0;
     virtual void fill_rect(const Rect& r, Color c) = 0;
     virtual void draw_rect(const Rect& r, Color c) = 0;

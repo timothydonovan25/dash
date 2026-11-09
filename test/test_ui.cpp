@@ -7,6 +7,7 @@
 #include "ui/app.hpp"
 #include "ui/framebuffer_canvas.hpp"
 #include "ui/shadow.hpp"
+#include "ui/theme.hpp"
 #include "ui/wire_cost.hpp"
 #include "core/state/track_buffer.hpp"
 #include <cmath>
@@ -2052,6 +2053,56 @@ int main() {
         s.wipe();
         fx.app.render(s.canvas, true);
         CHECK(s.ink() != stable_ink);
+    }
+
+    CASE("the Contrast palette repaints the screen with no standard grey left on it");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 2);   // TRIP: background, panels, captions
+        const Frame f = busy_frame();
+        auto count = [&](Color c) {
+            size_t n = 0;
+            for (Color p : s.px) n += p == c;
+            return n;
+        };
+        fx.app.update(f);
+        fx.app.render(s.canvas, true);
+        fx.app.clear_full_repaint();
+        const std::vector<Color> standard = s.px;
+        CHECK(count(color::kBg) > 0);
+        CHECK(count(color::kDim) > 0);
+
+        fx.settings.palette = theme::kPaletteContrast;
+        fx.app.update(f);
+        CHECK(fx.app.needs_full_repaint());
+        fx.app.render(s.canvas, true);
+        CHECK(count(color::kBg) == 0);
+        CHECK(count(color::kPanel) == 0);
+        CHECK(count(color::kGrid) == 0);
+        CHECK(count(color::kDim) == 0);
+        CHECK(count(theme::palette_color(color::kDim, theme::kPaletteContrast)) > 0);
+        CHECK(count(color::kAlarm) == std::count(standard.begin(), standard.end(), color::kAlarm));
+
+        // Back to Standard: the same pixels as before.
+        fx.settings.palette = 0;
+        fx.app.update(f);
+        CHECK(fx.app.needs_full_repaint());
+        fx.app.render(s.canvas, true);
+        CHECK(s.px == standard);
+    }
+
+    CASE("a Contrast colour is never itself remapped (primitives call each other)");
+    {
+        const Color in[] = {color::kBg, color::kPanel, color::kGrid, color::kDim};
+        for (Color c : in) {
+            const Color once = theme::palette_color(c, theme::kPaletteContrast);
+            CHECK(once != c);
+            CHECK(theme::palette_color(once, theme::kPaletteContrast) == once);
+        }
+        CHECK(theme::palette_color(color::kText, theme::kPaletteContrast) == color::kText);
+        CHECK(theme::palette_color(color::kBg, 0) == color::kBg);
     }
 
     CASE("the FPS counter: drawn top-left when on, updated as damage, painted back when off");

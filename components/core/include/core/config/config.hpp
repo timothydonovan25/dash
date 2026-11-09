@@ -41,6 +41,9 @@ struct Settings {
     // "1:30" rather than "13:30". No AM/PM: it would not fit the clock tiles.
     bool    clock_12h      = true;
     bool    dim_at_night   = false;
+    // The screen's colours (ui::theme::palette_color): 0 Standard, 1 Contrast,
+    // darker surfaces and brighter captions for a panel that looks washed out.
+    uint8_t palette        = 0;
     // The wheelspin / lockup bar across the top of every screen (core/slip).
     bool    slip_bar       = true;
     // The toast along the bottom of every screen when a trick lands or a

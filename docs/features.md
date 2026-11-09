@@ -1207,6 +1207,8 @@ Every item in `components/core/src/config.cpp`, by CONFIG submenu.
 | Display | Speedo | Wheels / Fused | — |
 | Display | Slip bar | On / Off | — |
 | Display | Popups | On / Off | — |
+| Display | 12h clock | On / Off | — |
+| Display | Palette | Standard / Contrast (2.11): Contrast takes the background to true black and the panels darker, and brightens the captions and rules, for a washed-out panel. Mapped in `FrameBufferCanvas` by `ui::theme::palette_color`; screens never see it | — |
 | Startup | Gauge sweep | On / Off | — |
 | Startup | Sweep time | 500–5000, step 100 | ms |
 | Startup | Splash | On / Off | — |

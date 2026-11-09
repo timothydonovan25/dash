@@ -49,4 +49,22 @@ inline constexpr Color shift_lamp(int index) {
     return alarm;
 }
 
+// CONFIG -> Display -> Palette. 0 Standard is the colours above. 1 Contrast
+// is for a panel that looks washed out: the surfaces go darker (the
+// background to true black), captions and rules brighter. Meaning colours,
+// text and images are untouched. The canvas maps every colour it is given,
+// so no screen knows which palette is up. No output may be an input, or a
+// primitive that calls another would map twice.
+inline constexpr uint8_t kPaletteContrast = 1;
+inline constexpr Color palette_color(Color c, uint8_t palette) {
+    if (palette != kPaletteContrast) return c;
+    switch (c) {
+        case color::kBg:    return rgb(0, 0, 0);
+        case color::kPanel: return rgb(12, 14, 18);
+        case color::kGrid:  return rgb(84, 94, 108);
+        case color::kDim:   return rgb(176, 186, 202);
+        default:            return c;
+    }
+}
+
 }  // namespace ui::theme

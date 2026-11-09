@@ -7,6 +7,7 @@ namespace {
 
 const char* const kUnitOptions[] = {"Imperial", "Metric"};
 const char* const kSpeedoOptions[] = {"Wheels", "Fused"};
+const char* const kPaletteOptions[] = {"Standard", "Contrast"};
 // In kFrameRateHz's order (config.hpp).
 const char* const kFrameRateOptions[] = {"10 Hz", "20 Hz", "30 Hz", "60 Hz", "120 Hz", "Unlimited"};
 static_assert(sizeof(kFrameRateOptions) / sizeof(kFrameRateOptions[0]) == kFrameRateCount,
@@ -68,6 +69,7 @@ const ConfigItem kItems[] = {
     boolean(0x0106,"Slip bar",     "Display", FIELD(slip_bar)),
     boolean(0x0107,"Popups",       "Display", FIELD(popups)),
     boolean(0x0108,"12h clock",    "Display", FIELD(clock_12h)),
+    choice(0x0109, "Palette",      "Display", FIELD(palette), kPaletteOptions, 2),
 
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),
