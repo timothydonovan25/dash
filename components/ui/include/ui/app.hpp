@@ -106,6 +106,18 @@ public:
     Screen& current() { return *active_; }
     ScreenId current_id() const { return active_id_; }
     const core::nav::State& nav_state() const { return nav_; }
+    // The mode and screen, (mode << 8) | screen, saved across key-off.
+    uint16_t place() const {
+        return static_cast<uint16_t>((static_cast<unsigned>(nav_.mode) << 8) | nav_.screen);
+    }
+    // Before begin(): start on a saved place(). One out of range (another
+    // firmware's layout, blank NVS) is ignored.
+    void resume_place(uint16_t p) {
+        const unsigned m = p >> 8, sc = p & 0xFFu;
+        if (m >= core::nav::kModeCount || sc >= layout_.screens[m]) return;
+        nav_.mode = static_cast<core::nav::Mode>(m);
+        nav_.screen = static_cast<uint8_t>(sc);
+    }
     const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
 
     AlertOverlay& alert() { return alert_; }

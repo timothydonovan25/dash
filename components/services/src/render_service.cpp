@@ -230,6 +230,12 @@ void render_task(void* arg) {
     }
 
     ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
+    // The screen left at the last key-off (keeper saves it while still).
+    float place = 0.0f;
+    if (d.storage && hal::ok(d.storage->read_f32(hal::kNsLife, hal::kKeyUiPlace, place)) &&
+        place >= 0.0f && place < 65536.0f) {
+        app.resume_place(static_cast<uint16_t>(place));
+    }
     app.begin(canvas);
 
     // The copy of the glass, 300 kB, in PSRAM: it is read once per strip
@@ -263,6 +269,7 @@ void render_task(void* arg) {
     watchdog_join();
     for (;;) {
         watchdog_feed();
+        d.ui_place.store(app.place(), std::memory_order_relaxed);
         // Wait here rather than at the bottom of the loop, so a button press
         // is acted on the moment it arrives instead of after the rest of the
         // period has run out. That is the difference between a menu that

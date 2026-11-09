@@ -473,6 +473,18 @@ Wi-Fi page and IMU's Calibrate level all post `ConfigSet` commands. A task
 that keeps its own copy compares and re-reads. `keeper` saves settings to
 NVS, and only while the bike is still (§28). §34 lists every item.
 
+**Editing (2.12).** One E flips an On/Off item; numbers and choices still
+take E, C/D, E. A long E puts any item back to its default
+(`core::config::default_value`), and a `*` after a label marks one that
+differs. Actions that lose something (`ConfigItem::confirm`: Clear laps,
+Forget track, Reset to base, Reset trip A, Forget phone, Test crash) show
+"E again" on the first E and run on the second; any other button cancels.
+CONFIG → Shift → **Test lamps** runs the start-up sweep on the lamps once
+(`Deps::lamp_test_req`, `logic` to `ctrl`); it stops when the wheels turn.
+
+**Start where you left off (2.12).** The mode and screen showing are saved
+(`hal::kKeyUiPlace`, by `keeper` while still) and the dash starts on them.
+
 While a gear calibration run is open, `ui/screen_gearcal.cpp` takes over
 CONFIG (§15).
 

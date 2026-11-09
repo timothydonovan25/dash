@@ -43,6 +43,17 @@ constexpr ConfigItem action(uint16_t key, const char* label, const char* group,
                       0, nullptr, 0, id};
 }
 
+// An action that loses something: the screen wants E twice.
+constexpr ConfigItem confirmed(uint16_t key, const char* label, const char* group,
+                               state::CommandId id) {
+    ConfigItem it = action(key, label, group, id);
+    it.confirm = true;
+    return it;
+}
+
+// What every setting starts as, for default_value(). Read-only.
+const Settings kDefaults{};
+
 // Offset and width always come from the same member name, so they cannot
 // disagree with each other.
 #define FIELD(f) static_cast<uint16_t>(offsetof(Settings, f)), \
@@ -93,16 +104,19 @@ const ConfigItem kItems[] = {
     num(0x0307, "Lead time",   "Shift", Kind::Int,    0,   300,  10, "ms",  FIELD(shift_lead_ms)),
     num(0x0308, "Peak hold",   "Shift", Kind::Int,    0,  5000, 250, "ms",  FIELD(shift_peak_hold_ms)),
     num(0x0309, "Tach smooth", "Shift", Kind::Int,    0,    50,   1, "ms",  FIELD(tach_smooth_ms)),
+    // The lamps run the start-up sweep once, to see them without revving.
+    // `ctrl` stops it the moment the wheels turn, as it does the sweep.
+    action(0x030A, "Test lamps",  "Shift", state::CommandId::ShiftLampTest),
 
     // Lap timer
     num(0x0401, "Line width",   "Lap", Kind::Float, 10, 200,  5, "ft",  FIELD(lap_half_width_ft)),
     num(0x0402, "Arm speed",    "Lap", Kind::Float,  0,  60,  1, "mph", FIELD(lap_min_speed_mph)),
     num(0x0403, "Min lap",      "Lap", Kind::Int,    2, 600,  1, "s",   FIELD(lap_min_lap_s)),
     action(0x0404, "Set line here", "Lap", state::CommandId::LapSetLine),
-    action(0x0405, "Clear laps",    "Lap", state::CommandId::LapClear),
+    confirmed(0x0405, "Clear laps", "Lap", state::CommandId::LapClear),
     // Deletes the saved track (core::track) whose line is set: its line,
     // splits, record and reference lap. The next visit starts from nothing.
-    action(0x0406, "Forget track",  "Lap", state::CommandId::TrackForget),
+    confirmed(0x0406, "Forget track", "Lap", state::CommandId::TrackForget),
 
     // Gearing. One ratio per gear, in rpm per mph. Calibrate against the
     // ratio the DIAG screen shows at a steady speed in that gear.
@@ -117,7 +131,7 @@ const ConfigItem kItems[] = {
     // ratio and its % error, accept. Auto-adjust is the learner.
     action(0x0808, "Calibrate gears", "Gearing", state::CommandId::GearCalStart),
     boolean(0x0809,"Auto-adjust",     "Gearing", FIELD(gear_autotune)),
-    action(0x080A, "Reset to base",   "Gearing", state::CommandId::GearCalReset),
+    confirmed(0x080A, "Reset to base", "Gearing", state::CommandId::GearCalReset),
     // What the learner is held to. Written by the calibration and by typing
     // a ratio above; not meant to be edited.
     num(0x0811, "Base 1st", "Gear base", Kind::Float, 40, 900, 5, "r/mph", GBASE(0)),
@@ -141,11 +155,11 @@ const ConfigItem kItems[] = {
     action(0x0603, "Calibrate level", "IMU", state::CommandId::ImuCalibrate),
 
     // Trip
-    action(0x0701, "Reset trip A", "Trip", state::CommandId::TripReset),
+    confirmed(0x0701, "Reset trip A", "Trip", state::CommandId::TripReset),
 
     // Phone (§11.3). Forget drops every bond, so the next phone pairs
     // without a window; pairing mode lets one more phone bond for a minute.
-    action(0x0A01, "Forget phone", "Phone", state::CommandId::BleForgetPhone),
+    confirmed(0x0A01, "Forget phone", "Phone", state::CommandId::BleForgetPhone),
     action(0x0A02, "Pairing mode", "Phone", state::CommandId::BlePairingMode),
     // Calls and messages from the phone, as a toast. The text itself only
     // when stopped unless asked for: a sender's name is a glance, a message
@@ -157,7 +171,7 @@ const ConfigItem kItems[] = {
     boolean(0x0A05,"Crash SOS",     "Phone", FIELD(crash_sos)),
     // The countdown now, as a crash would start it: the whole path to the
     // text, on the bench. Any button cancels it.
-    action(0x0A06, "Test crash", "Phone", state::CommandId::CrashTest),
+    confirmed(0x0A06, "Test crash", "Phone", state::CommandId::CrashTest),
 
     // Heart rate (core/hr): the watch's own broadcast, shown on STAT ->
     // HEART and logged. Turning it off and on forgets which watch it was.
@@ -312,6 +326,8 @@ float get(const Settings& s, const ConfigItem& it) {
     return sign ? static_cast<float>(*static_cast<const int32_t*>(p))
                 : static_cast<float>(*static_cast<const uint32_t*>(p));
 }
+
+float default_value(const ConfigItem& it) { return get(kDefaults, it); }
 
 bool set(Settings& s, const ConfigItem& it, float v) {
     if (it.kind == Kind::Action || it.offset == kNoOffset) return false;

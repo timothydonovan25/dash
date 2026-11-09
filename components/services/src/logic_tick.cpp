@@ -925,6 +925,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::StuntReset:
                 s.stunt.reset_session();
                 break;
+            case core::state::CommandId::ShiftLampTest:
+                d.lamp_test_req.fetch_add(1, std::memory_order_relaxed);
+                break;
             case core::state::CommandId::CrashTest:
                 s.crash.test(now);
                 break;

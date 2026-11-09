@@ -77,8 +77,20 @@ void ConfigScreen::update(const Frame&) {
                 value[vk++] = '>';
                 value[vk++] = ' ';
             }
-            cfg::format(*settings_, it, value + vk, sizeof value - vk);
+            if (it.kind == cfg::Kind::Action && armed_key_ == it.key) {
+                copy(value + vk, sizeof value - vk, "E again");
+            } else {
+                cfg::format(*settings_, it, value + vk, sizeof value - vk);
+            }
             copy(label, sizeof label, it.label);
+            // A '*' after the label: changed from the default, which a long
+            // E puts back.
+            if (it.kind != cfg::Kind::Action &&
+                cfg::get(*settings_, it) != cfg::default_value(it)) {
+                size_t lk = 0;
+                while (label[lk]) ++lk;
+                copy(label + lk, sizeof label - lk, " *");
+            }
         }
         table_.set_row(i, label, value);
         ++rows;
@@ -94,8 +106,16 @@ void ConfigScreen::update(const Frame&) {
         copy(hint, sizeof hint, cfg::group_name(group_));
         size_t k = 0;
         while (hint[k]) ++k;
-        copy(hint + k, sizeof hint - k,
-             editing_ ? ":  C/D change   E done" : ":  C/D move   E edit   B back");
+        const cfg::ConfigItem* it =
+            focus_ < cfg::group_size(group_) ? cfg::group_item(group_, focus_) : nullptr;
+        const char* tail = ":  C/D move   E edit   hold E default   B back";
+        if (editing_) tail = ":  C/D change   E done";
+        else if (it && it->kind == cfg::Kind::Bool)
+            tail = ":  C/D move   E toggle   hold E default   B back";
+        else if (it && it->kind == cfg::Kind::Action)
+            tail = armed_key_ == it->key ? ":  E again to confirm   any other button cancels"
+                                         : ":  C/D move   E run   B back";
+        copy(hint + k, sizeof hint - k, tail);
     }
     hint_.set_text(hint);
 }
@@ -105,6 +125,10 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
     using core::nav::Press;
 
     if (!settings_) return false;
+
+    // Any button but the second E forgets a half-confirmed action.
+    const uint16_t armed = armed_key_;
+    armed_key_ = 0;
 
     if (!in_group_) {
         if (e.button == Button::E && e.press == Press::Short) {
@@ -136,10 +160,28 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
         return true;
     }
 
+    // A long E puts the item back to its default (cfg::default_value).
+    if (e.button == Button::E && e.press == Press::Long) {
+        if (it.kind == cfg::Kind::Action) return true;
+        editing_ = false;
+        post_value(it, cfg::default_value(it));
+        return true;
+    }
+
     if (e.button == Button::E && e.press == Press::Short) {
         if (it.kind == cfg::Kind::Action) {
+            // One that loses something wants E twice (ConfigItem::confirm).
+            if (it.confirm && armed != it.key) {
+                armed_key_ = it.key;
+                return true;
+            }
             // An action item posts its command and never touches Settings.
             return post(core::state::Command(it.action));
+        }
+        // A switch flips on the one press: nothing to choose between.
+        if (it.kind == cfg::Kind::Bool) {
+            post_value(it, current(it) > 0.5f ? 0.0f : 1.0f);
+            return true;
         }
         editing_ = !editing_;
         has_pending_ = false;
@@ -153,24 +195,31 @@ bool ConfigScreen::handle(const core::nav::InputEvent& e) {
         if (!editing_) return false;            // let nav move the focus
         // C is up and D is down, on the value as well as on the list.
         const int dir = (e.button == Button::C) ? +1 : -1;
-        const float shown = cfg::get(*settings_, it);
-        if (has_pending_ && (pending_key_ != it.key || pending_val_ == shown)) {
-            has_pending_ = false;                // applied, or another item
-        }
-        const float from = has_pending_ ? pending_val_ : shown;
+        const float from = current(it);
         const float to = cfg::nudged(it, from, dir);
-        if (to != from) {
-            // Up to logic, which applies it; the keeper then writes NVS and
-            // every module holding a copy refreshes. The screen does not
-            // write Settings, flash, or the shift-light config itself.
-            post(core::state::Command::config_set(it.key, to));
-            has_pending_ = true;
-            pending_key_ = it.key;
-            pending_val_ = to;
-        }
+        if (to != from) post_value(it, to);
         return true;
     }
     return false;
+}
+
+float ConfigScreen::current(const cfg::ConfigItem& it) {
+    const float shown = cfg::get(*settings_, it);
+    if (has_pending_ && (pending_key_ != it.key || pending_val_ == shown)) {
+        has_pending_ = false;                // applied, or another item
+    }
+    return has_pending_ ? pending_val_ : shown;
+}
+
+void ConfigScreen::post_value(const cfg::ConfigItem& it, float v) {
+    // Up to logic, which applies it; the keeper then writes NVS and every
+    // module holding a copy refreshes. The screen does not write Settings,
+    // flash, or the shift-light config itself.
+    if (v == current(it)) return;
+    post(core::state::Command::config_set(it.key, v));
+    has_pending_ = true;
+    pending_key_ = it.key;
+    pending_val_ = v;
 }
 
 void ConfigScreen::draw_background(Canvas& c) {

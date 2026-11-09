@@ -52,6 +52,7 @@ enum class CommandId : uint8_t {
     NavSearchKey,     // i: a character of core::route::kAlphabet to add, or 8 to delete one
     NavSearchPick,    // i: Frame::nav.hits[i]
     NavSearchGo,      // go to the street picked, at the number typed (none: the street)
+    ShiftLampTest,    // CONFIG -> Shift -> Test lamps: `ctrl` runs the start-up sweep on the lamps
 };
 
 struct Command {

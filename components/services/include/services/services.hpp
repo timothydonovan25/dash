@@ -173,6 +173,11 @@ struct Deps {
 
     // The `logic` task, once it is running; TaskHandle_t. See wake_logic.
     std::atomic<void*> logic_task{nullptr};
+
+    // The screen up now (ui::App::place). `render` writes; `keeper` saves it.
+    std::atomic<uint16_t> ui_place{0xFFFF};   // 0xFFFF: not drawn yet, nothing to save
+    // CONFIG -> Shift -> Test lamps: `logic` bumps it, `ctrl` runs the sweep.
+    std::atomic<uint32_t> lamp_test_req{0};
 };
 
 // Run a `logic` pass now rather than at its next 50 Hz tick: a producer has

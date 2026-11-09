@@ -646,7 +646,7 @@ public:
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
     uint8_t focus_count() const override;
-    void set_focus(uint8_t f) override { focus_ = f; }
+    void set_focus(uint8_t f) override { focus_ = f; armed_key_ = 0; }
     int focus_now() const override { return focus_; }
 
     // The screen reads Settings and never writes it: an edit goes up as a
@@ -693,6 +693,12 @@ private:
     uint8_t                 group_ = 0;
     uint8_t                 focus_ = 0;
     bool                    editing_ = false;
+    // A confirmed action (ConfigItem::confirm) that has had its first E:
+    // the next E runs it, any other button forgets it. 0 for none.
+    uint16_t                armed_key_ = 0;
+    // The value the item shows now: what was posted, until logic applies it.
+    float                   current(const core::config::ConfigItem& it);
+    void                    post_value(const core::config::ConfigItem& it, float v);
 };
 
 // The gear calibration page, which takes over CONFIG while a run is open

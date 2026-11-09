@@ -90,6 +90,9 @@ void ctrl_task(void* arg) {
     // kSweepWaitMs -- a dead panel -- there is no tach to follow, so skip it.
     bool sweep_done = false;
     constexpr uint32_t kSweepWaitMs = 3000;
+    // CONFIG -> Shift -> Test lamps reruns the sweep from `test_start`.
+    uint32_t lamp_test_seen = d.lamp_test_req.load(std::memory_order_relaxed);
+    uint32_t test_start = 0;
 
     TickType_t next = xTaskGetTickCount();
     uint32_t late = 0;
@@ -147,16 +150,23 @@ void ctrl_task(void* arg) {
         // edge timestamps, so it costs nothing here but a multiply.
         const uint16_t rpm = core::shift::lamp_rpm(tach.raw_rpm(), tach.rpm_rate(), sc);
         lamp_rpm = rpm;
+        const uint32_t req = d.lamp_test_req.load(std::memory_order_relaxed);
+        if (req != lamp_test_seen) {
+            lamp_test_seen = req;
+            test_start = now ? now : 1;
+            sweep_done = false;
+        }
         if (!sweep_done) {
-            const uint32_t first = d.system ? d.system->first_frame_ms : 0;
+            const uint32_t first = test_start ? test_start
+                                              : (d.system ? d.system->first_frame_ms : 0);
             if (first != 0) {
                 core::sweep::Config wc;
-                wc.enabled = d.settings->gauge_sweep;
+                wc.enabled = test_start != 0 || d.settings->gauge_sweep;
                 wc.duration_ms = d.settings->sweep_ms;
                 wc.peak_rpm = d.settings->shift_flash_rpm;
                 const float road = front.mph() > rear.mph() ? front.mph() : rear.mph();
                 const float sw = core::sweep::lamp_rpm(now - first, road, wc);
-                if (sw < 0.0f) sweep_done = true;
+                if (sw < 0.0f) { sweep_done = true; test_start = 0; }
                 else if (sw > rpm) lamp_rpm = static_cast<uint16_t>(sw);
             } else if (now > kSweepWaitMs || !d.settings->gauge_sweep) {
                 sweep_done = true;

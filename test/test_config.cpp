@@ -14,7 +14,7 @@ bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
 const uint16_t kShippedKeys[] = {
     0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x0108, 0x0109,
     0x0201, 0x0202, 0x0203, 0x0204, 0x0205,
-    0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308, 0x0309,
+    0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308, 0x0309, 0x030A,
     0x0401, 0x0402, 0x0403, 0x0404, 0x0405, 0x0406,
     0x0501, 0x0502, 0x0503,
     0x0601, 0x0602, 0x0603,
@@ -261,6 +261,26 @@ int main() {
         const LapView lv = lap_view(s);
         CHECK(lv.min_lap_ms == 25000);
         CHECK_NEAR(lv.half_width_ft, s.lap_half_width_ft, 1e-6);
+    }
+
+    CASE("default_value is a fresh Settings' value, whatever the current one is");
+    {
+        Settings s;
+        s.brightness_pct = 40;
+        s.slip_bar = false;
+        CHECK(default_value(*find(0x0101)) == 80.0f);
+        CHECK(default_value(*find(0x0106)) == 1.0f);
+        CHECK(default_value(*find(0x0405)) == 0.0f);   // an action
+    }
+
+    CASE("only the actions that lose something ask twice");
+    {
+        CHECK(find(0x0405)->confirm);   // Clear laps
+        CHECK(find(0x0406)->confirm);   // Forget track
+        CHECK(find(0x0A01)->confirm);   // Forget phone
+        CHECK(!find(0x0C01)->confirm);  // Eject card
+        CHECK(!find(0x030A)->confirm);  // Test lamps
+        CHECK(!find(0x0101)->confirm);  // not an action
     }
 
     CASE("nudged gives the next value without touching Settings");

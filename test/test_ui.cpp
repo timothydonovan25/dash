@@ -1298,20 +1298,70 @@ int main() {
         CHECK(fx.app.current().focus_count() == core::config::group_size(1));
         CHECK(fx.app.nav_state().focus == 0);
 
-        // Toggling the sweep off goes up as a ConfigSet for its key.
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // edit
-        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
+        // One E flips a switch: the sweep goes off as a ConfigSet for its key,
+        // and a second E, before logic has applied the first, puts it back.
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.key == 0x0B01);
+        CHECK(fx.sink.posted.back().cfg.val == 0.0f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.val == 1.0f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         apply_posted(fx);
         CHECK(!fx.settings.gauge_sweep);
-        CHECK(fx.sink.posted.back().cfg.key == 0x0B01);
 
-        // B ends the edit, then leaves the submenu with the cursor on it.
-        fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
+        // A long E puts it back to its default (on), and C/D still move.
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        apply_posted(fx);
+        CHECK(fx.settings.gauge_sweep);
         CHECK(fx.app.current().focus_count() == core::config::group_size(1));
+
+        // B leaves the submenu with the cursor on it: a switch is never an edit.
         fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
         CHECK(fx.app.current().focus_count() == groups);
         CHECK(fx.app.nav_state().focus == 1);
         CHECK(fx.app.nav_state().mode == Mode::Config);
+    }
+
+    CASE("a confirmed action wants E twice; any other button cancels it");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+        // Find Lap -> Clear laps by walking the table the way a rider does.
+        size_t g = 0, i = 0;
+        for (g = 0; g < core::config::group_count(); ++g)
+            if (std::strcmp(core::config::group_name(g), "Lap") == 0) break;
+        for (i = 0; i < core::config::group_size(g); ++i)
+            if (core::config::group_item(g, i)->key == 0x0405) break;
+        CHECK(core::config::group_item(g, i)->confirm);
+        for (size_t k = 0; k < g; ++k) fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        for (size_t k = 0; k < i; ++k) fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        const size_t before = fx.sink.posted.size();
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // armed
+        CHECK(fx.sink.posted.size() == before);
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);   // cancels, moves up
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // armed again
+        CHECK(fx.sink.posted.size() == before);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // runs
+        CHECK(fx.sink.posted.size() == before + 1);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::LapClear);
+    }
+
+    CASE("the App starts on a saved place, and ignores one out of range");
+    {
+        Fixture fx;
+        fx.app.resume_place(static_cast<uint16_t>((1u << 8) | 2u));   // TRACK, screen 2
+        CHECK(fx.app.nav_state().mode == Mode::Track);
+        CHECK(fx.app.nav_state().screen == 2);
+        CHECK(fx.app.place() == ((1u << 8) | 2u));
+        fx.app.resume_place(static_cast<uint16_t>((1u << 8) | 200u)); // no such screen
+        CHECK(fx.app.nav_state().screen == 2);
+        fx.app.resume_place(0xFFFF);
+        CHECK(fx.app.nav_state().mode == Mode::Track);
     }
 
     CASE("the gear calibration page takes over CONFIG while a run is open, and hands it back");

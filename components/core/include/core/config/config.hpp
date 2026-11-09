@@ -189,6 +189,9 @@ struct ConfigItem {
     const char* const* options;      // Enum only
     uint8_t           option_count;  // Enum only
     state::CommandId  action;        // Action only
+    // Action only: it loses something (a track, laps, a bond), so the
+    // config screen asks for a second E before posting it.
+    bool              confirm = false;
 };
 
 // The table, and how much of it there is.
@@ -212,6 +215,9 @@ const ConfigItem* find(uint16_t key);
 // go through the same clamp.
 float clamp(const ConfigItem& it, float v);
 float get(const Settings& s, const ConfigItem& it);
+// The value a fresh `Settings{}` has for it: what a long E on the config
+// screen puts back. 0 for an action.
+float default_value(const ConfigItem& it);
 bool  set(Settings& s, const ConfigItem& it, float v);   // true if it changed
 
 // One step of the C/D buttons on the config screen, from `current`: the

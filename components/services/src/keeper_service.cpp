@@ -146,6 +146,9 @@ void keeper_task(void* arg) {
     core::health::Policy policy;
     double last_saved_odo = -1.0;
     double last_saved_hours = -1.0;
+    // The screen as last saved, so an unchanged one is never rewritten.
+    float saved_place = -1.0f;
+    if (d.storage) d.storage->read_f32(hal::kNsLife, hal::kKeyUiPlace, saved_place);
 
     SettingsSaver settings_saver;
     drivers::ChipTemp chip_temp;
@@ -204,6 +207,11 @@ void keeper_task(void* arg) {
             if (last_saved_hours < 0.0 || hours - last_saved_hours >= 0.01) {
                 d.storage->write_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
                 last_saved_hours = hours;
+            }
+            const float place = d.ui_place.load(std::memory_order_relaxed);
+            if (place != 65535.0f && place != saved_place) {
+                d.storage->write_f32(hal::kNsLife, hal::kKeyUiPlace, place);
+                saved_place = place;
             }
             // Settings that have changed since the last pass.
             settings_saver.save_changed(*d.storage, *d.settings);

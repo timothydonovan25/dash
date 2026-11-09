@@ -25,6 +25,9 @@ inline constexpr uint16_t kKeyEngineHours  = 0x0002;
 // Which panel FPC1 had at the last boot (drivers::PanelModel), so the probe
 // tries it first. Written by wiring, at boot, only when it changes.
 inline constexpr uint16_t kKeyPanelModel   = 0x0003;
+// The mode and screen last shown, (mode << 8) | screen (ui::App::place),
+// so the dash starts where it was left. Written by keeper while still.
+inline constexpr uint16_t kKeyUiPlace      = 0x0004;
 // The named waypoints: three keys each from here (lat, lon, when), in
 // core::waypoint's order.
 inline constexpr uint16_t kKeyWaypointBase = 0x0100;
