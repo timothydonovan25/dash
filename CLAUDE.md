@@ -34,7 +34,8 @@ firmware: `firmware.txt` (2.0, `fps-counter`).
 | BLE (GATT contract, iPhone, watch, pairing), Wi-Fi updates, partition table, stable/dev slots — architecture §11, same numbers. A bare "§11.x" in code means this file | `docs/radio-and-updates.md` |
 | What has run on the board; bench procedure per subsystem; BRINGUP markers; `sdkconfig` traps | `docs/bringup.md` (status table first) |
 | USB console commands, `pod_keys.py`, menu routes, soak summary | `docs/console.md` |
-| A C6 with blank flash: flashing it over its UART | `docs/c6-uart-flash.md` |
+| A C6 with blank flash: flashing it over its UART | `docs/bringup.md` §9.2 |
+| A chip's datasheet, and how this project uses it (pins, registers, values, traps) | `datasheets/` (`<PART>.pdf` + `<PART>-USAGE.md`, index in its README) |
 | Pin numbers in code | `components/bsp/include/bsp/pins.hpp` (the only place) |
 | Pins, nets, PCA9955B and rails, the pre-order audit, open hardware items | `docs/p4-board-pin-map.md` |
 | Speed fusion design, dead wheels, replay | `docs/fusion.md` |
