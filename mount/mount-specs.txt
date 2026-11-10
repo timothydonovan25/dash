@@ -1,0 +1,5 @@
+12mm head bolts 3+7/8 in apart horizontally, angled 26.1 degrees towards the rider.
+relative to them, i want the screen to be 1in forward and 2in up.
+the angle of the screen should be 30 degrees up.
+you must  keep the tray and frame files untouched, you can only change the pod clamp part to interface with the old tray and frame while mounting to the new requirements.
+keep clearance for bolt heads.

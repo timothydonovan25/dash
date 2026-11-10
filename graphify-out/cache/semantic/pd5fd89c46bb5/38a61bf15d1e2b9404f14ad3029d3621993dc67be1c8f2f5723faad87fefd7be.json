@@ -1,0 +1,1 @@
+{"nodes": [{"id": "components_bsp_cmakelists_bsp", "label": "bsp component", "file_type": "code", "source_file": "components/bsp/CMakeLists.txt", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null, "rationale": "The only hardware truth: pins and bus setup"}], "edges": [], "hyperedges": []}
