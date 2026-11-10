@@ -685,13 +685,17 @@ void Table::render(Canvas& c) {
         if (focused) {
             // Inside the bounds: on the first row the band starts above
             // them, and a partial repaint never clears what is out there.
-            c.fill_rect(Rect{bounds.x, static_cast<int16_t>(y - 2), bounds.w,
-                             static_cast<int16_t>(line)}.clipped_to(bounds),
-                        color::kPanel);
+            // The outline in the text colour says which row it is where the
+            // panel fill alone is too faint to see (a transflective panel).
+            const Rect band = Rect{bounds.x, static_cast<int16_t>(y - 2), bounds.w,
+                                   static_cast<int16_t>(line)}.clipped_to(bounds);
+            c.fill_rect(band, color::kPanel);
+            c.draw_rect(band, theme::primary);
         }
-        c.draw_text(bounds.x, y, left_[r].s,
+        // Inset off the outline, every row alike so the columns line up.
+        c.draw_text(static_cast<int16_t>(bounds.x + kPadPx), y, left_[r].s,
                     focused ? color::kWhite : color::kText, scale_, Align::Left);
-        c.draw_text(bounds.right(), y, right_[r].s,
+        c.draw_text(static_cast<int16_t>(bounds.right() - kPadPx), y, right_[r].s,
                     focused ? color::kAccent : color::kDim, scale_, Align::Right);
     }
 }

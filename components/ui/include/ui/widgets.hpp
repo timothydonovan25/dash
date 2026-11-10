@@ -185,6 +185,8 @@ private:
 class Table : public Widget {
 public:
     static constexpr size_t kRows = 12;
+    // Text sits this far inside the focus outline, on every row.
+    static constexpr int16_t kPadPx = 4;
     void configure(uint8_t visible_rows, uint8_t scale = 1);
     void set_row(size_t i, const char* left, const char* right);
     void set_row_count(size_t n);

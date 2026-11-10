@@ -1322,6 +1322,26 @@ int main() {
         CHECK(fx.app.nav_state().mode == Mode::Config);
     }
 
+    CASE("the focused table row is outlined in the text colour, and the outline follows it");
+    {
+        Fixture fx;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Config, 0);
+        fx.app.update(busy_frame());
+        fx.app.render(s.canvas, true);
+        // CONFIG's table is at (14, 40), scale 2: rows 20 px apart.
+        auto at = [&](int x, int y) { return s.px[static_cast<size_t>(y) * kScreenW + x]; };
+        CHECK(at(200, 40) == color::kText);         // row 0's top edge (clipped to the table)
+        CHECK(at(14, 50) == color::kText);          // its left edge
+        CHECK(at(200, 58) != color::kText);         // row 1 not yet
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(busy_frame());
+        fx.app.render(s.canvas, true);
+        CHECK(at(200, 58) == color::kText);
+        CHECK(at(200, 40) != color::kText);
+    }
+
     CASE("a confirmed action wants E twice; any other button cancels it");
     {
         Fixture fx;

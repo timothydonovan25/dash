@@ -20,6 +20,12 @@ played:
 --shot (screen.png): the buttons and what they did, on one port
 (tools/dash_screen.py, console `screen`).
 
+Paused for flashing without quitting: SIGUSR1 lets go of the port, SIGUSR2
+takes it back (the board's new port, unless -p), keys and log resume:
+    kill -USR1 $(cat $XDG_RUNTIME_DIR/pod_keys.pid); python3 tools/flash_dev.py
+    kill -USR2 $(cat $XDG_RUNTIME_DIR/pod_keys.pid)
+(not pkill -f, which also signals, and kills, any shell whose command line names it)
+
 q / Ctrl-C quits. Prints the board's log alongside. Opens the port without
 resetting the board (RTS is lowered before DTR). `hold` is the bike's
 (main/serial_buttons.cpp); the demo has its touch zones.
@@ -28,6 +34,7 @@ import argparse
 import os
 import re
 import select
+import signal
 import sys
 import time
 import termios
@@ -62,7 +69,7 @@ def kitty_supported(fd):
     return re.search(rb"\x1b\[\?\d+u", got) is not None
 
 
-def held_keys(fd, s):
+def held_keys(fd, tx):
     """Keys 1-5 as held state, `hold <mask>` on every change and every
     RESEND_S while any is down."""
     mask, sent, last = 0, None, 0.0
@@ -70,7 +77,7 @@ def held_keys(fd, s):
 
     def send():
         nonlocal sent, last
-        s.write(f"hold {mask}\n".encode())
+        tx(f"hold {mask}\n")
         sent, last = mask, time.monotonic()
 
     while True:
@@ -113,17 +120,70 @@ def main():
     ap.add_argument("--screen", type=float, default=0, help="seconds between screenshots; 0 for none")
     ap.add_argument("--shot", default="screen.png", help="where the screenshot goes")
     a = ap.parse_args()
+    fixed = a.port
     a.port = a.port or find_port()
 
     s = serial.Serial()
-    s.port, s.baudrate, s.timeout = a.port, 115200, 0.2
-    # The USB-Serial-JTAG resets the chip on DTR low with RTS high. Opening
-    # with both False reset it every time: pyserial lowers DTR before RTS.
-    # Open as the kernel does anyway (both high), then RTS down first.
-    s.dtr = s.rts = True
-    s.open()
-    s.rts = False
-    s.dtr = False
+    s.baudrate, s.timeout = 115200, 0.2
+
+    def open_port():
+        s.port = a.port
+        # The USB-Serial-JTAG resets the chip on DTR low with RTS high. Opening
+        # with both False reset it every time: pyserial lowers DTR before RTS.
+        # Open as the kernel does anyway (both high), then RTS down first.
+        s.dtr = s.rts = True
+        s.open()
+        s.rts = False
+        s.dtr = False
+
+    open_port()
+    paused = threading.Event()
+
+    def tx(line):
+        if paused.is_set():
+            return                  # keys pressed while paused go nowhere
+        try:
+            s.write(line.encode())
+        except (serial.SerialException, OSError, TypeError):
+            if not paused.is_set():     # closed under us by pause() is fine
+                raise
+
+    def pause(*_):
+        if paused.is_set():
+            return
+        try:
+            s.write(b"hold 0\n")       # nothing stays held while away
+        except (serial.SerialException, OSError):
+            pass
+        paused.set()                # before close, so the threads see why it failed
+        s.close()
+        sys.stdout.write(f"\r\n[pod_keys: paused, {a.port} free]\r\n")
+        sys.stdout.flush()
+
+    def resume(*_):
+        if not paused.is_set():
+            return
+        end = time.monotonic() + 30     # the board is still enumerating after a flash
+        while True:
+            a.port = fixed or find_port()
+            try:
+                open_port()
+                break
+            except serial.SerialException:
+                if time.monotonic() > end:
+                    sys.stdout.write(f"\r\n[pod_keys: {a.port} not back, still paused; SIGUSR2 again]\r\n")
+                    sys.stdout.flush()
+                    return
+                time.sleep(0.5)
+        paused.clear()
+        sys.stdout.write(f"\r\n[pod_keys: back on {a.port}]\r\n")
+        sys.stdout.flush()
+
+    signal.signal(signal.SIGUSR1, pause)
+    signal.signal(signal.SIGUSR2, resume)
+    pidfile = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "pod_keys.pid")
+    with open(pidfile, "w") as f:
+        f.write(f"{os.getpid()}\n")
 
     scr = None
     if a.screen:
@@ -133,10 +193,15 @@ def main():
 
     def echo():
         buf = b""
-        while s.is_open:
+        while True:
+            if paused.is_set():
+                time.sleep(0.1)
+                continue
             try:
                 d = s.read(4096)
-            except (serial.SerialException, TypeError):
+            except (serial.SerialException, OSError, TypeError):
+                if paused.is_set():
+                    continue
                 return
             if not d:
                 continue
@@ -159,9 +224,9 @@ def main():
             sys.stdout.flush()
 
     def ask():
-        while s.is_open:
+        while True:
             try:
-                s.write(b"screen\n")
+                tx("screen\n")
             except (serial.SerialException, OSError, TypeError):
                 return
             time.sleep(a.screen)
@@ -178,14 +243,14 @@ def main():
             sys.stdout.write(KITTY_ON)
             sys.stdout.flush()
             try:
-                held_keys(fd, s)
+                held_keys(fd, tx)
             finally:
                 # The terminal first: a port gone mid-session raises on the
                 # write, and left the shell typing escape codes.
                 sys.stdout.write(KITTY_OFF)
                 sys.stdout.flush()
                 try:
-                    s.write(b"hold 0\n")
+                    tx("hold 0\n")
                 except (serial.SerialException, OSError):
                     pass
             return
@@ -195,12 +260,16 @@ def main():
             if not k or k in ("q", "\x03", "\x04"):   # "" is EOF, and "" in SHORT is True
                 break
             if k in SHORT:
-                s.write(f"btn {'ABCDE'[SHORT.index(k)]}\n".encode())
+                tx(f"btn {'ABCDE'[SHORT.index(k)]}\n")
             elif k in LONG:
-                s.write(f"long {'ABCDE'[LONG.index(k)]}\n".encode())
+                tx(f"long {'ABCDE'[LONG.index(k)]}\n")
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         s.close()
+        try:
+            os.remove(pidfile)
+        except OSError:
+            pass
         print()
 
 

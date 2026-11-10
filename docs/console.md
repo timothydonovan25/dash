@@ -43,6 +43,13 @@ lines, so debounce, long presses and Doom all work. Anywhere else it sends
 decoded presses: 1–5 short, shift+1–5 long; debounce and hold timing are not
 exercised. q quits. The board's log scrolls alongside.
 
+To flash without quitting it, pause it: `SIGUSR1` sends `hold 0` and lets go
+of the port, `SIGUSR2` reopens it (re-finding the board's port unless `-p`
+was given, waiting up to 30 s for it to enumerate) and keys work again:
+`kill -USR1 $(cat $XDG_RUNTIME_DIR/pod_keys.pid)`, flash, then the same with
+`-USR2`. Not `pkill -f pod_keys.py`: it also signals any shell whose command
+line names it, and SIGUSR1 kills a shell.
+
 ## Menu routes
 
 From anywhere: `long A` is CRUISE screen 0. Presses 350 ms apart. If one
