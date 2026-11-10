@@ -16,3 +16,6 @@ __pycache__/
 demo_p4/build-*/
 .stfolder/
 *.sync-conflict-*
+
+# graphify: the cache rebuilds itself; the graph and report stay.
+graphify-out/cache/

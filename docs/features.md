@@ -1021,6 +1021,9 @@ have not run (bringup §9.1).
   - **Boot dev once.**
   - **Promote to stable** works only from inside the running dev image, by
     hand.
+  - Boot dev once and Promote want **E twice** (2.14): the first arms
+    the row and the status line says "E again to confirm"; any other button
+    cancels.
 - **Other routes in.** `tools/flash_dev.py` writes the dev slot over USB,
   `idf.py flash` writes a new stable, and the Wi-Fi page uploads to dev.
 - **Image header check** (`core/ota/`). An image for the wrong board is

@@ -810,7 +810,10 @@ void UpdateScreen::update(const Frame& f) {
     Color sc = color::kDim;
     const char* st = "";
     char err[48];
-    if (o.install == ota::Install::Failed) {
+    if (armed_) {
+        st = "E again to confirm   any other button cancels";
+        sc = color::kAlarm;
+    } else if (o.install == ota::Install::Failed) {
         join(err, sizeof err, "failed:", ota::install_error_name(o.error),
              o.error == ota::InstallError::BadImage ? ota::image_error_name(o.image_error)
                                                     : nullptr);
@@ -875,7 +878,15 @@ void UpdateScreen::update(const Frame& f) {
 bool UpdateScreen::handle(const core::nav::InputEvent& e) {
     using core::nav::Button;
     using core::nav::Press;
+    // Any button but the second E forgets a half-confirmed action.
+    const uint8_t armed = armed_;
+    armed_ = 0;
     if (e.button != Button::E || e.press != Press::Short) return false;
+    // Boot dev once reboots the bike; Promote replaces stable for good.
+    if ((focus_ == 1 || focus_ == 2) && armed != focus_ + 1) {
+        armed_ = static_cast<uint8_t>(focus_ + 1);
+        return true;
+    }
     // `ota` decides whether it can; this only asks. A refusal comes back on
     // the status line rather than being second-guessed here.
     static constexpr core::state::CommandId kIds[kActions] = {

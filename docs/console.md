@@ -60,7 +60,7 @@ stops working, the sim shows the same screens.
 | Wi-Fi on/off | `long A`, A×4, D×13, E, E — then E again toggles |
 | Eject card | `long A`, A×4, D×12, E, E |
 | DIAG → Update | `long A`, A×3, D×7, E |
-| Boot dev once | then D, E |
+| Boot dev once | then D, E, E |
 
 These counts follow the CONFIG table's order and DIAG's menu; a new setting
 or page moves them.
@@ -73,12 +73,12 @@ NVS holds settings, the phone's bond, trip and waypoints:
 Forget phone, Calibrate level, the trip and gear resets. Tracks need a fix,
 so indoors they are safe.
 
-**They reach the slots too.** Boot dev once and Promote to stable each act
-on one short E with no confirmation; a 20 min run did both (dev booted at
-6 min, promoted at 14), leaving the older dev image as stable. Afterwards
-check the boot line `ota: running ... from ota_N` and, if it moved,
-`idf.py flash` (it rewrites otadata, so stable is `ota_0` again). Whether a
-rider should get a confirm step there is open.
+**They reach the slots too.** Before 2.14, Boot dev once and Promote to
+stable each acted on one short E; a 20 min run did both (dev booted at
+6 min, promoted at 14), leaving the older dev image as stable. They now want
+E twice with nothing between, which random presses hit far less often, but
+still check the boot line `ota: running ... from ota_N` afterwards and, if
+it moved, `idf.py flash` (it rewrites otadata, so stable is `ota_0` again).
 
 ## The 5 s status block
 

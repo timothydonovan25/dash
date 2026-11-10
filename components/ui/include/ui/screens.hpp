@@ -618,10 +618,13 @@ public:
     bool handle(const core::nav::InputEvent& e) override;
     WidgetList widgets() override;
     uint8_t focus_count() const override { return kActions; }
-    void set_focus(uint8_t f) override { focus_ = f; }
+    void set_focus(uint8_t f) override { focus_ = f; armed_ = 0; }
 
 private:
     static constexpr uint8_t kActions = 4;
+    // Boot dev once and Promote want E twice, as CONFIG's confirmed
+    // actions do: the row number + 1 after the first E, 0 otherwise.
+    uint8_t armed_ = 0;
     Label   running_;
     Label   other_;
     Label   c6_;

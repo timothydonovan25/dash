@@ -2095,9 +2095,19 @@ int main() {
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
         fx.app.update(f);
+        // Boot dev once: one E only arms it, and a move away disarms it.
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        fx.app.on_input(InputEvent{Button::C, Press::Short}, s.canvas);
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
         fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 1);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.size() == 2);
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         CHECK(fx.sink.posted.size() == 3);
         CHECK(fx.sink.posted[0].id == core::state::CommandId::OtaInstallSd);

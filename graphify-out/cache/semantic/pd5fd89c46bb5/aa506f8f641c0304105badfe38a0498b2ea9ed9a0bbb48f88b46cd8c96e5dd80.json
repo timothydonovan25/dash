@@ -1,1 +1,0 @@
-{"nodes": [{"id": "firmware_release_version", "label": "Firmware release version 1.32 (doom stunts notify)", "file_type": "document", "source_file": "firmware.txt", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null, "rationale": "Names every dash-*.bin; shown on Update screen and Wi-Fi page"}], "edges": [], "hyperedges": []}
