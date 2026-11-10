@@ -53,6 +53,9 @@ enum class CommandId : uint8_t {
     NavSearchPick,    // i: Frame::nav.hits[i]
     NavSearchGo,      // go to the street picked, at the number typed (none: the street)
     ShiftLampTest,    // CONFIG -> Shift -> Test lamps: `ctrl` runs the start-up sweep on the lamps
+    ServiceDone,      // CONFIG -> Service -> Mark done: the interval starts again
+    OdoSet,           // f: miles. Console `odo`, the laptop only
+    EngHoursSet,      // f: hours. Console `hours`
 };
 
 struct Command {

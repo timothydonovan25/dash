@@ -120,5 +120,32 @@ int main() {
         }
     }
 
+    CASE("the laptop's odo and hours set the totals; mark done restarts the service interval");
+    {
+        core::state::Slots slots;
+        core::config::Settings settings;
+        settings.service_every_h = 10.0f;
+        services::Deps deps;
+        deps.slots = &slots;
+        deps.settings = &settings;
+        deps.totals_unread.store(true);
+        services::LogicState s;
+        Queue q;
+        q.q.emplace_back(CommandId::OdoSet, 1234.5f);
+        services::logic_tick(deps, s, q, 1000);
+        CHECK(deps.totals_unread.load());                  // hours not given yet
+        q.q.emplace_back(CommandId::EngHoursSet, 87.0f);
+        q.q.emplace_back(CommandId::OdoSet, -5.0f);        // refused
+        services::logic_tick(deps, s, q, 1020);
+        CHECK(!deps.totals_unread.load());
+        CHECK_NEAR(slots.trip.get().odo_mi, 1234.5, 0.01);
+        CHECK_NEAR(slots.trip.get().eng_hours, 87.0, 0.01);
+        CHECK(slots.trip.get().service_due);               // 87 h past a service at 0
+        q.q.emplace_back(CommandId::ServiceDone);
+        services::logic_tick(deps, s, q, 1040);
+        CHECK(!slots.trip.get().service_due);
+        CHECK_NEAR(settings.service_at_h, 87.0, 0.01);
+    }
+
     return check::report("logic_waypoint");
 }

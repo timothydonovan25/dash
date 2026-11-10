@@ -19,6 +19,7 @@ const char* text(Kind k) {
         case Kind::SdCard:      return "LOG STOPPED";
         case Kind::ShiftLamps:  return "SHIFT LIGHTS OUT";
         case Kind::Imu:         return "IMU FAULT";
+        case Kind::Service:     return "SERVICE DUE";
         default:                return "";
     }
 }
@@ -61,6 +62,8 @@ bool Alerter::condition(Kind k, const state::Frame& f) const {
             return f.health[Dev::LedDriver].state == DevState::Fault;
         case Kind::Imu:
             return f.health[Dev::Imu].state == DevState::Fault;
+        case Kind::Service:
+            return f.trip.service_due;
         default:
             return false;
     }

@@ -171,6 +171,20 @@ int main() {
         CHECK(run(a, 0, 1000, [](Frame& f) { f.health[Dev::RearWheel].state = DevState::Fault; }) == Kind::RearWheel);
     }
 
+    CASE("service due shows, stays dismissed, and gives way to a fault");
+    {
+        Alerter a;
+        const auto due = [](Frame& f) { f.trip.service_due = true; };
+        CHECK(run(a, 0, 1000, due) == Kind::Service);
+        a.acknowledge();
+        CHECK(run(a, 1000, 5000, due) == Kind::None);
+        Alerter b;
+        CHECK(run(b, 0, 1000, [](Frame& f) {
+            f.trip.service_due = true;
+            f.health[Dev::RearWheel].state = DevState::Fault;
+        }) == Kind::RearWheel);
+    }
+
     CASE("every kind has text, and None has none");
     {
         for (uint8_t i = 1; i < static_cast<uint8_t>(Kind::Count); ++i) {

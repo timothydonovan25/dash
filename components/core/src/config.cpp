@@ -211,6 +211,13 @@ const ConfigItem kItems[] = {
     // the submenus above keep their places (docs/console.md's routes).
     boolean(0x1001, "FPS counter", "Diag", FIELD(show_fps)),
     choice(0x1002, "Frame rate",   "Diag", FIELD(frame_rate), kFrameRateOptions, 6),
+
+    // Service (core::trip::service_due): an alert every Interval engine
+    // hours after Done at; 0 is off. Mark done sets Done at to now.
+    // The last group, so no older menu route moves.
+    num(0x1201, "Interval", "Service", Kind::Float, 0, 200, 1, "h", FIELD(service_every_h)),
+    num(0x1202, "Done at",  "Service", Kind::Float, 0, 100000, 1, "h", FIELD(service_at_h)),
+    confirmed(0x1203, "Mark done", "Service", state::CommandId::ServiceDone),
 };
 
 #undef FIELD

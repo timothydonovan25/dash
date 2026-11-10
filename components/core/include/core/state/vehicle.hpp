@@ -134,6 +134,8 @@ struct Trip {
     float fuel_used_gal = 0.0f;
     float eng_hours     = 0.0f;
     float top_mph       = 0.0f;
+    // The service interval has run out (core::trip::service_due).
+    bool  service_due   = false;
 };
 
 // The lap timer's own state plus the delta, which the timer does not own:

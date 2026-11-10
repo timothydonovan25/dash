@@ -72,6 +72,12 @@ struct Settings {
     bool     hr_on      = false;
     uint16_t hr_max_bpm = 185;
 
+    // CONFIG -> Service: SERVICE DUE once the engine has run `every` hours
+    // past `at` (core::trip::service_due). 0: off, which it is until the
+    // rider picks an interval. Mark done sets `at` to the hours now.
+    float service_every_h = 0.0f;
+    float service_at_h    = 0.0f;
+
     // CRUISE -> NAV (core::route): routes keep off dirt roads (tracks and
     // unpaved surfaces). Switched from NAV's picker as well as here.
     bool     nav_avoid_dirt = false;

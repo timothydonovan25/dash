@@ -74,6 +74,13 @@ struct Record {
     float    nav_turn_ft = 0.0f;
     float    nav_dest_mi = 0.0f;
     uint8_t  limit_mph   = 0;
+
+    // Battery volts (0: no reading), how many shift lamps are lit (0-8),
+    // and wheel slip in percent of road speed (core::slip): + is the rear
+    // spinning, - a wheel locking.
+    float    vbat        = 0.0f;
+    uint8_t  shift_lamps = 0;
+    int8_t   slip_pct    = 0;
 };
 
 enum Flags : uint16_t {

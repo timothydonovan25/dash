@@ -36,6 +36,10 @@ struct Input {
     uint32_t t_ms       = 0;
 };
 
+// Has the engine run `every_h` hours since the service at `at_h`? Never
+// with `every_h` 0, which is the reminder turned off.
+bool service_due(double engine_hours, float at_h, float every_h);
+
 class Computer {
 public:
     // Restored from NVS at boot. The `life` namespace holds these two and

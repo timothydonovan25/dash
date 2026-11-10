@@ -147,6 +147,24 @@ void handle(const char* line, ui::ICommandSink& commands, const services::Deps& 
         services::bench_route();
         return;
     }
+    // `odo <miles>`, `hours <h>`: set the odometer or the engine hours, after
+    // an NVS erase or a board swap. Here and nowhere on the dash: it is not
+    // a thing to reach with a thumb.
+    if (std::strncmp(line, "odo ", 4) == 0 || std::strncmp(line, "hours ", 6) == 0) {
+        const bool odo = line[0] == 'o';
+        const char* arg = line + (odo ? 4 : 6);
+        char* end = nullptr;
+        const float v = std::strtof(arg, &end);
+        if (end == arg || !(v >= 0.0f)) {
+            ESP_LOGW(kTag, "usage: odo <miles> | hours <h>");
+        } else {
+            ESP_LOGW(kTag, "%s set to %.2f", odo ? "odometer" : "engine hours",
+                     static_cast<double>(v));
+            commands.post(core::state::Command(odo ? core::state::CommandId::OdoSet
+                                                   : core::state::CommandId::EngHoursSet, v));
+        }
+        return;
+    }
     if (std::strcmp(line, "pod trace") == 0) {
         ESP_LOGI(kTag, "tracing the pod for 30 s");
         services::trace_pod(30000);

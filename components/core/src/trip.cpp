@@ -14,6 +14,10 @@ float FuelModel::gph_at(float tps_pct) const {
     return idle_gph + (wot_gph - idle_gph) * (tps_pct / 100.0f);
 }
 
+bool service_due(double engine_hours, float at_h, float every_h) {
+    return every_h > 0.0f && engine_hours - static_cast<double>(at_h) >= static_cast<double>(every_h);
+}
+
 void Computer::restore(double odo_mi, double engine_hours) {
     odo_mi_ = odo_mi;
     engine_hours_ = engine_hours;

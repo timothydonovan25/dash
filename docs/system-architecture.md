@@ -598,7 +598,7 @@ Producers write fixed-size records into a PSRAM ring buffer. The `logger`
 task drains the ring to SD in 8 kB blocks. Producers never touch the
 filesystem and never block.
 
-`core::log::Record` is 72 bytes fixed; the ring is 512 of them, 36 kB in
+`core::log::Record` is 124 bytes fixed; the ring is 512 of them, 62 kB in
 PSRAM. Fixed size matters because the drain writes whole records: a
 variable-length format means a partial write at power-off corrupts the
 tail rather than truncating it.
@@ -606,8 +606,8 @@ tail rather than truncating it.
 **The file is CSV, not a binary format.** The original sketch called for
 binary — four times smaller, decoded by a script on the PC. That was the
 wrong trade. A blackbox you need a tool to read is a blackbox you never
-read, and the SD card is 16 GB against a 50 Hz record of 72 bytes, which
-is 13 MB an hour. Space is not the constraint.
+read, and the SD card is 16 GB against a 50 Hz record of 124 bytes, which
+is 22 MB an hour. Space is not the constraint.
 
 Given it is CSV anyway, the columns are named for **RaceRender**, so the
 same file is both the blackbox and the source for a video overlay

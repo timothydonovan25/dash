@@ -140,5 +140,14 @@ int main() {
         CHECK_NEAR(p.trip_a_mi, 0.0, 1e-9);    // trips are not life data
     }
 
+    CASE("service is due once the interval has run, and never when it is off");
+    {
+        using core::trip::service_due;
+        CHECK(!service_due(109.9, 100.0f, 10.0f));
+        CHECK(service_due(110.0, 100.0f, 10.0f));
+        CHECK(!service_due(5000.0, 0.0f, 0.0f));     // off
+        CHECK(!service_due(50.0, 60.0f, 10.0f));     // "done at" typed past now
+    }
+
     return check::report("trip");
 }

@@ -507,6 +507,7 @@ priority:
 | **SD card** | The log has stopped |
 | **Shift lamps** | The lamp driver is gone, and the backlight with it |
 | **IMU** | Lean, jump and lap-delta inputs are gone |
+| **Service due** | The engine-hours interval has run out (§17, 2.14). Last, and dismissed with a press until Mark done |
 
 Each alert has an onset delay and a clear delay. A dismissal holds until
 the fault genuinely clears. Low fuel is deliberately not an alert: the burn
@@ -669,6 +670,13 @@ least 30 s apart, and never more than 5 % from the calibrated base (CONFIG
 - **Trip A** and **Trip B.** Reset from TRIP's E or CONFIG → Trip → Reset
   trip A.
 - **Engine hours**, counted while the engine is running.
+- **Service reminder** (2.14, `core::trip::service_due`). CONFIG → Service →
+  **Interval** (engine hours, 0 = off, the default) and **Done at**; once
+  the engine has run the interval past Done at, **SERVICE DUE** shows
+  (§11.1). **Mark done** (E twice) sets Done at to the hours now.
+- **Setting the totals** (2.14): console `odo <miles>` and `hours <h>`, the
+  laptop only (docs/console.md). Totals that failed to read back at boot
+  are not saved over what is stored until both have been given.
 - **Top speed.**
 - **Fuel model.** Burn is interpolated between the idle rate and the WOT
   rate (gph) by load, against the tank size. It is an estimate, and there
@@ -793,9 +801,11 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 ### 23.1 Ride log, the blackbox (`core/log/`)
 - **CSV, with columns named for RaceRender**, so one file is both the
   blackbox and a video overlay source:
-  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR`
+  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct`
   (`core/src/log.cpp`). `Time` is in seconds, X is longitudinal g and Y is
-  lateral g. **Rules for a new column** (CLAUDE.md, *Logging is for
+  lateral g. `Volts` is the battery (0: no reading), `ShiftLamps` how many
+  lamps are lit (0–8), `SlipPct` wheel slip against road speed: + the rear
+  spinning, − a wheel locking (2.14). **Rules for a new column** (CLAUDE.md, *Logging is for
   RaceRender*): append it at the end, name it with its unit, never rename or
   move one, and write a missing reading as 0, never the last value held.
 - **Lap tags** (`# Lap 0: 00:02:43.08`) come from the lap timer's own
@@ -803,7 +813,7 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 - **Rate.** CONFIG → Log → Rate: No log, 1, 5, 10 (default), 25 or 50 Hz, all
   divisors of the 50 Hz tick so rows are evenly spaced. A tick that starts
   or ends a lap always gets its row, unless the rate is No log (which writes no blackbox file at all).
-- **Ring.** Fixed 72-byte records, 512 of them in PSRAM, drained to SD in
+- **Ring.** Fixed 124-byte records, 512 of them in PSRAM, drained to SD in
   8 kB blocks. Producers never touch the filesystem or block.
 - **`FlushPolicy`.** A block goes to the card when its oldest row is 2 s
   old. fsync happens 5 s after the first uncommitted write, or when the bike
@@ -1276,6 +1286,9 @@ Every item in `components/core/src/config.cpp`, by CONFIG submenu.
 | Log | Detail log | On / Off | — |
 | Diag | FPS counter | On / Off (off by default) | — |
 | Diag | Frame rate | 10 / 20 / 30 / 60 / 120 (default) Hz / Unlimited | — |
+| Service | Interval | 0 (off, default)–200 | h |
+| Service | Done at | 0–100000 | h |
+| Service | Mark done | action (E twice) | — |
 
 ### Commands
 Everything a screen, the Wi-Fi page or a service can ask of the owning
@@ -1284,4 +1297,5 @@ ConfigSet, LogStart, LogStop, StorageToHost, StorageEject, ImuCalibrate,
 ImuSetMountOffset, MediaCtrl, BleForgetPhone, BlePairingMode, OtaInstallSd,
 OtaBootDevOnce, OtaPromote, WifiToggle, NavDropWaypoint, NavClearWaypoint,
 GearCalStart, GearCalNext, GearCalSkip, GearCalCancel, GearCalReset,
-LeanPeaksReset, TrackForget, PerfReset, StuntReset, CrashCancel, CrashTest.
+LeanPeaksReset, TrackForget, PerfReset, StuntReset, CrashCancel, CrashTest,
+the Nav commands, ShiftLampTest, ServiceDone, OdoSet, EngHoursSet.

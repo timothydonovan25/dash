@@ -32,6 +32,7 @@ enum class Kind : uint8_t {
     SdCard,        // the log has stopped
     ShiftLamps,    // the lamp driver is gone (and the backlight with it)
     Imu,           // lean, jump and lap-delta inputs are gone
+    Service,       // the engine-hours interval has run out; last, it can wait
     Count
 };
 

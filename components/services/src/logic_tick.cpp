@@ -452,6 +452,20 @@ void blackbox_row(Deps& d, LogicState& s, uint32_t now,
         rec.nav_dest_mi = s.nav_progress.remain_dm / 16093.44f;
         rec.limit_mph = s.nav_progress.mph;
     }
+    rec.vbat = d.slots->elec.get().vbat;
+    rec.shift_lamps = static_cast<uint8_t>(
+        __builtin_popcount(static_cast<unsigned>(e.shift_mask | e.shift_hold)));
+    {
+        // As ui::App::update_slip, without the hold: a log row is the moment.
+        const core::state::Health h = d.slots->health.get();
+        core::slip::Config sc;
+        sc.hold_ms = 0;
+        const core::slip::Reading r = s.log_slip.update(
+            m.front_mph, h[core::state::Dev::FrontWheel].state != core::state::DevState::Fault,
+            m.rear_mph, h[core::state::Dev::RearWheel].state != core::state::DevState::Fault,
+            fo.valid ? fo.mph : g.speed_mph, fo.valid || g.fix, now, sc);
+        rec.slip_pct = static_cast<int8_t>(r.kind == core::slip::Kind::Spin ? r.pct : -r.pct);
+    }
     d.blackbox->push(rec);
 }
 
@@ -973,6 +987,29 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 if (cmd.i == 1) s.trip.reset_trip_b();
                 else            s.trip.reset_trip_a();
                 break;
+            case core::state::CommandId::ServiceDone:
+                if (d.settings) {
+                    d.settings->service_at_h = static_cast<float>(s.trip.engine_hours());
+                }
+                break;
+            case core::state::CommandId::OdoSet:
+            case core::state::CommandId::EngHoursSet:
+                // The laptop's: after an NVS erase, a board swap, or totals
+                // that would not read back. Negative or NaN is refused. Once
+                // both are given they are the truth, and may be saved again.
+                if (cmd.f >= 0.0f) {
+                    if (cmd.id == core::state::CommandId::OdoSet) {
+                        s.trip.restore(cmd.f, s.trip.engine_hours());
+                        s.odo_set = true;
+                    } else {
+                        s.trip.restore(s.trip.odo_mi(), cmd.f);
+                        s.hours_set = true;
+                    }
+                    if (s.odo_set && s.hours_set) {
+                        d.totals_unread.store(false, std::memory_order_relaxed);
+                    }
+                }
+                break;
             case core::state::CommandId::ConfigSet:
                 // Every edit lands here: the CONFIG screen, the Wi-Fi page
                 // and imu's Calibrate level all post ConfigSet, and this is
@@ -1268,7 +1305,11 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     ti.tps_pct = e.tps_pct;
     ti.t_ms = now;
     s.trip.update(ti, s.fuel);
-    d.slots->trip.publish(s.trip.publish());
+    core::state::Trip trip = s.trip.publish();
+    trip.service_due = d.settings &&
+        core::trip::service_due(s.trip.engine_hours(), d.settings->service_at_h,
+                                d.settings->service_every_h);
+    d.slots->trip.publish(trip);
 
     // --- session --------------------------------------------------------
     {

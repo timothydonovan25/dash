@@ -22,6 +22,7 @@
 #include "core/route/navigator.hpp"
 #include "core/route/pace.hpp"
 #include "core/session/session.hpp"
+#include "core/slip/slip.hpp"
 #include "core/stunt/stunt.hpp"
 #include "core/track/track.hpp"
 #include "core/trip/trip.hpp"
@@ -44,6 +45,10 @@ struct LogicState {
 
     core::lap::Timer      lap;
     core::trip::Computer  trip;
+    // The blackbox's SlipPct column; render's own meter draws the bar.
+    core::slip::Meter     log_slip;
+    // Console `odo` and `hours` have each been given (Deps::totals_unread).
+    bool odo_set = false, hours_set = false;
     core::trip::FuelModel fuel;
     core::delta::Config   delta_cfg;
 
