@@ -18,7 +18,7 @@
 // | render  |  1   |   6  | 120 Hz    | snapshot, widgets, panel            |
 // | ble     |  1   |   4  | event     | media, notify, heart rate, BLE diag |
 // | keeper  |  1   |   3  | 20 Hz     | health, retry, NVS, backlight level |
-// | storage |  1   |   3  | 2 Hz      | card mount, eject, track files      |
+// | storage |  1   |   1  | 2 Hz      | card mount, eject, track files      |
 // | wifi    |  1   |   3  | 4 Hz      | the update hotspot and its page     |
 // | ota     |  1   |   2  | event     | stable/dev slots                    |
 // | logger  |  1   |   2  | drain     | blackbox and detail rings to SD     |
@@ -147,6 +147,11 @@ struct Deps {
     // keeps the lamps dark, `keeper` keeps the backlight off. Cleared if the
     // supply comes back, or if the board turns out to be on USB.
     std::atomic<bool> power_fail{false};
+    // Set by logic_restore when the odometer or engine hours could not be
+    // read back (a flash error, not a blank NVS): the totals in the trip slot
+    // then started from zero, and `keeper` and `power` must not save them
+    // over what is stored.
+    std::atomic<bool> totals_unread{false};
     // CONFIG's Eject: `storage` bumps the request and waits for `logger` to
     // put what it holds in RAM on the card and answer with the same number,
     // then unmounts. Without it the last ~2 s of every stream were lost.

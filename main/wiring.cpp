@@ -201,6 +201,8 @@ void finish_panel() {
         g_storage.write_f32(hal::kNsLife, hal::kKeyPanelModel,
                             static_cast<float>(g_panel->model()));
     }
+    // The one backlight write not made by `ctrl` or `power`: the first
+    // light, at boot, before keeper has a level for ctrl to send.
     g_deps.panel->set_backlight(20);
     g_health.tick(g_clock.now_ms(), core::health::Policy{});
     g_slots.health.publish(g_health.publish());

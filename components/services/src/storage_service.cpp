@@ -1,4 +1,4 @@
-// `storage` — core 1, priority 3.
+// `storage` — core 1, priority 1 (under the logger: see start_storage).
 //
 // Owns the card: mounts it, notices it being pulled, remounts it when it
 // comes back, and is the one place that would hand it to a host over USB.

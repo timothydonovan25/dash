@@ -199,12 +199,14 @@ void keeper_task(void* arg) {
         if (d.storage && still_for_flash(d)) {
             const double odo = t.odo_mi;
             const double hours = t.eng_hours;
-            if (last_saved_odo < 0.0 ||
-                std::fabs(odo - last_saved_odo) >= kOdoWriteThresholdMi) {
+            // Not if they were never read back (Deps::totals_unread).
+            const bool totals = !d.totals_unread.load(std::memory_order_relaxed);
+            if (totals && (last_saved_odo < 0.0 ||
+                           std::fabs(odo - last_saved_odo) >= kOdoWriteThresholdMi)) {
                 d.storage->write_f64(hal::kNsLife, hal::kKeyOdometerMi, odo);
                 last_saved_odo = odo;
             }
-            if (last_saved_hours < 0.0 || hours - last_saved_hours >= 0.01) {
+            if (totals && (last_saved_hours < 0.0 || hours - last_saved_hours >= 0.01)) {
                 d.storage->write_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
                 last_saved_hours = hours;
             }

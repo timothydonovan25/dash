@@ -69,6 +69,7 @@ hal::Status NvsStorage::write_f32(const char* ns, uint16_t key, float value) {
     uint32_t raw = 0;
     __builtin_memcpy(&raw, &value, sizeof raw);
     err = nvs_set_u32(h, name, raw);
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return from_esp(err);
 }
@@ -100,13 +101,14 @@ hal::Status NvsStorage::write_f64(const char* ns, uint16_t key, double value) {
     uint64_t raw = 0;
     __builtin_memcpy(&raw, &value, sizeof raw);
     err = nvs_set_u64(h, name, raw);
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return from_esp(err);
 }
 
 hal::Status NvsStorage::commit() {
     if (!ready_) return hal::Status::NotPresent;
-    // Each write above opens and closes its own handle, and closing commits.
+    // Each write above commits before it closes its own handle.
     // The odometer is written once a second at most by the keeper — NVS wear
     // levelling copes with that for the life of the bike, but writing it at
     // 50 Hz from the logic task would not, which is why the keeper owns it.

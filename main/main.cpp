@@ -138,5 +138,5 @@ extern "C" void app_main() {
     services::start_wifi(deps);
 
     ESP_LOGI(kTag, "running");
-    // app_main returns and its task is deleted; the eleven above carry on.
+    // app_main returns and its task is deleted; the tasks above carry on.
 }

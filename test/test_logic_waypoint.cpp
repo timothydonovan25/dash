@@ -94,5 +94,31 @@ int main() {
         services::logic_tick(deps, s, q, 1040);
     }
 
+    CASE("totals that could not be read back are marked, so nobody saves zero over them");
+    {
+        struct Nvs final : hal::IStorage {
+            hal::Status odo = hal::Status::Ok;
+            hal::Status init() override { return hal::Status::Ok; }
+            hal::Status read_f32(const char*, uint16_t, float&) override { return hal::Status::NotPresent; }
+            hal::Status write_f32(const char*, uint16_t, float) override { return hal::Status::Ok; }
+            hal::Status read_f64(const char*, uint16_t key, double&) override {
+                return key == hal::kKeyOdometerMi ? odo : hal::Status::NotPresent;
+            }
+            hal::Status write_f64(const char*, uint16_t, double) override { return hal::Status::Ok; }
+            hal::Status commit() override { return hal::Status::Ok; }
+        };
+        for (const hal::Status st : {hal::Status::Ok, hal::Status::NotPresent, hal::Status::IoError}) {
+            Nvs nvs;
+            nvs.odo = st;
+            core::state::Slots slots;
+            services::Deps deps;
+            deps.slots = &slots;
+            deps.storage = &nvs;
+            services::LogicState s;
+            services::logic_restore(deps, s);
+            CHECK(deps.totals_unread.load() == (st == hal::Status::IoError));
+        }
+    }
+
     return check::report("logic_waypoint");
 }

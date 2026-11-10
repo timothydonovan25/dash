@@ -851,8 +851,12 @@ void logic_restore(Deps& d, LogicState& s) {
     // starts at zero, because everything else is a trip, not a life.
     if (!d.storage) return;
     double odo = 0.0, hours = 0.0;
-    d.storage->read_f64(hal::kNsLife, hal::kKeyOdometerMi, odo);
-    d.storage->read_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
+    const hal::Status so = d.storage->read_f64(hal::kNsLife, hal::kKeyOdometerMi, odo);
+    const hal::Status sh = d.storage->read_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
+    // NotPresent is a new board. Anything else is a total that is still in
+    // flash and was not read: never save this session's zero over it.
+    const auto unread = [](hal::Status s) { return !hal::ok(s) && s != hal::Status::NotPresent; };
+    if (unread(so) || unread(sh)) d.totals_unread.store(true, std::memory_order_relaxed);
     s.trip.restore(odo, hours);
 
     // The waypoints, which `keeper` saves while the bike is stopped.

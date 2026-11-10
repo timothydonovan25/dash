@@ -363,7 +363,7 @@ void start_ota(Deps& d) {
     // 16 kB: four upload chunks in flight while the flash writes catch up.
     // PSRAM: internal RAM is what the boot needs (16 kB more here and the
     // demo could not create its idle tasks), and the bytes are copied out to
-    // the internal g_chunk before any flash write touches them.
+    // g_chunk (PSRAM too; IDF bounces it) before any flash write.
     static StaticStreamBuffer_t sb_ctl;
     EXT_RAM_BSS_ATTR static uint8_t sb_mem[16 * 1024 + 1];
     if (!d.ota_stream) {

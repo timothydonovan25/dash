@@ -45,7 +45,7 @@ static_assert(configTICK_RATE_HZ >= 1000, "power needs a 1 ms tick");
 constexpr uint16_t kConfirmMovingSamples = 5;
 
 void save_totals(Deps& d) {
-    if (!d.storage) return;
+    if (!d.storage || d.totals_unread.load(std::memory_order_relaxed)) return;
     const core::state::Trip t = d.slots->trip.get();
     d.storage->write_f64(hal::kNsLife, hal::kKeyOdometerMi, t.odo_mi);
     d.storage->write_f64(hal::kNsLife, hal::kKeyEngineHours, t.eng_hours);
