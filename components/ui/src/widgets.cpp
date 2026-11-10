@@ -594,7 +594,9 @@ void Table::set_row(size_t i, const char* left, const char* right) {
     if (i >= kRows) return;
     const bool a = left_[i].set(left);
     const bool b = right_[i].set(right);
-    if (i + 1 > rows_) rows_ = i + 1;
+    // A row coming back into the count must be sent even if its text matches:
+    // a shrink leaves the old text in the buffer but not on the glass.
+    while (rows_ <= i) mark_row(rows_++);
     if (a || b) mark_row(i);
 }
 

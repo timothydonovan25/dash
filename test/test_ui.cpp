@@ -1073,6 +1073,24 @@ int main() {
         CHECK(r[0].w == 468);
     }
 
+    CASE("a table row back in the count is sent even with its old text (CONFIG B)");
+    {
+        Table t;
+        t.set_bounds(Rect{14, 40, 452, 250});
+        t.configure(10, 2);
+        for (size_t i = 0; i < 8; ++i) t.set_row(i, "group", ">");
+        t.set_row_count(8);
+        t.clear_dirty();
+        t.set_row_count(5);                          // into a short submenu
+        t.clear_dirty();
+        for (size_t i = 0; i < 8; ++i) t.set_row(i, "group", ">");   // B: same text
+        t.set_row_count(8);
+        CHECK(t.dirty);
+        Rect r[4];
+        CHECK(t.damage(r, 4) == 1);
+        CHECK(r[0].h >= 3 * 20);                     // rows 5..7 at least
+    }
+
     CASE("SESSION shows the ride and the saved track");
     {
         Fixture fx;
