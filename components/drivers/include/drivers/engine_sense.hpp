@@ -24,7 +24,7 @@ public:
     // A FreeRTOS task (TaskHandle_t) to notify on every tach edge that gets
     // past the refractory window: `ctrl`, so a new rpm reaches the lamps at
     // the edge rather than at its next 2 ms tick. At most one edge per
-    // refractory window, so a noisy lead cannot wake it more than ~670/s.
+    // refractory window, so a noisy lead cannot wake it more than ~250/s.
     // nullptr stops it.
     static void notify_on_tach(void* task);
 

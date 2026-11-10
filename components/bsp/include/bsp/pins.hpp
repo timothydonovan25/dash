@@ -96,7 +96,10 @@ inline constexpr int kImuInt1        = 13;   // U16-20
 // Reworked from 100k / 470 pF, which swallowed the spike (p4-board-pin-map.md
 // §6.3). Expect ringing: enforce a refractory window in firmware.
 inline constexpr int kTachSig        = 21;   // U16-22
-inline constexpr int kTachRefractoryUs = 1500;   // tune on the bench
+// 4 ms, was 1.5: on the bike each spark gave a second edge ~1.5 ms later
+// (end of the spark's burn), read as ~79k rpm. 4 ms still allows 15k rpm
+// at one pulse per rev, 30k at Revs/spark 2.
+inline constexpr int kTachRefractoryUs = 4000;
 inline constexpr int kWheelHallFront = 22;   // U16-23
 inline constexpr int kWheelHallRear  = 23;   // U16-24
 
