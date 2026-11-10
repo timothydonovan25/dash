@@ -16,6 +16,7 @@ Frame: board frame, gerber X right / Y up, mm. Z = 0 is the PCB's rider face
 (panel and shift LEDs, bottom layer); the rider is at -Z. Y max is the LED edge,
 the top. Run:  python pod.py  -> mount/out/pod_*.stl, *.step
 """
+import math
 import os
 import cadquery as cq
 
@@ -109,6 +110,24 @@ SPLIT_GAP = 1.0
 M5_CLEAR, M5_NUT_AF, M5_NUT_H = 5.5, 8.4, 4.2
 BASE_W, BASE_D, BASE_T = 64.0, 44.0, 6.0   # pad under the clamp, spreading it over the frame
 BASE_MIN = 8.0                       # base under the barrel
+
+# ---- bolt bracket: mounts on the handlebar holders' bolts instead of the bar (mount-specs.txt) ----
+# Replaces clamp_cap only; tray and frame are unchanged. Bike axes: forward (to the front wheel), up.
+BOLT_SPAN = 98.4     # 3 7/8": the two holder bolts, across the bike; the panel's centre sits midway
+BOLT_RAKE = 26.1     # bolt axes from vertical, heads leaning toward the rider
+SCREEN_FWD, SCREEN_UP = 25.4, 50.8   # panel face centre from the midpoint of the bolt-head tops
+SCREEN_TILT = 20.0   # the screen's normal, degrees above horizontal
+HEAD_H = 8.0         # MEASURE: 12 mm hex (M8) flange head height; the bolts need PLATE_T more length
+M8_CLEAR = 8.6
+HEAD_CLEAR = 24.0    # socket room around each head, kept clear up the bolt axis
+PLATE_T = 6.0        # plate trapped under the heads
+BOSS_R = 12.0        # plate reach behind each bolt, toward the rider
+HOLDER_FWD = 15.0    # MEASURE: holder cap's reach ahead of its bolt; nothing goes below its top there
+BLOCK_T = 10.0       # the cap's stand-in on the frame's clamp half; the M5 heads seat on it
+ARM_X = (69.0, 103.0)   # clear of CN2/CN3's wire column (x < 67.1) and the frame's right leg (x > 104)
+NECK_R = 12.0        # fillet radius where the neck leaves the crossbar
+CHAMFER = 10.0       # 45-degree cut on the arm's outside corner at the M5 face; stays clear of the M5 heads
+ARM_Y = BY0 - 8.0   # arm's top below the board: the 2 mm float and 6 mm air
 
 # ---- derived heights --------------------------------------------------------
 Z_PANEL = -PANEL_T
@@ -230,13 +249,17 @@ def frame():
     return f.union(base)
 
 
-def clamp():
-    """Built on the frame's back (bar along X, base face z=0, +z away from the pod), then placed."""
+def _clamp_dims():
+    """Bore radius, barrel radius, bore axis height and bolt positions of the clamp, in clamp() coordinates."""
     r = (BAR_D + 2 * BAR_RUBBER + 0.4) / 2
     ro = r + CLAMP_WALL
-    zc = BASE_MIN + ro
     by = r + LUG_R * 0.6
-    bolts = [(sx * CLAMP_BOLT_X, sy * by) for sx in (-1, 1) for sy in (-1, 1)]
+    return r, ro, BASE_MIN + ro, by, [(sx * CLAMP_BOLT_X, sy * by) for sx in (-1, 1) for sy in (-1, 1)]
+
+
+def clamp():
+    """Built on the frame's back (bar along X, base face z=0, +z away from the pod), then placed."""
+    r, ro, zc, by, bolts = _clamp_dims()
     barrel = (cq.Workplane("YZ").workplane(offset=-CLAMP_W / 2).center(0, zc).circle(ro).extrude(CLAMP_W))
     for x, y in bolts:
         barrel = barrel.union(_cyl(x, y, zc - LUG_H, zc + LUG_H, 2 * LUG_R))
@@ -260,6 +283,72 @@ def clamp():
     place = lambda p: p.translate((CX, CY, Z_BACK_OUT))
     bolt_len = 2 * LUG_H + 6 + 2   # cap top to the nut's far face, plus 2 mm
     return place(base), place(cap), bolt_len
+
+
+def _bike():
+    """The bolt bracket's geometry in board (Y, Z): bolt-head reference, bolt axis a (toward the head),
+    and p, along the holder's top toward the front wheel. Board +Y and +Z as bike (forward, up)."""
+    t, k = math.radians(SCREEN_TILT), math.radians(BOLT_RAKE)
+    ey, ez = (math.sin(t), math.cos(t)), (math.cos(t), -math.sin(t))
+    board = lambda f, u: (f * ey[0] + u * ey[1], f * ez[0] + u * ez[1])
+    d = board(-SCREEN_FWD, -SCREEN_UP)
+    ref = (PANEL_CY + d[0], Z_PANEL + d[1])
+    a = board(-math.sin(k), math.cos(k))
+    return ref, a, (-a[1], a[0])
+
+
+def bolt_bracket():
+    """Replaces clamp_cap: sits on the frame's clamp half (same four M5s and nuts), fills its half-bore,
+    and carries an arm under the board to a plate trapped under the two handlebar-holder bolts."""
+    r, _, zc, by, bolts = _clamp_dims()
+    ref, a, p = _bike()
+    at = lambda q, s, v: (q[0] + s * v[0], q[1] + s * v[1])
+    t0 = at(ref, -HEAD_H, a)              # plate top, under the heads
+    b0 = at(t0, -PLATE_T, a)              # plate bottom, on the holders
+    b1 = at(b0, HOLDER_FWD, p)
+    t1 = at(t0, (ARM_Y - t0[0]) / p[0], p)
+    z_split = Z_BACK_OUT + zc - SPLIT_GAP / 2      # the frame's clamp half's top face
+    z_top = z_split + BLOCK_T
+    y_web = CY - by - LUG_R                        # the clamp half's widest point, at its top
+    # 45-degree chamfer on the outside corner (ARM_Y, z_top): from c0 on the M5 face along (-1, -1) to the arm's back edge
+    c0 = (ARM_Y + CHAMFER, z_top)
+    dy, dz = b1[0] - ARM_Y, b1[1] - z_top
+    u = CHAMFER / (dy - dz)                        # c0 + s(-1,-1) = (ARM_Y, z_top) + u(dy, dz)
+    c1 = (ARM_Y + u * dy, z_top + u * dz)
+    arm = (cq.Workplane("YZ").workplane(offset=ARM_X[0]).polyline([
+        t0, t1, (ARM_Y, Z_TRAY1 + 6),   # then straight to the block: nothing fills the wedge under the board's edge
+        (y_web - 1, z_split), (CY, z_split), (CY, z_top), c0, c1, b1, b0]).close()
+        .extrude(ARM_X[1] - ARM_X[0]))
+    x0 = CX - CLAMP_W / 2
+    block = _box(x0, ARM_X[1], y_web, CY + by + LUG_R, z_split, z_top)
+    plug = (cq.Workplane("YZ").workplane(offset=x0).center(CY, Z_BACK_OUT + zc).circle(r - 0.3)
+            .extrude(CLAMP_W).intersect(_box(x0, x0 + CLAMP_W, 0, 99, 0, z_split)))
+    pl = cq.Plane(origin=(PANEL_CX, b0[0], b0[1]), xDir=(1, 0, 0), normal=(0, a[0], a[1]))  # local y = -p
+    plate = (cq.Workplane(pl).center(0, (BOSS_R - HOLDER_FWD) / 2)
+             .rect(BOLT_SPAN + 2 * BOSS_R, BOSS_R + HOLDER_FWD).extrude(PLATE_T))
+    # concave fillets where the neck leaves the crossbar, in the plate's plane (the neck is plate-thick there)
+    rf = min(NECK_R, (ARM_Y - t0[0]) / p[0] - HOLDER_FWD)
+    xa, xb, e = ARM_X[0] - PANEL_CX, ARM_X[1] - PANEL_CX, -HOLDER_FWD
+    flare = (cq.Workplane(pl).center((xa + xb) / 2, e - rf / 2 + 0.25).rect(xb - xa + 2 * rf, rf + 0.5)
+             .extrude(PLATE_T)
+             .cut(cq.Workplane(pl).pushPoints([(xa - rf, e - rf), (xb + rf, e - rf)]).circle(rf).extrude(PLATE_T)))
+    b = block.union(plug).union(arm).union(plate).union(flare)
+    for x, y in bolts:
+        b = b.cut(_cyl(CX + x, CY + y, z_split - 20, z_top + 1, M5_CLEAR))
+    holes = cq.Workplane(pl).pushPoints([(-BOLT_SPAN / 2, 0), (BOLT_SPAN / 2, 0)])
+    b = b.cut(holes.circle(M8_CLEAR / 2).extrude(PLATE_T))
+    b = b.cut(cq.Workplane(pl).workplane(offset=PLATE_T).pushPoints([(-BOLT_SPAN / 2, 0), (BOLT_SPAN / 2, 0)])
+              .circle(HEAD_CLEAR / 2).extrude(80))     # socket room up each bolt's axis
+    zn = zc - LUG_H - 6
+    return b, z_top - Z_BACK_OUT - zn + 2
+
+
+def holders():
+    """Keep-out: the holder caps, below the plate from behind the bolts to HOLDER_FWD ahead of them."""
+    ref, a, p = _bike()
+    b0y, b0z = ref[0] - (HEAD_H + PLATE_T) * a[0], ref[1] - (HEAD_H + PLATE_T) * a[1]
+    pl = cq.Plane(origin=(PANEL_CX, b0y, b0z), xDir=(1, 0, 0), normal=(0, -a[0], -a[1]))  # local y = +p
+    return cq.Workplane(pl).center(0, (HOLDER_FWD - 40) / 2).rect(200, HOLDER_FWD + 40).extrude(60)
 
 
 def ghost():
@@ -309,17 +398,20 @@ def check(parts):
     for dx, dy, dz in ((0, 0, 0), (2, 0, 0), (-2, 0, 0), (0, 2, 0), (0, -2, 0), (0, 0, -2), (0, 0, 2)):
         v = _vol(board.translate((dx, dy, dz)), rigid)
         assert v < 1e-3, f"board hits the frame moved by {(dx, dy, dz)}: {v:.1f} mm^3"
+    # 5. the bracket: a separate print beside the frame, and out of the holder caps it sits on
+    assert _vol(cap, fr) < 1e-3, f"bracket overlaps the frame: {_vol(cap, fr):.1f} mm^3"
+    assert _vol(cap, holders()) < 1e-3, f"bracket is inside the holders: {_vol(cap, holders()):.1f} mm^3"
 
 
 if __name__ == "__main__":
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
     os.makedirs(out, exist_ok=True)
-    _, cap, bolt_len = clamp()
-    parts = (tray(), frame(), cap)
+    bracket, bolt_len = bolt_bracket()
+    parts = (tray(), frame(), bracket)
     check(parts)
     pcb, panel, leds = ghost()
     parts_ghost = chips()
-    names = ("tray", "frame", "clamp_cap")
+    names = ("tray", "frame", "bolt_bracket")
     for name, part in list(zip(names, parts)) + [("ghost", pcb.union(panel).union(leds).union(parts_ghost))]:
         cq.exporters.export(part, f"{out}/pod_{name}.stl")
         cq.exporters.export(part, f"{out}/pod_{name}.step")
