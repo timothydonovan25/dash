@@ -8,52 +8,62 @@ extern const char kPage[] = R"HTML(<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CRF250F Dash</title>
 <style>
-body{font:16px/1.4 system-ui,sans-serif;margin:0 auto;padding:16px;max-width:560px;background:#111;color:#eee}
-h1{font-size:20px;margin:0 0 12px}h2{font-size:17px;margin:20px 0 8px;color:#9cf}
-.card{background:#1c1c1c;border-radius:8px;padding:12px;margin-bottom:12px}
-.row{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #2a2a2a}
-.row:last-child{border:0}.k{color:#999}a{color:#6cf}
-button,input[type=file]{font:inherit;width:100%;margin-top:8px}
-button{padding:10px;border:0;border-radius:6px;background:#2a6;color:#fff}
-button:disabled{background:#444}
-progress{width:100%;height:14px;margin-top:8px}
-.msg{margin-top:8px}.bad{color:#f66}.good{color:#6d6}.dim{color:#888}
-.row button{width:auto;margin:0;padding:2px 10px;background:#633;font-size:14px}
-.row button.gpx{background:#246;margin-right:6px}
-.set{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #2a2a2a}
-.set:last-child{border:0}.set input,.set select{font:inherit;width:120px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:3px}
-.set input[type=checkbox]{width:22px;height:22px}.u{color:#888;font-size:13px;min-width:40px}
-.ok{color:#6d6}.err{color:#f66}
-details{margin-bottom:8px}summary{cursor:pointer;color:#9cf;padding:4px 0}
-.row button.laps{background:#463;margin-right:6px}
-#an canvas{width:100%;display:block;background:#161616;border-radius:6px;margin-top:8px;touch-action:none}
+:root{--bg:#0d0e10;--card:#17191d;--line:#262a30;--txt:#e9eaec;--dim:#8b919a;--acc:#3d9cff;--red:#e5484d;--grn:#46c46e}
+*{box-sizing:border-box}
+body{font:16px/1.45 system-ui,-apple-system,sans-serif;margin:0 auto;padding:0 14px 40px;max-width:600px;background:var(--bg);color:var(--txt);-webkit-tap-highlight-color:transparent}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(var(--bg) 75%,transparent);padding:14px 0 10px;margin:0 -2px}
+h1{font-size:21px;margin:0;letter-spacing:.3px}h1 b{color:var(--acc)}
+h2{font-size:13px;margin:22px 2px 8px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border:0}.k{color:var(--dim)}a{color:var(--acc);text-decoration:none}
+button{font:inherit;font-weight:600;width:100%;margin-top:10px;padding:11px;border:0;border-radius:10px;background:var(--acc);color:#fff;cursor:pointer}
+button:active{filter:brightness(.85)}button:disabled{background:#2a2d33;color:#666;cursor:default}
+button.danger{background:var(--red)}button.warn{background:#b8661b}
+input[type=file]{font:inherit;width:100%;margin-top:10px;color:var(--dim)}
+input[type=file]::file-selector-button{font:inherit;border:1px solid var(--line);background:#22252a;color:var(--txt);border-radius:8px;padding:7px 12px;margin-right:10px}
+progress{width:100%;height:8px;margin-top:10px;accent-color:var(--acc)}
+.msg{margin-top:8px;font-size:15px}.msg:empty{display:none}.bad{color:var(--red)}.good{color:var(--grn)}.dim{color:var(--dim)}
+.row button,.log button{width:auto;margin:0;padding:6px 11px;font-size:13px;border-radius:7px;background:#2a2d33;color:var(--txt)}
+.row button{background:#5a2a2c}
+.set{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+.set:last-child{border:0}.set input,.set select{font:inherit;width:120px;background:#0f1013;color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px}
+.set input[type=checkbox]{width:22px;height:22px}.u{color:var(--dim);font-size:13px;min-width:40px}
+.ok{color:var(--grn)}.err{color:var(--red)}
+details{border-bottom:1px solid var(--line)}details:last-child{border:0}
+summary{cursor:pointer;padding:10px 2px;list-style:none;display:flex;align-items:center;gap:10px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:'\203A';margin-left:auto;color:var(--dim);font-size:22px;line-height:1;transition:transform .15s}
+details[open]>summary::after{transform:rotate(90deg)}
+input[type=checkbox]{width:20px;height:20px;margin:0;accent-color:var(--acc);flex:none}
+.bar{display:flex;align-items:center;gap:10px}.bar label{display:flex;align-items:center;gap:8px;font-weight:600}
+.bar #lsel{margin-left:auto;font-size:14px}
+.acts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.acts button{margin-top:10px;padding:10px 4px;font-size:14px}
+.day summary .dn{font-weight:600}.day summary .dim{font-size:13px}
+.log{display:flex;align-items:center;gap:10px;padding:8px 2px 8px 30px;border-top:1px solid #1f2227}
+.log label{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+.log .nm{font-variant-numeric:tabular-nums}.log .sz{color:var(--dim);font-size:13px;margin-left:auto}
+.log .b{display:flex;gap:6px}
+#logs{margin-top:8px}
+#an canvas{width:100%;display:block;background:#111316;border-radius:8px;margin-top:8px;touch-action:none}
 #an table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;margin-top:8px}
-#an th{color:#888;font-weight:normal;text-align:right;padding:3px 4px}
-#an td{text-align:right;padding:3px 4px;border-top:1px solid #2a2a2a}
+#an th{color:var(--dim);font-weight:normal;text-align:right;padding:3px 4px}
+#an td{text-align:right;padding:3px 4px;border-top:1px solid var(--line)}
 #an td:first-child,#an th:first-child{text-align:left}
-#an tr.best td:nth-child(2){color:#6d6}#an td.sb{color:#c8f}#an tr.dirty td{color:#777}
-#an input[type=radio]{width:auto;margin:0}
+#an tr.best td:nth-child(2){color:var(--grn)}#an td.sb{color:#c8f}#an tr.dirty td{color:#777}
+#an input[type=radio]{width:auto;margin:0;accent-color:var(--acc)}
 .ka{color:#4af}.kb{color:#fa4}#anread{min-height:1.4em;font-size:14px;font-variant-numeric:tabular-nums}
 </style></head><body>
-<h1>CRF250F Dash</h1>
-
-<div class="card" id="fw">
-<div class="row"><span class="k">Running</span><span id="run">&hellip;</span></div>
-<div class="row"><span class="k">Dev slot</span><span id="dev">&hellip;</span></div>
-</div>
-
-<h2>Upload firmware</h2>
-<div class="card">
-<div class="dim">Writes dash.bin to the dev slot. The bike must be parked with the
-engine off. Then on the dash: DIAG &rarr; Update &rarr; Boot dev once.</div>
-<input type="file" id="file" accept=".bin">
-<button id="up" disabled>Upload</button>
-<progress id="prog" value="0" max="100" hidden></progress>
-<div class="msg" id="upmsg"></div>
-</div>
+<header><h1>CRF250F <b>Dash</b></h1></header>
 
 <h2>Ride logs</h2>
-<div class="card" id="logs"><span class="dim">&hellip;</span></div>
+<div class="card">
+<div class="bar"><label><input type="checkbox" id="lall">Select all</label><span id="lsel" class="dim"></span></div>
+<div class="acts"><button id="ldl" disabled>Download</button><button id="ldd" class="warn" disabled>Download &amp; delete</button><button id="ldel" class="danger" disabled>Delete</button></div>
+<progress id="lprog" value="0" max="1" hidden></progress>
+<div class="msg" id="lmsg"></div>
+<div id="logs"><span class="dim">&hellip;</span></div>
+</div>
 
 <div id="anwrap" hidden>
 <h2>Lap analysis</h2>
@@ -95,6 +105,18 @@ one on the card once all of it has arrived.</div>
 
 <h2>Settings</h2>
 <div class="card" id="settings"><span class="dim">&hellip;</span></div>
+
+<h2>Firmware</h2>
+<div class="card" id="fw">
+<div class="row"><span class="k">Running</span><span id="run">&hellip;</span></div>
+<div class="row"><span class="k">Dev slot</span><span id="dev">&hellip;</span></div>
+<div class="dim">Writes dash.bin to the dev slot. The bike must be parked with the
+engine off. Then on the dash: DIAG &rarr; Update &rarr; Boot dev once.</div>
+<input type="file" id="file" accept=".bin">
+<button id="up" disabled>Upload</button>
+<progress id="prog" value="0" max="100" hidden></progress>
+<div class="msg" id="upmsg"></div>
+</div>
 
 <h2>Firmware backup</h2>
 <div class="card">
@@ -162,26 +184,107 @@ $('mup').onclick=()=>{
   x.onerror=()=>{m.className='msg bad';m.textContent='Connection lost.';$('mup').disabled=false};
   x.open('PUT',f.name.toLowerCase().endsWith('.idx')?'/route/search.idx':'/route/map.rgf');x.send(f);
 };
-async function logs(){
-  const el=$('logs');
-  try{
-    const l=await (await fetch('/api/logs')).json();
-    if(!l.length){el.innerHTML='<span class="dim">No logs, or no card.</span>';return}
-    l.sort((a,b)=>a.name<b.name?1:-1);
-    el.innerHTML=l.map(f=>'<div class="row"><a href="/logs/'+f.name+'" download>'+f.name+
-      '</a><span class="dim">'+kb(f.size)+' <button class="laps" data-laps="'+f.name+'">Laps</button>'+
-      '<button class="gpx" data-gpx="'+f.name+'">GPX</button>'+
-      '<button data-del="'+f.name+'">Delete</button></span></div>').join('');
-    el.querySelectorAll('[data-gpx]').forEach(b=>b.onclick=()=>gpx(b.dataset.gpx,b));
-    el.querySelectorAll('[data-laps]').forEach(b=>b.onclick=()=>analyse(b.dataset.laps,b));
-    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
-      const n=b.dataset.del;if(!confirm('Delete '+n+' from the card?'))return;
-      b.disabled=true;
-      let r={};try{r=await (await fetch('/logs/'+n,{method:'DELETE'})).json()}catch(e){r={error:'connection lost'}}
-      if(r.ok)logs();else{alert('Not deleted: '+r.error);b.disabled=false}
-    });
-  }catch(e){el.innerHTML='<span class="bad">Could not list logs.</span>'}
+// Ride logs, one fold per day (logs/2026-10-13_s007.csv), newest first.
+// Ticked logs are fetched one at a time (the dash serves one request at a
+// time), and more than one goes to the phone as a single .zip so the
+// browser asks once. "Download & delete" deletes nothing until every byte
+// of every log has arrived.
+let LOGS=[];
+const dayOf=n=>(/^(\d{4}-\d\d-\d\d)_/.exec(n)||[])[1]||'';
+const plural=(n,w)=>n+' '+w+(n===1?'':'s');
+function dayName(d){
+  return d?new Date(d+'T12:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'}):'Undated';
 }
+async function logs(){
+  const el=$('logs'),was=new Set([...el.querySelectorAll('details[open]')].map(d=>d.dataset.day));
+  try{LOGS=await (await fetch('/api/logs')).json()}
+  catch(e){el.innerHTML='<span class="bad">Could not list logs.</span>';return}
+  const g={};
+  LOGS.forEach(f=>(g[dayOf(f.name)]=g[dayOf(f.name)]||[]).push(f));
+  const days=Object.keys(g).sort((a,b)=>!a?1:!b?-1:a<b?1:-1);    // undated last
+  el.innerHTML=LOGS.length?days.map((d,i)=>{
+    const l=g[d].sort((a,b)=>a.name<b.name?1:-1);
+    return '<details class="day" data-day="'+d+'"'+((was.size?was.has(d):!i)?' open':'')+'><summary>'+
+      '<input type="checkbox" class="dchk"><span class="dn">'+dayName(d)+'</span><span class="dim">'+
+      plural(l.length,'ride')+' &middot; '+kb(l.reduce((s,f)=>s+f.size,0))+'</span></summary>'+
+      l.map(f=>'<div class="log"><label><input type="checkbox" class="fchk" value="'+f.name+'">'+
+        '<span class="nm">'+f.name.slice(d?11:0).replace('.csv','')+'</span><span class="sz">'+kb(f.size)+'</span></label>'+
+        '<span class="b"><button data-laps="'+f.name+'">Laps</button><button data-gpx="'+f.name+'">GPX</button></span></div>').join('')+
+      '</details>'}).join(''):'<span class="dim">No logs, or no card.</span>';
+  el.querySelectorAll('[data-gpx]').forEach(b=>b.onclick=()=>gpx(b.dataset.gpx,b));
+  el.querySelectorAll('[data-laps]').forEach(b=>b.onclick=()=>analyse(b.dataset.laps,b));
+  picked();
+}
+const ticked=()=>[...$('logs').querySelectorAll('.fchk:checked')].map(c=>c.value);
+function picked(){
+  const n=ticked(),all=$('logs').querySelectorAll('.fchk');
+  const sz=LOGS.filter(f=>n.includes(f.name)).reduce((s,f)=>s+f.size,0);
+  $('lsel').textContent=n.length?plural(n.length,'log')+' · '+kb(sz):plural(all.length,'log');
+  $('lall').checked=all.length>0&&n.length===all.length;$('lall').indeterminate=n.length>0&&n.length<all.length;
+  $('logs').querySelectorAll('details').forEach(d=>{
+    const c=d.querySelectorAll('.fchk'),k=d.querySelectorAll('.fchk:checked').length,h=d.querySelector('.dchk');
+    h.checked=k===c.length;h.indeterminate=k>0&&k<c.length});
+  ['ldl','ldd','ldel'].forEach(id=>$(id).disabled=!n.length||LOGS.busy);
+}
+$('logs').onchange=e=>{
+  if(e.target.classList.contains('dchk'))
+    e.target.closest('details').querySelectorAll('.fchk').forEach(c=>c.checked=e.target.checked);
+  picked();
+};
+$('lall').onchange=()=>{$('logs').querySelectorAll('.fchk').forEach(c=>c.checked=$('lall').checked);picked()};
+// A .zip with every file stored as it is: CSV is what the phone wants
+// anyway, and storing needs only the CRC.
+const CRC=new Uint32Array(256).map((_,n)=>{for(let k=0;k<8;k++)n=n&1?0xEDB88320^(n>>>1):n>>>1;return n});
+const crc32=d=>{let c=~0;for(let i=0;i<d.length;i++)c=CRC[(c^d[i])&255]^(c>>>8);return~c>>>0};
+const le=a=>{const b=new Uint8Array(a.reduce((s,x)=>s+x[1],0)),v=new DataView(b.buffer);let o=0;
+  for(const[x,n]of a){n===4?v.setUint32(o,x,true):v.setUint16(o,x,true);o+=n}return b};
+function zip(files){
+  const out=[],cen=[];let off=0;
+  for(const f of files){
+    const nm=new TextEncoder().encode(f.name),c=crc32(f.data),z=f.data.length,m=/^(\d{4})-(\d\d)-(\d\d)/.exec(f.name);
+    const dt=m?((+m[1]-1980)<<9)|(+m[2]<<5)|+m[3]:33;   // DOS date; 33 is 1980-01-01
+    out.push(le([[0x04034b50,4],[20,2],[0,2],[0,2],[0,2],[dt,2],[c,4],[z,4],[z,4],[nm.length,2],[0,2]]),nm,f.data);
+    cen.push(le([[0x02014b50,4],[20,2],[20,2],[0,2],[0,2],[0,2],[dt,2],[c,4],[z,4],[z,4],[nm.length,2],[0,2],[0,2],[0,2],[0,2],[0,4],[off,4]]),nm);
+    off+=30+nm.length+z;
+  }
+  const cs=cen.reduce((s,b)=>s+b.length,0);
+  return new Blob(out.concat(cen,[le([[0x06054b50,4],[0,2],[0,2],[files.length,2],[files.length,2],[cs,4],[off,4],[0,2]])]),{type:'application/zip'});
+}
+function save(blob,name){
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60e3);
+}
+async function bulk(dl,del){
+  const names=ticked(),m=$('lmsg'),p=$('lprog'),s=plural(names.length,'log');
+  if(!names.length)return;
+  if(del&&!confirm((dl?'Download, then delete ':'Delete ')+s+' from the card?'))return;
+  LOGS.busy=true;picked();m.className='msg dim';p.hidden=false;p.value=0;
+  const bad=[];
+  try{
+    if(dl){
+      const files=[];
+      for(const[i,n]of names.entries()){
+        m.textContent='Fetching '+(i+1)+' of '+names.length+'…';
+        const r=await fetch('/logs/'+n);if(!r.ok)throw n;
+        files.push({name:n,data:new Uint8Array(await r.arrayBuffer())});p.value=(i+1)/names.length;
+      }
+      if(files.length===1)save(new Blob([files[0].data],{type:'text/csv'}),files[0].name);
+      else save(zip(files),'dash-logs-'+new Date().toLocaleDateString('sv')+'.zip');
+    }
+    if(del)for(const[i,n]of names.entries()){
+      m.textContent='Deleting '+(i+1)+' of '+names.length+'…';p.value=(i+1)/names.length;
+      let r={};try{r=await (await fetch('/logs/'+n,{method:'DELETE'})).json()}catch(e){r={error:'connection lost'}}
+      if(!r.ok)bad.push(n+' ('+r.error+')');
+    }
+    m.className='msg '+(bad.length?'bad':'good');
+    m.textContent=bad.length?'Not deleted: '+bad.join(', '):(dl&&del?'Downloaded and deleted ':dl?'Downloaded ':'Deleted ')+s+'.';
+  }catch(e){m.className='msg bad';m.textContent='Could not fetch '+e+'. Nothing was deleted.'}
+  p.hidden=true;LOGS.busy=false;
+  if(del)logs();else picked();
+}
+$('ldl').onclick=()=>bulk(true,false);
+$('ldd').onclick=()=>bulk(true,true);
+$('ldel').onclick=()=>bulk(false,true);
 // A ride as a GPX track, for Gaia, Strava or Komoot. Converted here, on
 // the phone, from the CSV the dash already serves: the dash does no work.
 // One point per GPS fix (the log repeats a fix until the next one), only
