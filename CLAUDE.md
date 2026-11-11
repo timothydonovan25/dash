@@ -21,8 +21,8 @@ changes.
 `docs/bringup.md`'s status table says otherwise. In short: rails, boot,
 panel, SD on 12 V, GPS (stuck at 1 Hz), IMU on the bench, and the C6's SDIO
 link (the Android app has bonded) have run; the shift lamps, the pod on this
-board, tach (bench only), wheels, power-fail and SD-card OTA installs have not. Current
-firmware: `firmware.txt` (2.0, `fps-counter`).
+board, tach (bench only), wheels, power-fail and SD-card OTA installs have not. The
+current firmware version is in `firmware.txt`.
 
 ## Doc map
 

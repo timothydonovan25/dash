@@ -51,6 +51,7 @@
 #include "esp_hosted_coprocessor_fw_ver.h"
 #include "esp_hosted_cli.h"
 #include "host_power_save.h"
+#include "dash_espnow.h"
 #ifdef CONFIG_EXAMPLE_PEER_DATA_TRANSFER
 #include "example_peer_data_transfer.h"
 #endif
@@ -1298,6 +1299,8 @@ void app_main(void)
 #ifdef CONFIG_EXAMPLE_PEER_DATA_TRANSFER
 	example_peer_data_transfer_init();
 #endif
+
+	dash_espnow_init();
 
 #ifdef CONFIG_ESP_HOSTED_COPROCESSOR_EXAMPLE_LIGHT_SLEEP
 	example_light_sleep_init();

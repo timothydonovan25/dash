@@ -94,6 +94,12 @@ void print_status(Deps& d, uint32_t now) {
     printf("logger  rows %u, %u bytes, %u errors, slowest %u ms, dropped %u/%u/%u/%u/%u (bb/imu/tach/det/evt)\n",
            u(s.log_records), u(s.log_bytes), u(s.log_errors), u(s.log_max_ms), lost(d.blackbox),
            lost(d.imu_log), lost(d.tach_log), lost(d.det_log), lost(d.evt_log));
+    {
+        const hal::EngineLink el = d.engine ? d.engine->link() : hal::EngineLink{};
+        printf("ecu     %s, %s, lost %u, refused %u\n",
+               !d.settings->ecu_on ? "off" : el.adapter ? "adapter heard" : "no adapter",
+               e.ecu_online ? "ECU answering" : "no ECU data", u(el.lost), u(el.rejected));
+    }
     printf("storage sd %s%s%s\n", dev_state(h, Dev::Sd),
            s.sd_ejected ? ", ejected" : "", s.sd_usb ? ", USB drive" : "");
     printf("keeper  heap %u free, %u lowest, %u largest; psram %u free; chip %.1f C; stack low %s %u B\n",

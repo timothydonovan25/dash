@@ -19,9 +19,17 @@ namespace core::state {
 struct Engine {
     float rpm        = 0.0f;
     bool  neutral    = false;   // reads LOW on the wire; the driver inverts
-    // No coolant temperature: the CRF250F is air-cooled.
+    // From the ECU, through the K-line adapter (core/ecu). `ecu_online` is
+    // fresh data; `ecu_adapter` is the adapter heard, ECU answering or not.
+    // The rest are 0 whenever ecu_online is false. The bike is air-cooled:
+    // engine_c is whatever the ECU's own engine temperature sensor reads.
     float tps_pct    = 0.0f;
-    bool  ecu_online = false;   // false until the CAN adapter exists
+    bool  ecu_online = false;
+    bool  ecu_adapter = false;
+    float engine_c   = 0.0f;
+    float intake_c   = 0.0f;
+    float map_kpa    = 0.0f;
+    uint16_t inj_raw = 0;       // injector pulse, scale not known
 
     // The lamp pattern `ctrl` just sent to the PCA9955B, and whether it is
     // over the limit. Published rather than recomputed by the screen: the
@@ -581,6 +589,16 @@ struct Nav {
     float    pace_gap_ft[kMaxPace] = {};
     bool     pace_into[kMaxPace] = {};
     uint8_t  n_pace = 0;
+    // The route view's street names: the roads the route spends longest
+    // on (core::route::longest_roads), most time first, where each goes in
+    // the trip trace's frame (feet from the session origin).
+    static constexpr unsigned kMaxLabels = 4;
+    struct Label {
+        float x_ft = 0.0f, y_ft = 0.0f;
+        char  name[16] = {};
+    };
+    Label    labels[kMaxLabels];
+    uint8_t  n_labels = 0;
     // The 65 mph question.
     char     fast_road[24] = {};
     float    fast_mi = 0.0f;

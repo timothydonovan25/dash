@@ -2,6 +2,7 @@
 #include "core/units/units.hpp"
 #include "ui/chrome.hpp"
 #include <cmath>
+#include <cstdio>
 #include <initializer_list>
 
 namespace ui {
@@ -116,12 +117,22 @@ void EngineScreen::enter(Canvas&) {
 }
 
 void EngineScreen::update(const Frame& f) {
-    // The ECU is not reachable on this hardware: the board has no CAN
-    // transceiver and the K-line adapter cannot be rewired without a respin
-    // (§10.1). NullEngine is what ships, so this says so plainly instead of
-    // showing a screen full of zeros.
-    ecu_.configure(f.engine.ecu_online ? "ECU ONLINE" : "ECU OFFLINE  -  no adapter",
-                   f.engine.ecu_online ? color::kGood : color::kDim, 1, Align::Left);
+    // The ECU comes by radio from the K-line adapter (§10.1), which most
+    // of the time is not there, or is there with the key off. This line
+    // says which, and carries what the ECU has that no tile does.
+    char ecu[48];
+    if (f.engine.ecu_online) {
+        const char* unit = "";
+        const float eng = u::temp_for_display(f.engine.engine_c, units(), &unit);
+        const float air = u::temp_for_display(f.engine.intake_c, units(), &unit);
+        std::snprintf(ecu, sizeof ecu, "ECU  engine %.0f %s  air %.0f %s  %.0f kPa", eng, unit,
+                      air, unit, f.engine.map_kpa);
+    } else {
+        std::snprintf(ecu, sizeof ecu, "%s", f.engine.ecu_adapter
+                          ? "ECU SILENT  -  adapter heard, no data"
+                          : "ECU OFFLINE  -  no adapter (CONFIG -> ECU)");
+    }
+    ecu_.configure(ecu, f.engine.ecu_online ? color::kGood : color::kDim, 1, Align::Left);
 
     // RPM comes from the inductive pickup, not the ECU, and stays available
     // whatever the adapter is doing.

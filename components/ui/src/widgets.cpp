@@ -717,6 +717,18 @@ void MapView::set_route(const IPointSource* route) {
     touch();
 }
 
+void MapView::set_labels(const core::state::Nav::Label* l, uint8_t n) {
+    if (n > core::state::Nav::kMaxLabels) n = core::state::Nav::kMaxLabels;
+    bool same = n == n_labels_;
+    for (uint8_t i = 0; same && i < n; ++i)
+        same = l[i].x_ft == labels_[i].x_ft && l[i].y_ft == labels_[i].y_ft &&
+               std::strcmp(l[i].name, labels_[i].name) == 0;
+    if (same) return;
+    for (uint8_t i = 0; i < n; ++i) labels_[i] = l[i];
+    n_labels_ = n;
+    touch();
+}
+
 void MapView::set_live(bool valid) {
     assign_t(valid_, valid);
     // The trace is redrawn as it grows, every 10 points (1 s at 10 Hz), or
@@ -830,6 +842,48 @@ void MapView::render(Canvas& c) {
         if (route_only_ && prev) {
             c.draw_circle(qx, qy, 6, color::kText);
             c.draw_circle(qx, qy, 5, color::kText);
+        }
+    }
+
+    // The route's main roads, most time first: a dot in the middle of each
+    // one's longest stretch and the name beside it, on the side with room.
+    // One with no room by it beside the others keeps its dot.
+    if (route_only_) {
+        constexpr uint8_t kScale = 2;
+        constexpr int16_t kH = 7 * kScale, kGap = 5;
+        Rect placed[core::state::Nav::kMaxLabels];
+        uint8_t n_placed = 0;
+        const Rect box = bounds.inset(2);
+        for (uint8_t i = 0; i < n_labels_; ++i) {
+            const core::state::Nav::Label& l = labels_[i];
+            const int16_t dx = static_cast<int16_t>(in.cx() + (l.x_ft - mid_x) * s);
+            const int16_t dy = static_cast<int16_t>(in.cy() - (l.y_ft - mid_y) * s);
+            c.fill_circle(dx, dy, 3, color::kText);
+            // Right, left, above, below the dot; then the same, half size.
+            // None free: the dot alone, so the road still shows it was picked.
+            for (uint8_t tryi = 0; tryi < 8; ++tryi) {
+                const uint8_t sc = tryi < 4 ? kScale : 1;
+                const int16_t w = text_width_px(l.name, sc), h = static_cast<int16_t>(kH * sc / kScale);
+                int16_t tx = 0, ty = 0;
+                switch (tryi % 4) {
+                    case 0: tx = static_cast<int16_t>(dx + kGap);     ty = static_cast<int16_t>(dy - h / 2); break;
+                    case 1: tx = static_cast<int16_t>(dx - kGap - w); ty = static_cast<int16_t>(dy - h / 2); break;
+                    case 2: tx = static_cast<int16_t>(dx - w / 2);    ty = static_cast<int16_t>(dy - kGap - h); break;
+                    default: tx = static_cast<int16_t>(dx - w / 2);   ty = static_cast<int16_t>(dy + kGap); break;
+                }
+                if (tx < box.x || ty < box.y || tx + w > box.x + box.w || ty + h > box.y + box.h) continue;
+                const Rect r{static_cast<int16_t>(tx - 1), static_cast<int16_t>(ty - 1),
+                             static_cast<int16_t>(w + 2), static_cast<int16_t>(h + 2)};
+                bool clash = false;
+                for (uint8_t k = 0; k < n_placed; ++k) clash = clash || r.intersects(placed[k]);
+                if (clash) continue;
+                placed[n_placed++] = r;
+                if (c.intersects(r)) {
+                    c.fill_rect(r, color::kPanel);   // legible over the line
+                    c.draw_text(tx, ty, l.name, color::kText, sc);
+                }
+                break;
+            }
         }
     }
     if (n < 2) return;
@@ -1864,6 +1918,40 @@ void TurnArrow::render(Canvas& c) {
     const float ex = cx + std::sin(a) * arm, ey = cy - std::cos(a) * arm;
     thick(c, cx, cy, ex, ey, w, col);
     head(c, ex + std::sin(a) * s * 0.06f, ey - std::cos(a) * s * 0.06f, a, s * 0.2f, col);
+}
+
+// --- QrCode -------------------------------------------------------------
+
+void QrCode::set_text(const char* text) {
+    if (!text_.set(text)) return;
+    ok_ = !text_.empty() && core::qr::encode(text_.s, code_);
+    touch();
+}
+
+void QrCode::render(Canvas& c) {
+    c.fill_rect(bounds, color::kBg);
+    if (!ok_) return;
+    constexpr int kQuiet = 2;   // the spec's 4 is for print; a phone needs ~2
+    const int16_t span = bounds.w < bounds.h ? bounds.w : bounds.h;
+    const int16_t px = static_cast<int16_t>(span / (core::qr::kSize + 2 * kQuiet));
+    if (px < 1) return;
+    const int16_t side = static_cast<int16_t>(px * (core::qr::kSize + 2 * kQuiet));
+    const int16_t x0 = static_cast<int16_t>(bounds.right() - side);   // right-aligned
+    c.fill_rect(Rect{x0, bounds.y, side, side}, color::kWhite);
+    const int16_t ox = static_cast<int16_t>(x0 + kQuiet * px);
+    const int16_t oy = static_cast<int16_t>(bounds.y + kQuiet * px);
+    for (int y = 0; y < core::qr::kSize; ++y) {
+        // One rectangle per run of dark modules.
+        for (int x = 0; x < core::qr::kSize;) {
+            if (!code_.dark(x, y)) { ++x; continue; }
+            int e = x;
+            while (e < core::qr::kSize && code_.dark(e, y)) ++e;
+            c.fill_rect(Rect{static_cast<int16_t>(ox + x * px), static_cast<int16_t>(oy + y * px),
+                             static_cast<int16_t>((e - x) * px), px},
+                        color::kBlack);
+            x = e;
+        }
+    }
 }
 
 }  // namespace ui

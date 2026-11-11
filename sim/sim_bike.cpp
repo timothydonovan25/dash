@@ -239,6 +239,14 @@ void Bike::step(core::state::Slots& slots, const Controls& c, uint32_t now_ms,
     e.neutral = c.neutral;
     e.tps_pct = c.tps_pct;
     e.ecu_online = c.ecu_online;
+    e.ecu_adapter = c.ecu_online;
+    if (c.ecu_online) {
+        // Plausible, not modelled: a warm engine, and a manifold that fills
+        // as the throttle opens.
+        e.engine_c = 105.0f;
+        e.intake_c = 28.0f;
+        e.map_kpa = 30.0f + 0.7f * c.tps_pct;
+    }
     slots.engine.publish(e);
 
     core::state::Motion m;

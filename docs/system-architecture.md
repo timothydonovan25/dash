@@ -598,7 +598,7 @@ Producers write fixed-size records into a PSRAM ring buffer. The `logger`
 task drains the ring to SD in 8 kB blocks. Producers never touch the
 filesystem and never block.
 
-`core::log::Record` is 124 bytes fixed; the ring is 512 of them, 62 kB in
+`core::log::Record` is 132 bytes fixed; the ring is 512 of them, 68 kB in
 PSRAM. Fixed size matters because the drain writes whole records: a
 variable-length format means a partial write at power-off corrupts the
 tail rather than truncating it.
@@ -606,8 +606,8 @@ tail rather than truncating it.
 **The file is CSV, not a binary format.** The original sketch called for
 binary — four times smaller, decoded by a script on the PC. That was the
 wrong trade. A blackbox you need a tool to read is a blackbox you never
-read, and the SD card is 16 GB against a 50 Hz record of 124 bytes, which
-is 22 MB an hour. Space is not the constraint.
+read, and the SD card is 16 GB against a 50 Hz record of 132 bytes, which
+is 24 MB an hour. Space is not the constraint.
 
 Given it is CSV anyway, the columns are named for **RaceRender**, so the
 same file is both the blackbox and the source for a video overlay
@@ -705,9 +705,10 @@ public:
 
 Implementations, in the order you will need them:
 
-- `NullEngine` — always offline. Used now. Stat and Diag show `--`.
-- `EspNowEngine` — the K-line adapter's frames, adapter C6 → dash C6 over
-  ESP-NOW. Not written; see §10.1.
+- `NullEngine` — always offline. The sim and the tests.
+- `services::EspNowEngine` — the K-line adapter's frames, adapter C6 → dash
+  C6 over ESP-NOW (§10.1). Wired in since 2.15, and offline until CONFIG →
+  ECU → Adapter is on and an adapter is heard. Not run against one.
 
 Only one is compiled in at a time. Nothing above `IEngine` changes when
 you swap them.
@@ -728,8 +729,19 @@ must sit on a fixed channel (review §10). The earlier CAN adapter is
 `history/kline-can-adapter-netlist-review.md`. The repo records no order
 for either board.
 
-Design the frame format now, whichever transport wins. The transport is
-20 lines; the decode and the interface are the part worth getting right.
+**As built (2.15).** The frame format, the decode and the staleness rule
+are `core/ecu`, host-tested. The adapter broadcasts raw ECU tables and the
+dash decodes them, because the byte map is unproven on this bike and the
+dash is the end that updates from a card. The C6 (`dash_espnow.c`) forwards
+any ESP-NOW frame with the magic byte, with its sender's address, as an
+ESP-Hosted custom message; `EspNowEngine` feeds a `core::ecu::Link` on the
+RPC task (core 1) and publishes its snapshot, which `ctrl` reads and ages
+itself. `wifi` keeps a station up on `core::ecu::kChannel` while the
+setting is on, and the hotspot switches AP+STA ↔ STA instead of stopping
+Wi-Fi. A refusal on that path never triggers a C6 firmware push. Not done:
+pairing and an ESP-NOW key (the first adapter heard each power-on is
+taken), and anything measured: RAM with Wi-Fi always up, BLE beside it,
+frame loss.
 
 Tach RPM stays separate and always available. It comes from the inductive
 pickup on `TACH_SIG` (GPIO21), not from the ECU. Keep it that way even after the

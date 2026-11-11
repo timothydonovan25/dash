@@ -994,7 +994,7 @@ and hands the copy to the screen. No slot is touched.
 |---|---|---|
 | `rpm` | Engine speed for display | `core::tach::Meter::rpm()`: edge intervals from the tach ISR, smoothed by CONFIG → Shift → Tach smooth (`tach_smooth_ms`, a time constant) |
 | `neutral` | In neutral (sensed) | `IEngineSense::read().neutral`, which the driver has already inverted from the LOW-active wire |
-| `tps_pct` | Throttle position | From the ECU, which is unreachable (`NullEngine`), so always 0 today |
+| `tps_pct` | Throttle position | From the ECU through the K-line adapter (features §35); 0 without one. `ecu_adapter`, `engine_c`, `intake_c`, `map_kpa` and `inj_raw` come the same way |
 | `ecu_online` | ECU link up | `d.engine->online()`, always false today; screens show `--` for ECU fields |
 | `shift_mask` | Which of the 8 lamps the rpm lights, bit 0 = lamp 1 | `core::shift::pattern()` on the *raw* rpm (or the lead-predicted rpm), with hysteresis against the previous mask. Published so screens mirror the real lamps rather than recomputing (they would have their own hysteresis state and disagree) |
 | `shift_flash` | Over the flash limit (lamps blinking) | `core::shift::over_limit()` |
@@ -1251,7 +1251,7 @@ known only to `wiring.cpp`):
 | `panel` | `hal::IPanel` | `drivers::Ili9488` | `render` |
 | `sense` | `hal::IEngineSense` | `drivers::EngineSense` | `ctrl` |
 | `lamps` | `hal::IShiftLamps` | `drivers::Pca9955b` | `ctrl` only |
-| `engine` | `hal::IEngine` | `hal::NullEngine` (always offline) | `ctrl` |
+| `engine` | `hal::IEngine` | `services::EspNowEngine` (offline without the adapter) | `ctrl`; `wifi` calls `attach()` |
 | `storage` | `hal::IStorage` (NVS) | `drivers::NvsStorage` | `wiring` (load settings, panel model), `logic_restore`, `keeper`, `power`. NimBLE keeps its bonds in NVS through its own store |
 | `card` | `hal::ICard` (SD) | `drivers::SdCard` | `logger`, `storage`, `ota`, `wifi`, Doom |
 | `rails` | `hal::IRailSense` | `drivers::VinSense` | `keeper`, `power` |

@@ -623,4 +623,54 @@ Status query(Graph& g, uint32_t vf, const Snap& s, const Snap& t, SearchMem mem,
     return bld.ok() ? Status::Ok : bld.status();
 }
 
+size_t longest_roads(const Route& r, RoadLabel* out, size_t max) {
+    struct Road { uint32_t name_off, total_ds, best_ds, best_mid; };
+    // shortcut: 32 distinct roads tracked; past that a new one replaces the
+    // least-used only if its stretch is longer, which can miss a road ridden
+    // in many short pieces on a long route. Upgrade if labels look wrong there.
+    constexpr size_t kRoads = 32;
+    Road roads[kRoads];
+    size_t n = 0;
+    for (uint32_t i = 0; i + 1 < r.n_pts;) {
+        // Segments i..j-1 are one stretch of one road.
+        const uint32_t off = r.pts[i].name_off;
+        uint32_t j = i + 1;
+        while (j + 1 < r.n_pts && r.pts[j].name_off == off) ++j;
+        const uint32_t t0 = r.pts[i].time_ds;
+        const uint32_t dt = r.pts[j].time_ds - t0;
+        if (off != 0 && dt > 0) {
+            uint32_t mid = i;
+            while (mid < j && r.pts[mid].time_ds - t0 < dt / 2) ++mid;
+            size_t k = 0;
+            while (k < n && roads[k].name_off != off) ++k;
+            if (k == n) {
+                if (n < kRoads) {
+                    roads[n++] = Road{off, 0, 0, mid};
+                } else {
+                    size_t least = 0;
+                    for (size_t q = 1; q < n; ++q)
+                        if (roads[q].total_ds < roads[least].total_ds) least = q;
+                    if (roads[least].total_ds >= dt) { i = j; continue; }
+                    k = least;
+                    roads[k] = Road{off, 0, 0, mid};
+                }
+            }
+            roads[k].total_ds += dt;
+            if (dt > roads[k].best_ds) { roads[k].best_ds = dt; roads[k].best_mid = mid; }
+        }
+        i = j;
+    }
+    const uint32_t tenth = r.n_pts ? (r.pts[r.n_pts - 1].time_ds - r.pts[0].time_ds) / 10 : 0;
+    size_t got = 0;
+    while (got < max) {
+        size_t best = n;
+        for (size_t k = 0; k < n; ++k)
+            if (roads[k].total_ds && (best == n || roads[k].total_ds > roads[best].total_ds)) best = k;
+        if (best == n || (got >= 2 && roads[best].total_ds < tenth)) break;
+        out[got++] = RoadLabel{roads[best].name_off, roads[best].total_ds, roads[best].best_mid};
+        roads[best].total_ds = 0;
+    }
+    return got;
+}
+
 }  // namespace core::route

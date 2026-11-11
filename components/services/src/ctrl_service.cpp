@@ -368,11 +368,18 @@ void ctrl_task(void* arg) {
         // a copy nobody read again, and the gear read 0 on every screen.
         e.gear = core::gear::estimate(tach.rpm(), m.best_mph, c.neutral,
                                       core::config::gear_view(*d.settings));
-        e.ecu_online = d.engine && d.engine->online();
-        if (e.ecu_online) {
+        // The ECU's own rpm is not used: the pickup's is first-hand and
+        // does not wait on a radio.
+        if (d.engine && d.settings->ecu_on) {
+            e.ecu_adapter = d.engine->link().adapter;
             hal::EngineData ed;
             if (d.engine->read(ed)) {
+                e.ecu_online = true;
                 e.tps_pct = ed.tps_pct;
+                e.engine_c = ed.engine_c;
+                e.intake_c = ed.intake_c;
+                e.map_kpa = ed.map_kpa;
+                e.inj_raw = ed.inj_raw;
             }
         }
         d.slots->engine.publish(e);

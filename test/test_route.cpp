@@ -385,5 +385,43 @@ int main() {
         CHECK(query(g, 0, at(0, 0), at(5, 5), rig->search.mem(), rig->route) == Status::ReadError);
     }
 
+    CASE("longest_roads: most time first, the long one's middle, small ones dropped");
+    {
+        // Roads by segment, 10 s each: A A B A A A C D(unnamed) E, then the end.
+        static RouteStorage<16, 2> m;
+        Route r = m.make();
+        const uint32_t roads[] = {1, 1, 2, 1, 1, 1, 3, 0, 4};
+        for (uint32_t i = 0; i <= 9; ++i) {
+            RoutePoint& p = r.pts[r.n_pts++];
+            p = RoutePoint{};
+            p.time_ds = i * 100;
+            p.name_off = i < 9 ? roads[i] : 0;
+        }
+        RoadLabel out[4];
+        const size_t n = longest_roads(r, out, 4);
+        CHECK(n == 4);                       // 1, then 2/3/4 each 10% of 90 s
+        CHECK(out[0].name_off == 1 && out[0].time_ds == 500);
+        CHECK(out[0].point >= 3 && out[0].point <= 6);   // inside the 30 s stretch
+        CHECK(out[1].time_ds == 100);
+        for (size_t i = 0; i < n; ++i) CHECK(out[i].name_off != 0);
+        CHECK(longest_roads(r, out, 2) == 2);
+
+        // A long road and two crumbs under a tenth: only the top two.
+        r.n_pts = 0;
+        const uint32_t t_ds[] = {0, 1000, 2000, 2050, 2100};
+        const uint32_t off[]  = {1, 1, 2, 3, 0};
+        for (uint32_t i = 0; i < 5; ++i) {
+            RoutePoint& p = r.pts[r.n_pts++];
+            p = RoutePoint{};
+            p.time_ds = t_ds[i];
+            p.name_off = off[i];
+        }
+        CHECK(longest_roads(r, out, 4) == 2);
+        CHECK(out[0].name_off == 1 && out[1].name_off == 2);   // a tie: the first found
+
+        Route empty = m.make();
+        CHECK(longest_roads(empty, out, 4) == 0);
+    }
+
     return check::report("route");
 }

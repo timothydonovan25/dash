@@ -78,6 +78,11 @@ struct Settings {
     float service_every_h = 0.0f;
     float service_at_h    = 0.0f;
 
+    // The K-line adapter (core/ecu). On keeps the C6's Wi-Fi listening on
+    // the adapter's channel all the time; off, as it is until an adapter is
+    // fitted, the radio is BLE's alone.
+    bool  ecu_on = false;
+
     // CRUISE -> NAV (core::route): routes keep off dirt roads (tracks and
     // unpaved surfaces). Switched from NAV's picker as well as here.
     bool     nav_avoid_dirt = false;

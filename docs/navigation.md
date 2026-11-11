@@ -302,7 +302,8 @@ minutes left, as a Garmin does.
   route-only mode over the same `RouteTrace` as CRUISE → MAP: fitted to
   the route alone, its 65 mph stretches amber (`trace_route` puts 65 in a
   thinned point's `speed_mph` when any segment since the last point is
-  fast), the destination ringed, the bike white. North up; no other roads.
+  fast), the destination ringed, the bike white, its 2-4 longest-ridden roads
+  named (`longest_roads`, 2.18). North up; no other roads.
 
 Blackbox columns, appended at the end: `NavTurnFt`, `NavDestMi`, `LimitMPH`
 (0 when not routing or unknown).

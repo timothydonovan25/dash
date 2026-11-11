@@ -35,7 +35,7 @@ struct Controls {
     // Inside the dash, for DIAG -> System's chip and IMU rows.
     float dash_temp_c = 38.0f;
     bool  neutral    = false;
-    bool  ecu_online = false;   // NullEngine ships, so this is off by default
+    bool  ecu_online = false;   // the K-line adapter fitted and the ECU answering
     bool  gps_fix    = true;
     int   sats       = 11;
 

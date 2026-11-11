@@ -85,7 +85,7 @@ it moved, `idf.py flash` (it rewrites otadata, so stable is `ota_0` again).
 
 Every 5 s, while a USB host is connected, `keeper` prints a header and one
 line per service: `ctrl`, `imu`, `gnss`, `logic`, `input`, `render`,
-`logger`, `storage`, `keeper`, `power`, `ota`, `ble`, `wifi`. It replaced
+`logger`, `ecu`, `storage`, `keeper`, `power`, `ota`, `ble`, `wifi`. It replaced
 the 1 Hz `STAT` line and the 10 s `heap`/`imu`/`timing`/`gnss`/`power`/
 `logger` summary. What a soak watches:
 

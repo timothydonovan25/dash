@@ -26,6 +26,7 @@ idf_component_register(
          "src/pairing.cpp"
          "src/ota.cpp"
          "src/wifi.cpp"
+         "src/qr.cpp"
          "src/sweep.cpp"
          "src/fusion_speed.cpp"
          "src/fixtime.cpp"
@@ -48,4 +49,5 @@ idf_component_register(
          "src/route_search.cpp"
          "src/route_pace.cpp"
          "src/crash.cpp"
+         "src/ecu.cpp"
     INCLUDE_DIRS "include")

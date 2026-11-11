@@ -18,6 +18,7 @@ idf_component_register(
          "src/ota_service.cpp"
          "src/settings_store.cpp"
          "src/wifi_service.cpp"
+         "src/ecu_link.cpp"
          "src/wifi_page.cpp"
          "src/stack_watch.cpp"
          "src/watchdog.cpp"

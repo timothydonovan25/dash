@@ -515,7 +515,7 @@ BLE-only one, so the version check cannot tell them apart: a C6 that answers
 | | |
 |---|---|
 | On | DIAG → Update → Wi-Fi, or CONFIG → Wi-Fi. A toggle. |
-| Network | `CRF250F-Dash`, WPA2, channel 6, two clients. |
+| Network | `CRF250F-Dash`, WPA2, channel 6, two clients. Channel 6 is `core::ecu::kChannel`: with CONFIG → ECU → Adapter on, Wi-Fi is already up as a station listening for the K-line adapter (features §35), and the hotspot comes up beside it and goes back down to it. |
 | Password | Eight digits from `esp_random`, new every time it starts, shown on the Update screen. Nothing is stored. |
 | Address | `http://192.168.4.1` |
 | Off | The toggle; 10 minutes with no page request (`core::wifi::kIdleOffMs`); or moving faster than 3 mph. |

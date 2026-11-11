@@ -1,10 +1,9 @@
 // Engine data, from two sources that must not be confused.
 //
-// `IEngine` is the ECU. The dash cannot talk to it yet: the P4 board has
-// no CAN transceiver, and the K-line adapter's CANH/CANL run through an
-// SN65HVD230 so those wires cannot be repurposed as a UART without a respin
-// (§10.1). `NullEngine` is therefore what ships today, and every screen
-// already renders `--` for an offline ECU.
+// `IEngine` is the ECU. The board has no wire to it (§10.1): its data comes
+// from the K-line adapter under the seat, by radio, through
+// services::EspNowEngine. With no adapter that reads offline, as
+// `NullEngine` always does, and every screen renders `--`.
 //
 // `IEngineSense` is the inductive pickup on TACH_SIG (GPIO21), the neutral switch and the
 // two wheel sensors. It is always available and owes nothing to the ECU.
@@ -21,6 +20,17 @@ struct EngineData {
     float tps_pct   = 0.0f;
     float batt_v    = 0.0f;
     bool  mil       = false;    // check-engine lamp
+    float engine_c  = 0.0f;     // the ECU's engine temperature sensor
+    float intake_c  = 0.0f;
+    float map_kpa   = 0.0f;
+    uint16_t inj_raw = 0;       // injector pulse, scale not known
+};
+
+// The link to whatever carries the ECU's data, for DIAG and the console.
+struct EngineLink {
+    bool     adapter  = false;  // heard just now, whether or not the ECU answers
+    uint32_t lost     = 0;      // frames missed, since boot
+    uint32_t rejected = 0;      // frames refused, since boot
 };
 
 class IEngine {
@@ -28,11 +38,13 @@ public:
     virtual ~IEngine() = default;
     virtual bool online() const = 0;
     virtual bool read(EngineData& out) = 0;    // false when there is no data
+    // Hooks up the transport, once the radio it rides on is running. `wifi`
+    // calls it each time it brings that up, so it must bear repeating.
+    virtual Status attach() { return Status::Ok; }
+    virtual EngineLink link() const { return {}; }
 };
 
-// What is compiled in today. UartEngine, CanEngine and BleEngine arrive
-// later and nothing above this line changes when they do — which is the
-// entire reason this interface exists before any of them.
+// No ECU at all: the sim, the tests, a build without the adapter.
 class NullEngine final : public IEngine {
 public:
     bool online() const override { return false; }

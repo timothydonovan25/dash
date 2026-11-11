@@ -11,6 +11,7 @@
 #include "wiring.hpp"
 #include "doom_board.hpp"
 #include "services/settings_store.hpp"
+#include "services/ecu_link.hpp"
 
 #include "bsp/buses.hpp"
 #include "drivers/drivers.hpp"
@@ -64,7 +65,7 @@ drivers::EngineSense g_sense;
 drivers::NvsStorage  g_storage;
 drivers::SdCard      g_card;
 drivers::VinSense    g_vin;
-hal::NullEngine      g_engine;   // the ECU is unreachable on this board (§10.1)
+services::EspNowEngine g_engine{g_clock};   // the K-line adapter, by radio (§10.1)
 
 services::Deps         g_deps;
 services::CommandQueue g_commands;
@@ -131,7 +132,7 @@ services::Deps& build() {
 
     // Not fitted, and not faults: the health table distinguishes the two so
     // the keeper does not spend the ride retrying things that do not exist.
-    g_health.set_absent(core::state::Dev::Ecu);       // no CAN transceiver
+    g_health.set_absent(core::state::Dev::Ecu);       // an option (CONFIG -> ECU), not a fault
     g_health.set_absent(core::state::Dev::Phone);     // until one connects
     g_health.set_absent(core::state::Dev::TpmsF);
     g_health.set_absent(core::state::Dev::TpmsR);     // no TPMS scan yet (§11.2)

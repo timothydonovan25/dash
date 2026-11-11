@@ -707,7 +707,7 @@ int main() {
     // before there is a board to log from.
     std::FILE* log_file = std::fopen("dash_log.csv", "wb");
     if (log_file) {
-        char head[256];
+        char head[512];
         const size_t h = core::log::csv_header(head, sizeof head);
         std::fwrite(head, 1, h, log_file);
     }

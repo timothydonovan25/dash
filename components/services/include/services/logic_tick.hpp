@@ -92,6 +92,9 @@ struct LogicState {
     // what the card said last.
     core::route::Navigator nav;
     core::route::Progress  nav_progress;
+    core::state::Nav::Label route_labels[core::state::Nav::kMaxLabels];   // label_route's
+    uint8_t                n_route_labels = 0;
+    core::state::Nav       nav_out;        // publish_nav's staging copy: too big for its frame
     core::route::PaceNote  pace[core::state::Nav::kMaxPace];   // publish_nav's, here not on its stack
     bool     map_asked = false;
     uint32_t map_asked_ms = 0;

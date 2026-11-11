@@ -49,7 +49,9 @@ Firmware (ESP-IDF v6.0.2, sourced for you). Each needs -b:
   with a dark screen. If it does, unplug it and plug it back in.
 
 Housekeeping:
-  clean       delete the host, sim and bike build trees
+  clean       delete the host, sim, bike and demo build trees
+
+  A running tools/pod_keys.py is paused for flash and dev and resumed after.
 
 Port: ${PORT:-found by itself: the Espressif board in /dev/serial/by-id}
       (change with -p PORT or PORT=...)
@@ -124,6 +126,25 @@ find_port() {
 need_port() {
     [[ -n "$PORT" ]] || find_port
     [[ -e "$PORT" ]] || die "$PORT not found. Is the board plugged in?"
+}
+
+# tools/pod_keys.py holds the port; SIGUSR1 lets go of it, SIGUSR2 takes it
+# back (docs/console.md). POD_PAUSED=1 when one was running and is now paused.
+POD_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/pod_keys.pid"
+POD_PAUSED=0
+pod_keys_pause() {
+    local pid
+    pid="$(cat "$POD_PID_FILE" 2>/dev/null)" || return 0
+    # A crashed pod_keys.py leaves its pid file; SIGUSR1 would kill whatever reused the pid.
+    grep -qa pod_keys.py "/proc/$pid/cmdline" 2>/dev/null || return 0
+    kill -USR1 "$pid" 2>/dev/null || return 0
+    POD_PAUSED=1
+    say "Paused pod_keys.py ($pid) for the flash"
+    sleep 0.5   # let it close the port
+}
+pod_keys_resume() {
+    [[ $POD_PAUSED -eq 1 ]] || return 0
+    kill -USR2 "$(cat "$POD_PID_FILE")" 2>/dev/null && say "Resumed pod_keys.py; its window shows the log"
 }
 
 need_board() {
@@ -208,16 +229,20 @@ case "$cmd" in
     sim)        sim_run ;;
     check)      need_board; host_test; fw_build ;;
     fw|build)   fw_build ;;
-    flash)      need_board; need_port; fw_build; flash_stable
-                idf -p "$PORT" monitor --no-reset ;;
-    dev)        need_board; need_port; fw_build
+    flash)      need_board; need_port; fw_build; pod_keys_pause
+                trap pod_keys_resume EXIT
+                flash_stable
+                # pod_keys.py already scrolls the log; a monitor would fight it for the port.
+                [[ $POD_PAUSED -eq 1 ]] || idf -p "$PORT" monitor --no-reset ;;
+    dev)        need_board; need_port; fw_build; pod_keys_pause
+                trap pod_keys_resume EXIT
                 python3 tools/flash_dev.py -p "$PORT" "$(project_dir)/build/dash.bin" ;;
     monitor)    need_board; idf_env; need_port; idf -p "$PORT" monitor --no-reset ;;
     menuconfig) need_board; idf_env; fix_foreign_build "$(project_dir)/build"
                 idf menuconfig ;;
     size)       need_board; idf_env; idf size ;;
-    clean)      say "Removing build-host, build-sim, build"
-                rm -rf build-host build-sim build ;;
+    clean)      say "Removing build-host, build-sim, build, demo_p4/build"
+                rm -rf build-host build-sim build demo_p4/build ;;
     ""|help|-h|--help) usage ;;
     *)          usage; die "unknown command: $cmd" ;;
 esac

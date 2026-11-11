@@ -18,6 +18,7 @@ set(COMPONENT_SRCS
 	"slave_ext_coex.c"
 	"slave_control.c"
 	"slave_util.c"
+	"dash_espnow.c"
 )
 
 if(CONFIG_ESP_HOSTED_USE_MEMPOOL)

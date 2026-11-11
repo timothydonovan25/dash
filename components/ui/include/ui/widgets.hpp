@@ -7,6 +7,7 @@
 #pragma once
 #include <cstdint>
 #include "core/hr/hr.hpp"
+#include "core/qr/qr.hpp"
 #include "core/slip/slip.hpp"
 #include "ui/widget.hpp"
 #include "ui/album_art.hpp"
@@ -251,6 +252,9 @@ public:
     void set_route_only(bool on) {
         if (assign_t(route_only_, on)) fit_stale_ = true;
     }
+    // The route view's road names. They change only with the route, so the
+    // map redraws then and not on every frame.
+    void set_labels(const core::state::Nav::Label* l, uint8_t n);
     void render(Canvas& c) override;
 
 private:
@@ -277,6 +281,8 @@ private:
     size_t fit_n_ = 0;
     float fit_min_x_ = 0, fit_max_x_ = 0, fit_min_y_ = 0, fit_max_y_ = 0;
     bool  fit_ok_ = false;          // at least one readable point
+    core::state::Nav::Label labels_[core::state::Nav::kMaxLabels];
+    uint8_t n_labels_ = 0;
 };
 
 // The tach bar: an outline up the left edge of the speed screen that flares
@@ -614,6 +620,19 @@ private:
 class Blank final : public Widget {
 public:
     void render(Canvas& c) override { c.fill_rect(bounds, color::kBg); }
+};
+
+// A QR code, dark on a white square with a two-module quiet zone, the
+// modules as large as the bounds allow. Empty text draws background.
+class QrCode final : public Widget {
+public:
+    void set_text(const char* text);
+    void render(Canvas& c) override;
+
+private:
+    TextBuf<core::qr::kMaxBytes + 1> text_;
+    core::qr::Code code_;
+    bool ok_ = false;
 };
 
 // NAV's "Where to?" keyboard: 39 keys in a 13 x 3 grid, DEL, then LIST (or

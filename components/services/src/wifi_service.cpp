@@ -20,6 +20,13 @@
 // Booting the new image stays a button on the dash: nothing on the network
 // can make the bike run code it has not been told to run.
 //
+// The same radio hears the K-line adapter (core/ecu, architecture §10.1).
+// With CONFIG -> ECU -> Adapter on, the C6's Wi-Fi is kept running as a
+// station that joins nothing, on core::ecu::kChannel, so its ESP-NOW can
+// listen; the hotspot then comes up beside it and goes down to it, on that
+// same channel. A refusal on this path never replaces the C6's firmware:
+// that stays the rider's doing, from the Update screen.
+//
 // The Wi-Fi itself is on the C6, reached over the same SDIO link as BLE
 // through esp_wifi_remote. A C6 still on the BLE-only build refuses to start
 // Wi-Fi, and carries the same ESP-Hosted version number as the BLE + Wi-Fi
@@ -28,6 +35,7 @@
 #include "c6_firmware.hpp"
 
 #include "core/config/config.hpp"
+#include "core/ecu/ecu.hpp"
 #include "core/ota/ota.hpp"
 #include "core/wifi/wifi.hpp"
 #include "core/route/search.hpp"
@@ -70,6 +78,7 @@ void log_ram(const char* when) {
              static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)));
 }
 constexpr uint32_t kTickMs = 250;
+constexpr uint32_t kListenRetryMs = 10000;
 constexpr size_t kChunk = 4096;
 
 // Any other failure is believed on the second try: the first can be the
@@ -716,7 +725,10 @@ public:
                 else if (op == core::state::WifiRequest::Toggle) start();
             }
 
-            if (w_.state != core::wifi::State::On) continue;
+            if (w_.state != core::wifi::State::On) {
+                listen_for_adapter(now);
+                continue;
+            }
             // Read the clock again: start() above stamps last_use later than
             // `now`, and an unsigned now - last would then read as days idle.
             now = d_.clock->now_ms();
@@ -774,7 +786,7 @@ private:
         server_ = start_server();
         if (!server_) {
             ESP_LOGE(kTag, "web server did not start");
-            esp_wifi_stop();
+            radio_down();
             w_.state = core::wifi::State::Failed;
             publish();
             return;
@@ -786,7 +798,47 @@ private:
         publish();
     }
 
-    esp_err_t bring_up() {
+    // The station the adapter is heard through, kept up while the setting
+    // is on and the hotspot is not. Tried again every kListenRetryMs: the
+    // C6 may not be up yet, or may be on a build without Wi-Fi.
+    void listen_for_adapter(uint32_t now) {
+        const bool want = d_.settings->ecu_on;
+        if (!want) {
+            if (sta_) radio_down();
+            return;
+        }
+        if (sta_ || now - listen_tried_ms_ < kListenRetryMs) return;
+        listen_tried_ms_ = now;
+        if (!d_.slots->health.get().ok(core::state::Dev::BleHost)) return;
+        esp_err_t e = init_wifi();
+        if (e == ESP_OK) e = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (e == ESP_OK) e = esp_wifi_start();
+        if (e == ESP_OK) e = esp_wifi_set_channel(core::ecu::kChannel, WIFI_SECOND_CHAN_NONE);
+        demote_radio_tasks(false);
+        if (e != ESP_OK) {
+            ESP_LOGW(kTag, "not listening for the adapter: %s", esp_err_to_name(e));
+            esp_wifi_stop();
+            return;
+        }
+        sta_ = true;
+        if (d_.engine) d_.engine->attach();
+        ESP_LOGI(kTag, "listening for the K-line adapter on channel %u", core::ecu::kChannel);
+        log_ram("adapter");
+    }
+
+    // The hotspot off: down to the adapter's station if that is wanted,
+    // else the radio off.
+    void radio_down() {
+        if (sta_ && d_.settings->ecu_on) {
+            esp_wifi_set_mode(WIFI_MODE_STA);
+            esp_wifi_set_channel(core::ecu::kChannel, WIFI_SECOND_CHAN_NONE);
+        } else {
+            esp_wifi_stop();
+            sta_ = false;
+        }
+    }
+
+    esp_err_t init_wifi() {
         // The netif once per boot, whatever the C6 says: making the default
         // AP netif a second time asserts inside esp_netif.
         if (!netif_made_) {
@@ -806,17 +858,24 @@ private:
             }
             inited_ = true;
         }
+        return ESP_OK;
+    }
+
+    esp_err_t bring_up() {
+        const esp_err_t init = init_wifi();
+        if (init != ESP_OK) return init;
         wifi_config_t ap = {};
         std::snprintf(reinterpret_cast<char*>(ap.ap.ssid), sizeof ap.ap.ssid, "%s",
                       core::wifi::kSsid);
         ap.ap.ssid_len = static_cast<uint8_t>(std::strlen(core::wifi::kSsid));
         std::snprintf(reinterpret_cast<char*>(ap.ap.password), sizeof ap.ap.password, "%s",
                       w_.pass);
-        ap.ap.channel = 6;
+        ap.ap.channel = core::ecu::kChannel;
         ap.ap.max_connection = 2;
         ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
         ap.ap.pmf_cfg.required = false;
-        esp_err_t e = esp_wifi_set_mode(WIFI_MODE_AP);
+        // Beside the adapter's station if that is up; alone otherwise.
+        esp_err_t e = esp_wifi_set_mode(sta_ ? WIFI_MODE_APSTA : WIFI_MODE_AP);
         if (e == ESP_OK) e = esp_wifi_set_config(WIFI_IF_AP, &ap);
         if (e == ESP_OK) e = esp_wifi_start();
         // The event loop above, and whatever esp_wifi_init made on the
@@ -832,7 +891,7 @@ private:
             httpd_stop(server_);
             server_ = nullptr;
         }
-        esp_wifi_stop();
+        radio_down();
         ESP_LOGI(kTag, "hotspot off (%s)", why);
         log_ram("off");
         w_ = core::state::Wifi{};
@@ -845,6 +904,8 @@ private:
     bool netif_made_ = false;
     bool inited_ = false;
     int refusals_ = 0;
+    bool sta_ = false;                // the adapter's station is up
+    uint32_t listen_tried_ms_ = 0;
 };
 
 void wifi_task(void* arg) {

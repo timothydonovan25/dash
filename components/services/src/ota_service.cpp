@@ -304,6 +304,11 @@ private:
                 publish();
             }
             if (done >= size) break;
+            // A full stream never blocks the read below, and with `render`
+            // taking the rest of core 1 its idle task starved: the task
+            // watchdog panicked the board 75 % into a phone upload. One tick
+            // a chunk, ~0.6 s over a 2.4 MB image.
+            vTaskDelay(1);
             if (!parked()) return abort_with(InstallError::Moving);
             got = size - done < kChunk ? size - done : kChunk;
             if (!src.read(g_chunk, got)) return abort_with(InstallError::ReadFailed);

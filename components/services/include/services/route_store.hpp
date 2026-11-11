@@ -21,6 +21,7 @@
 #include "core/route/route.hpp"
 #include "core/route/search.hpp"
 #include "core/state/track_buffer.hpp"
+#include "core/state/vehicle.hpp"
 #include "hal/i_storage.hpp"
 
 namespace services {
@@ -41,6 +42,9 @@ struct RouteData {
     core::route::Cue        cues[kRouteCues];
     char                    cue_names[kRouteCues][kRoadName];
     char                    fast_name[kRoadName];
+    core::route::RoadLabel  labels[core::state::Nav::kMaxLabels];
+    char                    label_names[core::state::Nav::kMaxLabels][kRoadName];
+    uint8_t                 n_labels = 0;
     core::route::Route      route{pts, kRoutePts, cues, kRouteCues};
 };
 

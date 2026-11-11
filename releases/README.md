@@ -26,3 +26,8 @@ C6 co-processor images (`c6-<esp_hosted version>-<date>-<feature>.bin`):
   dash 1.9 on, the dash pushes slave_fw to the C6 whenever the build ids
   differ, once per image (core/c6). DIAG -> Update shows "2.12.8 #<id>";
   "#-" is a C6 build from before build ids.
+- `c6-2.12.8-2026-11-10-espnow-ecu.bin`: the same, and it runs ESP-NOW
+  itself to hear the K-line adapter, forwarding its frames to the P4
+  (`dash_espnow.c`, features §35). Dash 2.15's ECU link needs this one in
+  `slave_fw`; without it CONFIG → ECU → Adapter hears nothing. Built, not
+  run on a board.

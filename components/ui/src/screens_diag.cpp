@@ -740,9 +740,13 @@ constexpr Rect kUpdRunning {kUpdValueX,  40, 370, 10};
 constexpr Rect kUpdOther   {kUpdValueX,  58, 370, 10};
 constexpr Rect kUpdC6      {kUpdValueX,  76, 370, 10};
 constexpr Rect kUpdStatus  {14,          100, 452, 10};
-constexpr Rect kUpdActions {14,          124, 452, 88};
-constexpr Rect kUpdWifiJoin{14,          220, 452, 16};
-constexpr Rect kUpdWifiInfo{14,          242, 452, 10};
+// The rows stop at x 364 so the join QR fits on the right. 3 px a module
+// (13 mm on the glass) is what leaves the rows room; phones read it at a
+// hand's length.
+constexpr Rect kUpdActions {14,          124, 350, 88};
+constexpr Rect kUpdWifiJoin{14,          220, 350, 16};
+constexpr Rect kUpdWifiInfo{14,          242, 350, 10};
+constexpr Rect kUpdWifiQr  {367,         124, 99, 99};
 constexpr int16_t kUpdNoteY = 268;
 
 // "<a> <b> <c>", for the version lines.
@@ -780,6 +784,8 @@ void UpdateScreen::enter(Canvas&) {
     wifi_info_.configure("", color::kDim, 1, Align::Left);
     list_[5] = &wifi_join_;
     list_[6] = &wifi_info_;
+    wifi_qr_.set_bounds(kUpdWifiQr);
+    list_[7] = &wifi_qr_;
 }
 
 void UpdateScreen::update(const Frame& f) {
@@ -858,8 +864,10 @@ void UpdateScreen::update(const Frame& f) {
 
     char join_line[48] = "";
     char info_line[64] = "";
+    char qr_text[core::qr::kMaxBytes + 1] = "";
     if (w.state == wifi::State::On) {
         join(join_line, sizeof join_line, wifi::kSsid, " pass", w.pass);
+        core::qr::wifi_join(qr_text, sizeof qr_text, wifi::kSsid, w.pass);
         char n[8], mins[8];
         u::fmt_value(n, sizeof n, static_cast<float>(w.clients), 0, true);
         u::fmt_value(mins, sizeof mins, static_cast<float>((w.off_in_s + 59) / 60), 0, true);
@@ -873,6 +881,7 @@ void UpdateScreen::update(const Frame& f) {
     }
     wifi_join_.set_text(join_line);
     wifi_info_.set_text(info_line);
+    wifi_qr_.set_text(qr_text);
 }
 
 bool UpdateScreen::handle(const core::nav::InputEvent& e) {
@@ -912,6 +921,6 @@ void UpdateScreen::draw_background(Canvas& c) {
                 theme::secondary, 1, Align::Left);
 }
 
-WidgetList UpdateScreen::widgets() { return WidgetList{list_, 7}; }
+WidgetList UpdateScreen::widgets() { return WidgetList{list_, 8}; }
 
 }  // namespace ui

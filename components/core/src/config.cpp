@@ -197,7 +197,7 @@ const ConfigItem kItems[] = {
     // back. Set against a meter on the battery, key on.
     num(0x0E01, "Trim", "Battery", Kind::Float, -1.0f, 1.5f, 0.05f, "V", FIELD(battery_trim_v)),
 
-    // Blackbox. 50 Hz is about 27 MB an hour and gives the ring ten seconds
+    // Blackbox. 50 Hz is about 30 MB an hour and gives the ring ten seconds
     // of slack against an SD stall; 5 Hz is a hundred. Lap markers are
     // written whatever this says.
     choice(0x0901, "Rate", "Log", FIELD(log_rate),
@@ -218,6 +218,10 @@ const ConfigItem kItems[] = {
     num(0x1201, "Interval", "Service", Kind::Float, 0, 200, 1, "h", FIELD(service_every_h)),
     num(0x1202, "Done at",  "Service", Kind::Float, 0, 100000, 1, "h", FIELD(service_at_h)),
     confirmed(0x1203, "Mark done", "Service", state::CommandId::ServiceDone),
+
+    // ECU (core/ecu): listen for the K-line adapter. Off and on does not
+    // choose another adapter; the first heard each power-on is it.
+    boolean(0x1301, "Adapter", "ECU", FIELD(ecu_on)),
 };
 
 #undef FIELD

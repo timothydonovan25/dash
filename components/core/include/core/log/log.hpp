@@ -81,6 +81,15 @@ struct Record {
     float    vbat        = 0.0f;
     uint8_t  shift_lamps = 0;
     int8_t   slip_pct    = 0;
+
+    // From the ECU (core/ecu), all 0 without kFlagEcu: throttle opening,
+    // manifold pressure, the ECU's engine and intake temperatures, and the
+    // injector pulse as the ECU sends it (scale not known).
+    uint8_t  tps_pct     = 0;
+    uint8_t  map_kpa     = 0;
+    int16_t  engine_f    = 0;
+    int16_t  intake_f    = 0;
+    uint16_t inj_raw     = 0;
 };
 
 enum Flags : uint16_t {

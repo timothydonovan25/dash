@@ -6,8 +6,8 @@ the host, so a service can be exercised against a fake.
 `i_rails.hpp`, plus `hal.hpp` as an umbrella for main.
 
 `i_engine.hpp` carries both halves of "engine data": `IEngine` is the ECU,
-and `NullEngine` — always offline — is what ships, because the board has no
-CAN transceiver (architecture §10.1). `IEngineSense` is the tach pickup, the
+and it has no wire on this board: `services::EspNowEngine` gets it by radio
+from the K-line adapter (architecture §10.1). `NullEngine` is always offline. `IEngineSense` is the tach pickup, the
 neutral switch and the wheel sensors, which are always available and owe
 the ECU nothing.
 

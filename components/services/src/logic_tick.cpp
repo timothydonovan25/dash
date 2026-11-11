@@ -466,6 +466,13 @@ void blackbox_row(Deps& d, LogicState& s, uint32_t now,
             fo.valid ? fo.mph : g.speed_mph, fo.valid || g.fix, now, sc);
         rec.slip_pct = static_cast<int8_t>(r.kind == core::slip::Kind::Spin ? r.pct : -r.pct);
     }
+    if (e.ecu_online) {
+        rec.tps_pct = static_cast<uint8_t>(std::lround(e.tps_pct));
+        rec.map_kpa = static_cast<uint8_t>(std::lround(e.map_kpa));
+        rec.engine_f = static_cast<int16_t>(std::lround(core::units::f_from_c(e.engine_c)));
+        rec.intake_f = static_cast<int16_t>(std::lround(core::units::f_from_c(e.intake_c)));
+        rec.inj_raw = e.inj_raw;
+    }
     d.blackbox->push(rec);
 }
 
@@ -558,6 +565,20 @@ __attribute__((noinline)) void trace_route(Deps& d, LogicState& s, const core::r
     t.gen.fetch_add(1, std::memory_order_release);
 }
 
+// The route's road names (RouteData::labels) into the frame the map draws
+// in, once per route; publish_nav copies them every frame.
+void label_route(LogicState& s, const RouteData* rd) {
+    s.n_route_labels = 0;
+    if (!rd) return;
+    for (uint8_t i = 0; i < rd->n_labels && i < core::state::Nav::kMaxLabels; ++i) {
+        if (!rd->label_names[i][0] || rd->labels[i].point >= rd->route.n_pts) continue;
+        const core::route::Point& at = rd->route.pts[rd->labels[i].point].p;
+        core::state::Nav::Label& l = s.route_labels[s.n_route_labels++];
+        to_local_ft(s.origin, core::geo::LatLon{at.lat_e7 * 1e-7, at.lon_e7 * 1e-7}, l.x_ft, l.y_ft);
+        std::snprintf(l.name, sizeof l.name, "%s", rd->label_names[i]);
+    }
+}
+
 void search_go(LogicState& s, core::route::Point to, const char* name, const core::state::Gnss& g,
                core::route::Point here);
 
@@ -611,6 +632,7 @@ __attribute__((noinline)) void pump_route(Deps& d, LogicState& s, const core::st
             if (s.nav.answered(box->status, r, now)) {
                 box->live = into;
                 trace_route(d, s, &r);
+                label_route(s, &box->data[into]);
                 s.fast_presumed = false;
                 for (uint32_t i = 0; i < r.n_pts; ++i)
                     if (r.pts[i].flags & core::route::kAttrFast) { s.fast_presumed = r.pts[i].mph == 0; break; }
@@ -621,6 +643,7 @@ __attribute__((noinline)) void pump_route(Deps& d, LogicState& s, const core::st
     if (!s.nav.following()) {
         box->live = 0xFF;
         if (s.route_traced) trace_route(d, s, nullptr);
+        label_route(s, nullptr);
     }
     if (!box->free()) return;
 
@@ -784,7 +807,8 @@ __attribute__((noinline)) void nav_go(Deps& d, LogicState& s, const core::state:
 // Out of line: its locals (a whole Nav) must not land in logic_tick's frame.
 __attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
     build_nav_list(s);
-    core::state::Nav n;
+    core::state::Nav& n = s.nav_out;
+    n = core::state::Nav{};
     n.phase = static_cast<uint8_t>(s.nav.phase());
     n.status = static_cast<uint8_t>(s.nav.status());
     n.map_date = s.nav.has_map() ? s.map_date : 0;
@@ -797,6 +821,8 @@ __attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
     if (box && box->live < 2 && s.nav.following()) {
         const RouteData& rd = box->data[box->live];
         n.following = true;
+        for (uint8_t i = 0; i < s.n_route_labels; ++i) n.labels[i] = s.route_labels[i];
+        n.n_labels = s.n_route_labels;
         if (p.on || p.cue != core::route::kNone) {
             if (p.cue < rd.route.n_cues) {
                 const core::route::Cue& c = rd.route.cues[p.cue];

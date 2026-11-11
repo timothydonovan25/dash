@@ -24,7 +24,7 @@ how a rider reaches it. Paths are relative to the repo root.
 | `core/battery`, `core/power` | 21 | `core/nav` | 3, 9 |
 | `core/ble` (pairing) | 24 | `core/nmea`, `core/fixtime` | 16, 7.1 |
 | `core/c6` (C6 firmware push) | 24 | `core/ota` | 26 |
-| `core/crash` (crash SOS) | 24.3 | | |
+| `core/crash` (crash SOS) | 24.3 | `core/ecu` (K-line adapter link) | 35 |
 | `core/config` | 10, 34 | `core/perf` | 19 |
 | `core/delta` | 7.3 | `core/session` | 7.6 |
 | `core/flash` (`still`) | 28 | `core/shift`, `core/tach` | 12 |
@@ -327,6 +327,15 @@ using 65 mph roads. See `docs/navigation.md`.
   fitted to the screen, north up, blue with its 65 mph stretches amber, the
   destination ringed and the bike a white dot and arrow. The distance and
   time left stay below it.
+- The route view names the route's **main roads** (2.18; 2.17 named the
+  next three turns): the two the route spends longest on, plus a third and
+  fourth if each takes a tenth of its time or more. A dot sits in the middle
+  of each road's longest stretch with the name beside it, 15 characters at
+  most. A name tries right, left, above and below its dot, then the same at
+  half size (2.19); with no room clear of a bigger road's name, the dot
+  shows alone. Picked once per
+  route (`core::route::longest_roads`, in `route_store`), placed by
+  `logic`'s `label_route`, carried in `Nav::labels`.
 - **Pace notes** (2.8): the next bends on the road graded rally style,
   1 (tightest) to 6, with into / tightens / opens / long / hairpin, on the
   status line: `300 R4 tightens 150 L3 into R5` (docs/navigation.md §7.2).
@@ -428,8 +437,10 @@ Six screens: **ALL, ENGINE, IMU, PERF, STUNT, HEART.**
 
 - **ALL** — every live value in one table.
 - **ENGINE** — rpm, engine hours, throttle position with a bar, voltage,
-  and an rpm sparkline sampled every 100 ms. There is no CAN transceiver, so
-  ECU fields read `--` (§33).
+  and an rpm sparkline sampled every 100 ms. Throttle is the ECU's, and
+  reads `--` without the K-line adapter; the line across the top says
+  whether the adapter and the ECU are heard, and carries the ECU's engine
+  and intake temperatures and manifold pressure (§35).
 - **IMU (attitude)** — a lean indicator, pitch, yaw rate, lateral g and
   vertical g, airtime, best airtime and landing g, plus the session's peak
   lean left and right. Short E resets the lean peaks (`LeanPeaksReset`).
@@ -801,7 +812,7 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 ### 23.1 Ride log, the blackbox (`core/log/`)
 - **CSV, with columns named for RaceRender**, so one file is both the
   blackbox and a video overlay source:
-  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct`
+  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct,ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw`
   (`core/src/log.cpp`). `Time` is in seconds, X is longitudinal g and Y is
   lateral g. `Volts` is the battery (0: no reading), `ShiftLamps` how many
   lamps are lit (0–8), `SlipPct` wheel slip against road speed: + the rear
@@ -813,7 +824,11 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 - **Rate.** CONFIG → Log → Rate: No log, 1, 5, 10 (default), 25 or 50 Hz, all
   divisors of the 50 Hz tick so rows are evenly spaced. A tick that starts
   or ends a lap always gets its row, unless the rate is No log (which writes no blackbox file at all).
-- **Ring.** Fixed 124-byte records, 512 of them in PSRAM, drained to SD in
+- **ECU columns (2.15).** `ThrottlePct`, `MapKpa`, `EngineTempF`,
+  `IntakeTempF` and `InjRaw` (the injector pulse as the ECU sends it, scale
+  not known) come from the K-line adapter (§35) and are all 0 on a row
+  without the `Flags` ECU bit.
+- **Ring.** Fixed 132-byte records, 512 of them in PSRAM, drained to SD in
   8 kB blocks. Producers never touch the filesystem or block.
 - **`FlushPolicy`.** A block goes to the card when its oldest row is 2 s
   old. fsync happens 5 s after the first uncommitted write, or when the bike
@@ -1207,8 +1222,9 @@ ninth row, `doom::Program` (a `ui::IProgram`), over doomgeneric
 
 ## 33. Deliberately not here
 
-- **ECU data / CAN.** The board has no CAN transceiver. `NullEngine` is wired
-  in and ECU fields render `--`.
+- **A wire to the ECU.** The board has no CAN transceiver and no spare
+  pins. ECU data comes by radio from a separate adapter (§35), and without
+  one its fields render `--`.
 - **TPMS.** The observer scan waits on capturing a real sensor. The phone
   half is written.
 - **USB mass storage.** The ownership seam exists, and the TinyUSB half is
@@ -1289,6 +1305,7 @@ Every item in `components/core/src/config.cpp`, by CONFIG submenu.
 | Service | Interval | 0 (off, default)–200 | h |
 | Service | Done at | 0–100000 | h |
 | Service | Mark done | action (E twice) | — |
+| ECU | Adapter | On / Off (off by default) | — |
 
 ### Commands
 Everything a screen, the Wi-Fi page or a service can ask of the owning
@@ -1299,3 +1316,46 @@ OtaBootDevOnce, OtaPromote, WifiToggle, NavDropWaypoint, NavClearWaypoint,
 GearCalStart, GearCalNext, GearCalSkip, GearCalCancel, GearCalReset,
 LeanPeaksReset, TrackForget, PerfReset, StuntReset, CrashCancel, CrashTest,
 the Nav commands, ShiftLampTest, ServiceDone, OdoSet, EngHoursSet.
+
+## 35. The ECU link (K-line adapter)
+
+*Since 2.15. Host-tested; **nothing here has run against an adapter**, and
+the adapter's board is not ordered (`kline-adapter/review.md`).*
+
+The ECU's live data reaches the dash by radio. A separate board under the
+seat reads the Keihin ECM's K-line and broadcasts each table it reads over
+ESP-NOW; the dash's C6 hears it and passes it to the P4. Nothing is sent
+back to the adapter. The adapter's own firmware is not in this repo yet.
+
+- **Turning it on.** CONFIG → ECU → Adapter, off by default. On, the C6's
+  Wi-Fi runs all the time as a station that joins nothing, on channel 6,
+  so that it can listen; the update hotspot uses the same channel and comes
+  up beside it. Off, the radio is BLE's alone, as before.
+- **What it gives.** Throttle opening, the ECU's engine and intake
+  temperatures, manifold pressure and the raw injector pulse: STAT →
+  ENGINE's throttle tile and top line, and five blackbox columns (§23).
+  The ECU's rpm is not used: the pickup's is first-hand, and the shift
+  lamps never wait on a radio.
+- **The frame** (`core/ecu`): magic `0x4B`, version, sequence number,
+  flags (bit 0: the ECU is answering), the Keihin table number, a length,
+  then the table's bytes as the ECU sent them. A frame with no table is a
+  heartbeat. The dash decodes table `0x11`; other tables are accepted and
+  ignored.
+- **Which adapter.** The first one heard after power-on, for that power-on.
+  Frames from any other are counted and dropped. There is no pairing and
+  no encryption.
+- **Stale and lost.** A reading older than 500 ms is no reading, and every
+  ECU field goes back to `--` and 0 in the log. Frames are lost (the radio
+  is shared with BLE); they are counted by sequence number and nothing
+  needs every one.
+- **The byte map is a guess.** It is community reverse-engineering from a
+  CRF250L, a CBR600RR and a Winner 150, not a CRF250F capture. Throttle is
+  scaled ×0.5 on the weaker of two readings of the sources. Check every
+  field against the bike before believing a column.
+- **Seeing it work.** The console summary's `ecu` line says whether the
+  adapter is heard and the ECU answering, with frames lost and refused;
+  the log prints the adapter's address when it is first heard.
+
+Code: `core/ecu` (format, decode, link state; `test/test_ecu.cpp`),
+`services/ecu_link` (`EspNowEngine`), `services/wifi_service.cpp` (the
+listening station), `demo_p4/c6_cp/main/dash_espnow.c` (the C6's half).

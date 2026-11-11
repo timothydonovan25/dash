@@ -634,7 +634,8 @@ private:
     // the address and how long until it turns itself off.
     Label   wifi_join_;
     Label   wifi_info_;
-    Widget* list_[7] = {};
+    QrCode  wifi_qr_;
+    Widget* list_[8] = {};
     uint8_t focus_ = 0;
 };
 

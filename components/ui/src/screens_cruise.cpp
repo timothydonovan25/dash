@@ -755,7 +755,10 @@ void NavScreen::update(const Frame& f) {
         case View::Search: update_search(f); break;
         case View::Guide:  update_guide(f); break;
     }
-    if (show_map_) map_.set_live(f.gnss.fix);
+    if (show_map_) {
+        map_.set_labels(n.labels, n.n_labels);
+        map_.set_live(f.gnss.fix);
+    }
 }
 
 void NavScreen::update_picker(const Frame& f) {

@@ -116,7 +116,8 @@ size_t csv_header(char* buf, size_t n) {
         "Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,"
         "Lean,Pitch,GVert,LapTime,Sats,Flags,"
         "FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,"
-        "NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct\n";
+        "NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct,"
+        "ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw\n";
     return terminate(buf, n, put_str(buf, n, 0, h));
 }
 
@@ -215,6 +216,16 @@ size_t format_csv(char* buf, size_t n, const Record& r) {
     k = put_num(buf, n, k, static_cast<float>(r.shift_lamps), 0);
     k = put(buf, n, k, ',');
     k = put_num(buf, n, k, static_cast<float>(r.slip_pct), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.tps_pct), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.map_kpa), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.engine_f), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.intake_f), 0);
+    k = put(buf, n, k, ',');
+    k = put_num(buf, n, k, static_cast<float>(r.inj_raw), 0);
     k = put(buf, n, k, '\n');
     return terminate(buf, n, k);
 }

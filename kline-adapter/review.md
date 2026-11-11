@@ -3,9 +3,12 @@
 > **Status.** A separate board, not the dash: it reads the ECU's K-line and
 > would send it to the dash's C6 over ESP-NOW. Reviewed through revision 3
 > and an independent audit (2026-10-14, §16); the repo records no order or
-> bring-up. Nothing on the dash side is written: the dash still runs
-> `NullEngine` (architecture §10), and §10 and §16 list what the dash's C6
-> firmware and `wifi` would have to change. `gen_sch.py` and `pcb_drc.py`
+> bring-up. **The dash side is written (2.15, features §35) and has not run
+> against an adapter.** It differs from §10 below in two ways the adapter's
+> firmware must follow: the adapter **broadcasts** (no unicast, no LMK, no
+> pairing; the dash takes the first adapter it hears each power-on), and it
+> sends the ECU's **raw table bytes** in the frame `core/ecu/ecu.hpp`
+> defines, on channel 6. `gen_sch.py` and `pcb_drc.py`
 > beside this file generate and check the schematic and PCB.
 
 Source files, all 2026-10-13: `Sheet_1-copy_2026-10-13.net`,

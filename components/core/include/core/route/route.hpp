@@ -126,6 +126,17 @@ struct Route {
     void clear() { n_pts = n_cues = total_dm = total_ds = fast_dm = first_fast_name = 0; }
 };
 
+// The roads a route spends longest on, for the route view's names: up to
+// `max`, most time first. Past the second, only a road with a tenth of the
+// route's time or more. `point` is the middle, by time, of that road's
+// longest stretch: where its name goes.
+struct RoadLabel {
+    uint32_t name_off;
+    uint32_t time_ds;      // all of it on this road
+    uint32_t point;        // index into Route::pts
+};
+size_t longest_roads(const Route& r, RoadLabel* out, size_t max);
+
 template <uint32_t P, uint32_t C>
 struct RouteStorage {
     RoutePoint pts[P];
