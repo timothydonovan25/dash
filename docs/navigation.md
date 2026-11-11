@@ -12,14 +12,19 @@ The waypoints themselves stay, as destinations.
 ## 1. Rules the rider set
 
 - **Arkansas only**, for now.
-- **No interstates, ever**: `motorway` and `motorway_link` are dropped by
-  the extractor, so no route can contain one.
-- **65 mph roads ask first.** A road counts if OSM tags it ≥ 65 mph, or if
-  it is an untagged `trunk` (a divided highway, mostly 65 in Arkansas; the
-  screen says "likely" for these). A route that uses any of them asks:
-  **E avoid** (route again on the graph without them), **hold E keep**. The
-  answer holds for that destination's reroutes. If nothing connects without
-  them, the rider is told and may keep them anyway.
+- **Speed limit** (2.17): the fastest road a route may use, **50 to 75
+  mph in steps of 5, or off**, set on the picker's "Speed limit" row (E up
+  5, hold E down 5, round the ends through off) or CONFIG → Nav. A road
+  counts at its OSM `maxspeed`; untagged, an interstate (`motorway`) counts
+  as 70, a divided highway (`trunk`) as 65 (mostly true in Arkansas), a
+  `primary` road as 55, anything else as under any limit
+  (`Attr::cap_mph`). A road at the limit is in; over it is out. So 60
+  leaves out the divided highways, 65 keeps them, 70 adds untagged
+  interstates. **Interstates are on the map** (2.17; one way unless OSM
+  says otherwise), for testing in a car with the limit off.
+  Nothing is asked: the setting stands for every route until changed. If
+  nothing connects under it, the rider is told and may route at any speed
+  for that destination (E), or stop (hold E).
 - **Dirt** roads (`highway=track`, unpaved surfaces) are routable. The
   picker's last row switches "avoid dirt" on or off.
 - **Map updates** come from the card (copy `route/map.rgf`) or from OTA
@@ -87,17 +92,26 @@ road (via a way, or a chain of them, as a U-turn across a median is
 tagged) copies the link's junctions the same way. The router and the dash
 need no turn costs. Arkansas: 2,276 junctions and 21 links restricted.
 Skipped: 90 incomplete in OSM itself (no `from` or no `to` member), 192
-whose `from` road is not on the map (mostly interstate ramps), and 13
+whose `from` road is not on the map (mostly interstate ramps, before
+2.17 put interstates on the map), and 13
 links with a junction in the middle or a second rule on them.
 
 `rgf_build` (C++, `tools/routegraph/`) numbers the nodes along a Hilbert
 curve, routes each road at its posted limit (or a default for its class,
-capped at 65 mph), builds a snapping grid of 0.01° cells, and contracts four
-**variants**: all roads, no 65 mph, no dirt, and neither.
+capped at 65 mph), builds a snapping grid of 0.01° cells, and contracts
+fourteen **variants**: the speed limit (none, 50, 55, 60, 65, 70, 75)
+times dirt allowed or not. A contraction hierarchy cannot leave roads out
+at query time, so each is its own graph, ~16 MB of edges on Arkansas: the
+whole file is about 270 MB, half of it the no-dirt seven. Format version
+2 (2.17): a version 1 map says so on NAV and must be rebuilt.
+`--route … --limit 55` routes one as the dash would under that limit.
 `--check N` runs N random routes per variant through the dash's own query
 code and holds each to plain Dijkstra on the uncontracted roads.
 
 ## 4. Measured, Arkansas, OSM 2026-11-02
+
+Before 2.17: four variants, no interstates. The fourteen-variant map with
+interstates has not been built yet.
 
 | | |
 |---|---|
@@ -122,7 +136,7 @@ Not measured yet: the time per block read on the board (§9).
 | Block cache, reader | `core/route/graph.hpp`, `src/route_graph.cpp` | `route` |
 | Snap, CH query, unpack, cues | `core/route/route.hpp`, `src/route_query.cpp` | `route` |
 | Following, off-route, arrival | `core/route/follow.hpp` | `route_follow` |
-| State machine (65 mph, reroute) | `core/route/navigator.hpp` | `route_navigator` |
+| State machine (speed limit, reroute) | `core/route/navigator.hpp` | `route_navigator` |
 | Favourites file, nearest POI | `core/route/dest.hpp` | `route_dest` |
 | Mailbox, card source, serve | `services/route_store.hpp` | `route_store` |
 | `logic` glue | `logic_tick.cpp` (`pump_route`, `publish_nav`, `dead_reckon`) | none yet (§9) |
@@ -141,15 +155,19 @@ Points to know:
 - **Off route.** More than 50 m off the line for 5 s triggers a reroute
   from the bike's position. Reroutes are at most one per 10 s, and a failed
   one keeps the old route. Arrival is within 30 m.
-- **On a 65 mph road while avoiding them** (a wrong turn onto the
-  highway, or starting from one): a route can only start on a road the
-  rider is on, so when the nearest road is a 65 mph one within 50 m, the
-  avoiding query answers "no start" (`route_query.cpp`; a frontage road
-  nearby does not count). The navigator then routes once with 65 mph roads
-  allowed, without asking again, and avoids them again as soon as the bike
-  is on a slower road of that route, or leaves it by an exit of its own
-  (2.6, `Navigator::fast_detour_`). Riding under a 65 mph overpass can
-  briefly look like being on it: a detour, then a reroute 5 s later.
+- **On a road over the speed limit** (a wrong turn onto the highway, or
+  starting from one): a route can only start on a road the rider is on,
+  so when the nearest road is one over the limit within 50 m, the query
+  under the limit answers "no start" (`route_query.cpp`; a frontage road
+  nearby does not count). The navigator then routes once with no limit,
+  and puts it back as soon as the bike is on a road of that route under
+  it, or leaves it by an exit of its own (2.6, `Navigator::detour_`).
+  Riding under a highway overpass can briefly look like being on it: a
+  detour, then a reroute 5 s later.
+- **The posted limit** shown is held: a new value shows once the bike has
+  been on it 2 s (`FollowConfig::limit_hold_ms`, 2.17). At a junction the
+  nearest segment can swap between two roads, and an untagged stub between
+  two tagged roads reads 0, so the raw value flickered.
 - **Between GPS fixes** (1 Hz), `logic` carries the position forward
   along the course at the fused speed, up to 2 s.
 - **Ownership.** `logic` owns `RouteData[live]`. `storage` writes the
@@ -275,7 +293,7 @@ route's own shape (`core/route/pace.hpp`, `test_route_pace`):
   nothing is stored for the whole route, so a 400 km route costs the
   same.
 - The guidance status line reads them as a co-driver would, when it has
-  nothing more urgent (off route, 65 mph road): the distance to the
+  nothing more urgent (off route, a road over the limit): the distance to the
   first, each note, then the gap to the next unless it runs into it:
   `300 R4 tightens 150 L3 into R5`.
 
@@ -295,15 +313,18 @@ minutes left, as a Garmin does.
   why"), then the list.
 - **Guidance:** a turn arrow, the distance to the turn, the road after it,
   the posted limit (blank when the map has none), then distance and
-  minutes left. A status line shows Routing, Off route / rerouting, "65 mph
-  road", the 65 mph question, or Arrived.
+  minutes left. A status line shows Routing, Off route / rerouting, "Road
+  over 55 mph" (a detour), "No route under 55 mph" (the rider's limit), or
+  Arrived. CRUISE →
+  SPEED shows the same posted limit under the heart rate (2.17).
 - **Route view** (2.7), in place of the arrow and the numbers: short E
-  while guiding, and by itself at the 65 mph question. `MapView` in
+  while guiding, and by itself when no route fits the limit. `MapView` in
   route-only mode over the same `RouteTrace` as CRUISE → MAP: fitted to
-  the route alone, its 65 mph stretches amber (`trace_route` puts 65 in a
-  thinned point's `speed_mph` when any segment since the last point is
-  fast), the destination ringed, the bike white, its 2-4 longest-ridden roads
-  named (`longest_roads`, 2.18). North up; no other roads.
+  the route alone, its stretches over the speed limit amber (`trace_route`
+  puts 65 in a thinned point's `speed_mph` when any segment since the last
+  point is over it), the destination ringed, the bike white, its 2-4
+  longest-ridden roads named (`longest_roads`, 2.18). North up; no other
+  roads.
 
 Blackbox columns, appended at the end: `NavTurnFt`, `NavDestMi`, `LimitMPH`
 (0 when not routing or unknown).

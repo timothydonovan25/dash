@@ -33,13 +33,20 @@ bool read_rgi(const std::string& path, Rgi& out, std::string& err);
 // default for its class; never above the bike's cruising cap.
 inline constexpr int kCruiseCapMph = 65;
 int route_mph(const RgiEdge& e);
-// 65 mph or more: tagged so, or an untagged divided highway (trunk), which
-// in Arkansas mostly is. The alert says "likely" for the presumed ones.
-bool is_fast(const RgiEdge& e);
+// The limit the speed-limit variants judge a road by (Attr::cap_mph): its
+// tag, else 70 for an interstate, 65 for a divided highway (trunk), which
+// in Arkansas it mostly is, 55 for a primary road; else 0, under any limit.
+int posted_mph(const RgiEdge& e);
 
 struct Options {
-    std::vector<uint32_t> variants{0, core::route::kNoFast, core::route::kNoDirt,
-                                   core::route::kNoFast | core::route::kNoDirt};
+    // No limit, then 50 to 75 mph by 5 (core::config::kNavLimitMph), each
+    // with dirt and without.
+    std::vector<uint32_t> variants = [] {
+        std::vector<uint32_t> v;
+        for (uint32_t dirt : {0u, core::route::kNoDirt})
+            for (uint8_t mph : {0, 50, 55, 60, 65, 70, 75}) v.push_back(core::route::limit_flags(mph) | dirt);
+        return v;
+    }();
     uint32_t cell_e7 = 100000;         // 0.01 deg, ~1.1 km
     bool verbose = false;
 };

@@ -538,7 +538,8 @@ __attribute__((noinline)) void build_nav_list(LogicState& s) {
 // The route into the MAP screen's buffer, in the trip trace's frame, every
 // nth point so it fits (the last one always); or empty, for no route. A
 // point's speed_mph is 65 when any of the route since the point before is
-// on a 65 mph road, so the map draws that stretch amber however thin.
+// on a road over the speed limit (a detour), so the map draws that stretch
+// amber however thin.
 __attribute__((noinline)) void trace_route(Deps& d, LogicState& s, const core::route::Route* r) {
     s.route_traced = r != nullptr;
     if (!d.route_trace) return;
@@ -556,7 +557,7 @@ __attribute__((noinline)) void trace_route(Deps& d, LogicState& s, const core::r
             core::state::TrackPoint p;
             to_local_ft(s.origin, ll(i), p.x_ft, p.y_ft);
             for (uint32_t k = prev; k < i; ++k)   // segment k runs from point k to k+1
-                if (r->pts[k].flags & core::route::kAttrFast) p.speed_mph = 65.0f;
+                if (!core::route::allowed(r->pts[k].flags, r->pts[k].cap_mph, s.nav.limit())) p.speed_mph = 65.0f;
             prev = i;
             t.pts.push(p);
             if (i == r->n_pts - 1) break;
@@ -633,9 +634,6 @@ __attribute__((noinline)) void pump_route(Deps& d, LogicState& s, const core::st
                 box->live = into;
                 trace_route(d, s, &r);
                 label_route(s, &box->data[into]);
-                s.fast_presumed = false;
-                for (uint32_t i = 0; i < r.n_pts; ++i)
-                    if (r.pts[i].flags & core::route::kAttrFast) { s.fast_presumed = r.pts[i].mph == 0; break; }
             }
         }
         box->release();
@@ -813,6 +811,7 @@ __attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
     n.status = static_cast<uint8_t>(s.nav.status());
     n.map_date = s.nav.has_map() ? s.map_date : 0;
     n.avoid_dirt = s.nav.avoid_dirt();
+    n.max_mph = s.nav.max_mph();
     for (uint8_t i = 0; i < s.nav_list_n; ++i) n.dest[i] = s.nav_list[i];
     n.n_dest = s.nav_list_n;
     std::memcpy(n.target, s.nav_target, sizeof n.target);
@@ -835,7 +834,7 @@ __attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
             n.remain_mi = p.remain_dm / 16093.44f;
             n.remain_s = p.remain_ds / 10;
             n.limit_mph = p.mph;
-            n.on_fast = p.flags & core::route::kAttrFast;
+            n.over_limit = !core::route::allowed(p.flags, p.cap_mph, s.nav.limit());
             n.off_route = p.off_route;
             if (p.on && !p.off_route) {
                 // The bends in the next 800 m (core/route/pace.hpp).
@@ -856,10 +855,6 @@ __attribute__((noinline)) void publish_nav(Deps& d, LogicState& s) {
             n.remain_mi = rd.route.total_dm / 16093.44f;
             n.remain_s = rd.route.total_ds / 10;
         }
-        std::memcpy(n.fast_road, rd.fast_name, sizeof n.fast_road);
-        n.fast_road[sizeof n.fast_road - 1] = '\0';
-        n.fast_mi = rd.route.fast_dm / 16093.44f;
-        n.fast_presumed = s.fast_presumed;
     }
     n.usb_refused_seq = s.usb_refused_seq;
     n.search = s.search;
@@ -1106,11 +1101,8 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::NavCancel:
                 s.nav.cancel();
                 break;
-            case core::state::CommandId::NavAvoidFast:
-                s.nav.avoid_fast();
-                break;
-            case core::state::CommandId::NavKeepFast:
-                s.nav.keep_fast();
+            case core::state::CommandId::NavAnySpeed:
+                s.nav.any_speed();
                 break;
             case core::state::CommandId::NavSearch:
             case core::state::CommandId::NavSearchKey:
@@ -1233,7 +1225,10 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
         const core::route::Route* live =
             box && box->live < 2 ? &box->data[box->live].route : nullptr;
         // The setting, kept in NVS by keeper like any other (CONFIG -> Nav).
-        if (d.settings) s.nav.set_avoid_dirt(d.settings->nav_avoid_dirt);
+        if (d.settings) {
+            s.nav.set_avoid_dirt(d.settings->nav_avoid_dirt);
+            s.nav.set_max_mph(core::config::nav_limit_mph(d.settings->nav_speed_limit));
+        }
         phone_destination(d, s, g, here);
         s.nav_progress = s.nav.tick(live, here, g.fix, now);
         pump_route(d, s, g, here, now);

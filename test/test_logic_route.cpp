@@ -180,47 +180,35 @@ int main() {
         CHECK(r.find("Ferry") == 1);
     }
 
-    CASE("go: the quick way is the 65 mph highway, so the rider is asked");
+    CASE("the speed limit setting reaches the navigator: 55");
+    {
+        CHECK(r.nav().max_mph == 0);
+        r.q.q.push_back(core::state::Command::config_set(core::config::kKeyNavSpeedLimit, 2.0f));
+        r.run(2);
+        CHECK(r.settings.nav_speed_limit == 2);
+        CHECK(r.nav().max_mph == 55);
+        CHECK(r.s->nav.limit() == core::route::limit_flags(55));
+    }
+
+    CASE("go under 55: US 412 (an untagged divided highway, so 65) is left out, nothing asked");
     {
         r.q.q.emplace_back(CommandId::NavGo, int32_t{r.find("Ferry")});
         r.run(6);
         const core::state::Nav n = r.nav();
-        CHECK(n.phase == uint8_t(Phase::AskFast));
-        CHECK(n.following);
-        CHECK(std::string(n.target) == "Ferry");
-        CHECK(std::string(n.fast_road) == "US 412");
-        CHECK(n.fast_presumed);                        // untagged: "likely"
-        CHECK_NEAR(n.fast_mi, 4.0 / 1.609344, 0.05);
-        // The route view shows the highway amber: 65 on its points, all 4 km.
-        float fast_ft = 0, x0 = 0;
-        for (size_t i = 0; i < r.trace->pts.size(); ++i) {
-            core::state::TrackPoint p;
-            if (!r.trace->pts.read_nth(i, p)) continue;
-            if (i > 0 && p.speed_mph == 65.0f) fast_ft += p.x_ft - x0;
-            x0 = p.x_ft;
-        }
-        CHECK_NEAR(fast_ft, 4000 * 3.28084, 60);
-    }
-
-    CASE("avoid: routed again the slow way, and guided onto Oak St");
-    {
-        r.q.q.emplace_back(CommandId::NavAvoidFast);
-        r.run(6);
-        const core::state::Nav n = r.nav();
         CHECK(n.phase == uint8_t(Phase::Guiding));
         CHECK(n.following);
-        CHECK(!n.on_fast);
+        CHECK(std::string(n.target) == "Ferry");
+        CHECK(!n.over_limit);
         CHECK_NEAR(n.remain_mi, 5.0 / 1.609344, 0.05);
         CHECK(std::string(n.cue_road) == "Ridge Rd");  // first turn: right onto Ridge Rd
         CHECK(n.cue_kind == uint8_t(core::route::CueKind::Right));
         CHECK_NEAR(n.to_cue_ft, 500 * 3.28084, 30);
-        CHECK(r.s->nav.fast_choice() == core::route::FastChoice::Avoid);
     }
 
     CASE("the MAP screen's copy of the route: filled at each new route, ends where it ends");
     {
         const services::RouteTrace& t = *r.trace;
-        CHECK(t.gen.load() >= 2);                 // the fast route, then the slow one
+        CHECK(t.gen.load() >= 1);
         CHECK(t.pts.size() >= 4);
         core::state::TrackPoint first, last;
         CHECK(t.pts.read_nth(0, first));
@@ -248,10 +236,10 @@ int main() {
         CHECK(!n.off_route);
     }
 
-    CASE("off the route onto the 65 mph highway: rerouted along it, not asked again");
+    CASE("off the route onto the highway: rerouted along it, drawn amber");
     {
-        // Avoiding 65 mph roads, the bike wanders 500 m south onto US 412,
-        // out of reach of any slow road, so there is no slow route from
+        // Under 55, the bike wanders 500 m south onto US 412, out of reach
+        // of any slower road, so there is no route under the limit from
         // here: the reroute may use US 412 (the straight way to B).
         const uint32_t gen0 = r.trace->gen.load();
         r.at(kLatA, kLonA + 2 * kKmLon);
@@ -268,10 +256,18 @@ int main() {
         CHECK(n.phase == uint8_t(Phase::Guiding));
         CHECK(n.following);
         CHECK(!n.off_route);
-        CHECK(n.on_fast);
+        CHECK(n.over_limit);
         CHECK_NEAR(n.remain_mi, 2.0 / 1.609344, 0.05);
         CHECK(r.trace->gen.load() > gen0);                  // a new route on the MAP screen
-        CHECK(r.s->nav.fast_choice() == core::route::FastChoice::Avoid);
+        // The route view shows the highway amber: 65 on its points, all 2 km.
+        float fast_ft = 0, x0 = 0;
+        for (size_t i = 0; i < r.trace->pts.size(); ++i) {
+            core::state::TrackPoint p;
+            if (!r.trace->pts.read_nth(i, p)) continue;
+            if (i > 0 && p.speed_mph == 65.0f) fast_ft += p.x_ft - x0;
+            x0 = p.x_ft;
+        }
+        CHECK_NEAR(fast_ft, 2000 * 3.28084, 60);
     }
 
     CASE("arriving");
@@ -306,7 +302,7 @@ int main() {
         CHECK(std::string(n.dest[0].name) == "Pub");
         CHECK(n.dest[0].kind == core::state::NavDest::Phone);
         CHECK(std::string(n.target) == "Pub");
-        CHECK(n.phase == uint8_t(Phase::AskFast));        // the highway again
+        CHECK(n.phase == uint8_t(Phase::Guiding));
         // The same one again is not a new request.
         r.q.q.emplace_back(CommandId::NavCancel);
         r.run(2);
@@ -315,17 +311,17 @@ int main() {
         CHECK(r.nav().phase == uint8_t(Phase::Idle));
     }
 
-    CASE("keep: guided along the highway itself");
+    CASE("limit off: guided along the highway itself, and it is not over anything");
     {
+        r.q.q.push_back(core::state::Command::config_set(core::config::kKeyNavSpeedLimit, 0.0f));
+        r.run(2);
         r.at(kLatA, kLonA);
         r.q.q.emplace_back(CommandId::NavGo, int32_t{r.find("Ferry")});
         r.run(6);
-        CHECK(r.nav().phase == uint8_t(Phase::AskFast));
-        r.q.q.emplace_back(CommandId::NavKeepFast);
-        r.run(2);
         const core::state::Nav n = r.nav();
         CHECK(n.phase == uint8_t(Phase::Guiding));
-        CHECK(n.on_fast);
+        CHECK(n.max_mph == 0);
+        CHECK(!n.over_limit);
         CHECK_NEAR(n.remain_mi, 4.0 / 1.609344, 0.05);
     }
 
@@ -390,7 +386,7 @@ int main() {
         n = r.nav();
         CHECK(n.search == core::state::Nav::SearchOff);
         CHECK(std::string(n.target) == "Ferry Landing");
-        CHECK(n.phase == uint8_t(Phase::Guiding) || n.phase == uint8_t(Phase::AskFast));
+        CHECK(n.phase == uint8_t(Phase::Guiding));
 
         // A street: pick it, type 900, GO: routed to the north end of Elm.
         r.q.q.emplace_back(CommandId::NavCancel);

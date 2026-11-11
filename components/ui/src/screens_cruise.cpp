@@ -52,6 +52,11 @@ constexpr Rect kShiftStrip{136,   2,  72,  20};
 // rpm and mph have theirs. Blank unless CONFIG -> Heart rate -> Watch HR.
 constexpr Rect kHr        { 28, 100,  84,  28};
 constexpr Rect kHrUnit    { 28, 132,  84,  10};
+// The posted limit of the road the route is on, under the heart rate the
+// same way: the number at scale 4, LIMIT under it. Blank unless a route is
+// being followed and the road has a tagged limit.
+constexpr Rect kLim       { 28, 152,  84,  28};
+constexpr Rect kLimCap    { 28, 184,  84,  10};
 
 // The middle band is the lean gauge alone, as big as the band allows: this
 // is read on a moving dirt bike, where a g-ball's dot was detail nobody
@@ -146,6 +151,10 @@ void SpeedScreen::enter(Canvas&) {
     hr_.configure("", color::kDim, 4, Align::Center);
     hr_unit_.set_bounds(kHrUnit);
     hr_unit_.configure("", theme::secondary, 1, Align::Center);
+    lim_.set_bounds(kLim);
+    lim_.configure("", color::kText, 4, Align::Center);
+    lim_cap_.set_bounds(kLimCap);
+    lim_cap_.configure("", theme::secondary, 1, Align::Center);
 
     bar_stem_.set_bounds(kTachStem);
     bar_stem_.configure(kTachStem.y, kTachStem.bottom());
@@ -176,7 +185,8 @@ void SpeedScreen::enter(Canvas&) {
     list_[9]  = &hdop_;     list_[10] = &odo_;        list_[11] = &trip_;
     list_[12] = &fault_;    list_[13] = &fault_what_; list_[14] = &song_;
     list_[15] = &album_;    list_[16] = &artist_;     list_[17] = &progress_;
-    list_[18] = &hr_;       list_[19] = &hr_unit_;
+    list_[18] = &hr_;       list_[19] = &hr_unit_;    list_[20] = &lim_;
+    list_[21] = &lim_cap_;
 }
 
 void SpeedScreen::update(const Frame& f) {
@@ -218,6 +228,12 @@ void SpeedScreen::update(const Frame& f) {
     const Color hc = chrome::hr_readout(f.heart, f.t_ms, buf, sizeof buf, "");
     hr_.configure(buf, hc, 4, Align::Center);
     hr_unit_.set_text(buf[0] ? "bpm" : "");
+
+    const bool lim = f.nav.following && f.nav.limit_mph;
+    buf[0] = '\0';
+    if (lim) std::snprintf(buf, sizeof buf, "%u", unsigned(f.nav.limit_mph));
+    lim_.set_text(buf);
+    lim_cap_.set_text(lim ? "LIMIT" : "");
 
     // Full scale is the first shift lamp, not the redline: above that the
     // lamps are the instrument and the bar just stays full.
@@ -396,17 +412,17 @@ void SpeedScreen::draw_background(Canvas& c) {
                 color::kDim, 1, Align::Right);
 }
 
-WidgetList SpeedScreen::widgets() { return WidgetList{list_, 20}; }
+WidgetList SpeedScreen::widgets() { return WidgetList{list_, 22}; }
 
 const char* SpeedScreen::widget_name(size_t i) const {
     // Same order as list_ above.
-    static const char* kNames[20] = {
+    static const char* kNames[22] = {
         "tach stem", "tach flare", "speed", "rpm", "shift", "gear",
         "clock", "lean", "sats", "hdop", "odo", "trip",
         "fault", "fault what", "song", "album", "artist", "progress",
-        "hr", "hr unit",
+        "hr", "hr unit", "limit", "limit cap",
     };
-    return i < 20 ? kNames[i] : nullptr;
+    return i < 22 ? kNames[i] : nullptr;
 }
 
 // --- MediaScreen ----------------------------------------------------------
@@ -616,11 +632,12 @@ void pace_line(char* out, size_t cap, const core::state::Nav& n, u::System sys) 
 }
 
 constexpr uint16_t kAvoidDirtKey = core::config::kKeyNavAvoidDirt;
+constexpr uint16_t kSpeedLimitKey = core::config::kKeyNavSpeedLimit;
 
 bool nav_guiding(uint8_t phase) {
     using core::route::Phase;
     switch (static_cast<Phase>(phase)) {
-        case Phase::Routing: case Phase::AskFast: case Phase::NoSlowRoute:
+        case Phase::Routing: case Phase::NoSlowRoute:
         case Phase::Guiding: case Phase::Rerouting: case Phase::Arrived:
             return true;
         default:
@@ -732,12 +749,14 @@ void NavScreen::update(const Frame& f) {
     const core::state::Nav& n = f.nav;
     phase_ = n.phase;
     avoid_dirt_ = n.avoid_dirt;
+    limit_ix_ = 0;
+    for (uint8_t i = 0; i < core::config::kNavLimitCount; ++i)
+        if (core::config::kNavLimitMph[i] == n.max_mph) limit_ix_ = i;
     const View v = nav_guiding(n.phase) ? View::Guide
                  : n.search != core::state::Nav::SearchOff ? View::Search : View::Picker;
-    // The 65 mph question shows where the fast part is; otherwise the
-    // rider's choice.
+    // No route under the limit shows the map; otherwise the rider's choice.
     using core::route::Phase;
-    const bool asking = n.phase == uint8_t(Phase::AskFast) || n.phase == uint8_t(Phase::NoSlowRoute);
+    const bool asking = n.phase == uint8_t(Phase::NoSlowRoute);
     const bool map = v == View::Guide && (asking || want_map_);
     if (v != view_ || map != show_map_) {
         show_map_ = map;
@@ -781,7 +800,7 @@ void NavScreen::update_picker(const Frame& f) {
     const core::route::Point here{static_cast<int32_t>(std::lround(f.gnss.lat * 1e7)),
                                   static_cast<int32_t>(std::lround(f.gnss.lon * 1e7))};
     // No map, no rows: nothing to pick and nothing to switch.
-    rows_ = ph == Phase::NoMap ? 0 : static_cast<uint8_t>(n_dest_ + 2);
+    rows_ = ph == Phase::NoMap ? 0 : static_cast<uint8_t>(n_dest_ + 3);
     if (rows_) table_.set_row(0, "Where to?", "search");
     for (uint8_t i = 0; i < n_dest_ && rows_; ++i) {
         const core::state::NavDest& d = n.dest[i];
@@ -797,7 +816,12 @@ void NavScreen::update_picker(const Frame& f) {
         }
         table_.set_row(i + 1u, d.name, right);
     }
-    if (rows_) table_.set_row(n_dest_ + 1u, "Dirt roads", n.avoid_dirt ? "avoid" : "allowed");
+    if (rows_) {
+        char lim[12] = "off";
+        if (n.max_mph) std::snprintf(lim, sizeof lim, "%u mph", unsigned(n.max_mph));
+        table_.set_row(n_dest_ + 1u, "Speed limit", lim);
+        table_.set_row(n_dest_ + 2u, "Dirt roads", n.avoid_dirt ? "avoid" : "allowed");
+    }
     table_.set_row_count(rows_);
     table_.set_focus(rows_ ? (focus_ < rows_ ? focus_ : 0) : -1);
     const bool on_dest = focus_ >= 1 && focus_ <= n_dest_;
@@ -805,7 +829,8 @@ void NavScreen::update_picker(const Frame& f) {
                     : focus_ == 0 ? "C/D pick   E spell an address, town or place"
                     : on_dest && kind_[focus_ - 1] == core::state::NavDest::Waypoint
                         ? "C/D pick   E go   hold E put this waypoint here"
-                    : focus_ == n_dest_ + 1 ? "C/D pick   E switch"
+                    : focus_ == n_dest_ + 1 ? "C/D pick   E up   hold E down"
+                    : focus_ == n_dest_ + 2 ? "C/D pick   E switch"
                                             : "C/D pick   E go");
 }
 
@@ -925,26 +950,16 @@ void NavScreen::update_guide(const Frame& f) {
         case Phase::Rerouting:
             std::snprintf(status, sizeof status, "Off route: rerouting...");
             break;
-        case Phase::AskFast:
-            // "M-59: 0.6 mi at 65 mph (likely)": which road, how much of
-            // it, and whether that is a sign or a guess (an untagged
-            // divided highway).
-            std::snprintf(status, sizeof status, "%.14s: %.*f mi at 65 mph%s",
-                          n.fast_road[0] ? n.fast_road : "Route", n.fast_mi < 10.0f ? 1 : 0,
-                          static_cast<double>(n.fast_mi < 0.1f ? 0.1f : n.fast_mi),
-                          n.fast_presumed ? " (likely)" : "");
-            hint = "E avoid 65 mph roads   hold E keep them";
-            break;
         case Phase::NoSlowRoute:
-            std::snprintf(status, sizeof status, "No route without 65 mph roads");
-            hint = "E use them anyway   hold E stop";
+            std::snprintf(status, sizeof status, "No route under %u mph", unsigned(n.max_mph));
+            hint = "E any speed   hold E stop";
             break;
         case Phase::Arrived:
             std::snprintf(status, sizeof status, "Arrived: %s", n.target);
             break;
         default:
             if (n.off_route) std::snprintf(status, sizeof status, "Off route");
-            else if (n.on_fast) std::snprintf(status, sizeof status, "65 mph road");
+            else if (n.over_limit) std::snprintf(status, sizeof status, "Road over %u mph", unsigned(n.max_mph));
             else pace_line(status, sizeof status, n, units());
             break;
     }
@@ -1012,10 +1027,8 @@ bool NavScreen::handle(const core::nav::InputEvent& e) {
     const bool hold = e.press != Press::Short;
     if (view_ == View::Guide) {
         switch (static_cast<Phase>(phase_)) {
-            case Phase::AskFast:
-                return post(Command(hold ? CommandId::NavKeepFast : CommandId::NavAvoidFast));
             case Phase::NoSlowRoute:
-                return post(Command(hold ? CommandId::NavCancel : CommandId::NavKeepFast));
+                return post(Command(hold ? CommandId::NavCancel : CommandId::NavAnySpeed));
             default:
                 if (hold) return post(Command(CommandId::NavCancel));
                 want_map_ = !want_map_;      // the route view, or back to the turns
@@ -1027,9 +1040,16 @@ bool NavScreen::handle(const core::nav::InputEvent& e) {
         if (!hold) post(Command(CommandId::NavSearch, int32_t{1}));
         return true;
     }
-    if (focus_ == n_dest_ + 1)   // a setting, so a ConfigSet: `logic` is its one writer
+    // Settings, so a ConfigSet: `logic` is their one writer. The limit
+    // steps up 5 mph (50 ... 75, off) on E and down on hold E, round the ends.
+    if (focus_ == n_dest_ + 1) {
+        const uint8_t n = core::config::kNavLimitCount;
+        const uint8_t next = static_cast<uint8_t>((limit_ix_ + (hold ? n - 1 : 1)) % n);
+        return post(Command::config_set(kSpeedLimitKey, static_cast<float>(next)));
+    }
+    if (focus_ == n_dest_ + 2)
         return post(Command::config_set(kAvoidDirtKey, avoid_dirt_ ? 0.0f : 1.0f));
-    if (focus_ > n_dest_ + 1) return false;
+    if (focus_ > n_dest_ + 2) return false;
     const uint8_t i = static_cast<uint8_t>(focus_ - 1);
     if (hold) {
         // `logic` decides whether the fix is good enough, as for the lap line.

@@ -11,10 +11,10 @@ already read, by OSM id, is skipped.
 Second half: `rgf_build arkansas.rgi arkansas.rgf` (contraction, layout).
 docs/navigation.md §3 has the whole pipeline.
 
-Keeps roads a street-legal 250 may use: no motorway (interstates and
-freeways are dropped here, so no route can ever use one), no private or
-no-motor-vehicle ways, no driveways or parking aisles. Dirt tracks are
-kept and flagged. Ways are split at junctions; the points between two
+Keeps roads a motor vehicle may use: no private or no-motor-vehicle ways,
+no driveways or parking aisles. Interstates are kept (class 10): the
+builder leaves them out of every speed-limit variant, so the bike only
+routes on one with the limit off. Dirt tracks are kept and flagged. Ways are split at junctions; the points between two
 junctions become the edge's geometry.
 
 The .rgi layout (little-endian) is read by tools/routegraph/rgi.hpp; the
@@ -43,8 +43,9 @@ except ImportError:          # sim_map.py and the .rgi writer need no OSM
 CLASS = {
     "trunk": 1, "primary": 2, "secondary": 3, "tertiary": 4,
     "unclassified": 5, "residential": 6, "living_street": 7, "service": 8,
-    "track": 9,
+    "track": 9, "motorway": 10,
     "trunk_link": 1, "primary_link": 2, "secondary_link": 3, "tertiary_link": 4,
+    "motorway_link": 10,
 }
 NO = {"no", "private"}
 SKIP_SERVICE = {"driveway", "parking_aisle", "drive-through", "emergency_access"}
@@ -169,8 +170,6 @@ class Reader(_Handler):
             self._poi(t, e7(w.nodes[0].lat), e7(w.nodes[0].lon))
         hw = t.get("highway")
         if hw not in CLASS:
-            if hw in ("motorway", "motorway_link"):
-                self.skipped["motorway"] += 1
             return
         if hw == "service" and t.get("service") in SKIP_SERVICE:
             self.skipped["service"] += 1
@@ -193,7 +192,9 @@ class Reader(_Handler):
         if ow == "-1":
             pts.reverse()
             flags |= F_ONEWAY
-        elif ow in ("yes", "1", "true") or t.get("junction") in ("roundabout", "circular"):
+        elif ow in ("yes", "1", "true") or t.get("junction") in ("roundabout", "circular") \
+                or (hw in ("motorway", "motorway_link") and ow != "no"):
+            # OSM: a motorway is one way unless tagged otherwise.
             flags |= F_ONEWAY
         if t.get("junction") in ("roundabout", "circular"):
             flags |= F_ROUNDABOUT
@@ -401,7 +402,7 @@ def restrict(r, index, nodes, edges, edge_way, geom):
     for (vi, frm), rules in groups.items():
         ins = arriving(vi, frm)
         if not ins:
-            # A `from` road left off the map (an interstate ramp) cannot be
+            # A `from` road left off the map (a private road) cannot be
             # driven onto the turn: nothing lost. Otherwise it is a road on
             # the map that does not reach the junction, or only leaves it.
             r.skipped["restriction-from-off-map" if frm not in mapped else "restriction-no-from"] += 1

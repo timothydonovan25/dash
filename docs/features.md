@@ -301,8 +301,9 @@ distance, heading and speed.
 
 ### 6.5 NAV — turn-by-turn routing (2.x, not yet run on the board)
 Offline routing on an OpenStreetMap map from the card (`route/map.rgf`,
-built by `tools/routegraph`). It never uses interstates and asks before
-using 65 mph roads. See `docs/navigation.md`.
+built by `tools/routegraph`). A **speed limit** (50 to 75 mph by 5, or
+off) keeps routes off roads posted over it; off allows interstates. See
+`docs/navigation.md`.
 
 **Picker:**
 - The first row is **Where to?**: spell an address, town or place with the
@@ -312,19 +313,23 @@ using 65 mph roads. See `docs/navigation.md`.
   (docs/navigation.md §7.1).
 - Then a destination sent from the phone (Feed `G`, routed to at
   once), the waypoints that are set, the favourites from
-  `route/destinations.csv`, the nearest fuel and food, and a "Dirt roads"
-  switch (CONFIG → Nav → Avoid dirt).
-- CRUISE → MAP draws the route, dim, under the ridden trace; its 65 mph
-  stretches amber (2.7).
+  `route/destinations.csv`, the nearest fuel and food, a **Speed limit**
+  row (E up 5 mph, hold E down: 50 ... 75, off; CONFIG → Nav → Speed
+  limit) and a
+  "Dirt roads" switch (CONFIG → Nav → Avoid dirt).
+- CRUISE → MAP draws the route, dim, under the ridden trace; stretches
+  over the speed limit amber (2.7).
 - E goes. Hold E on a waypoint row drops that waypoint here.
 
 **Guidance:**
 - A turn arrow, the distance to the turn and the road's name, the posted
-  limit, and the distance and minutes left.
-- Off the route for 5 s, it reroutes. Avoiding 65 mph roads but on one, it
-  routes along it without asking, and avoids them again once off it (2.6).
+  limit (held 2 s on a change, so it does not flicker at junctions), and
+  the distance and minutes left. CRUISE → SPEED shows the limit too, under
+  the heart rate.
+- Off the route for 5 s, it reroutes. On a road over the speed limit, it
+  routes along it, and back under the limit once off it (2.6).
 - Short E switches to the **route view** and back (2.7): the whole route
-  fitted to the screen, north up, blue with its 65 mph stretches amber, the
+  fitted to the screen, north up, blue with stretches over the limit amber, the
   destination ringed and the bike a white dot and arrow. The distance and
   time left stay below it.
 - The route view names the route's **main roads** (2.18; 2.17 named the
@@ -341,8 +346,8 @@ using 65 mph roads. See `docs/navigation.md`.
   status line: `300 R4 tightens 150 L3 into R5` (docs/navigation.md §7.2).
   From the map's shape only; first-guess thresholds, not yet ridden.
 - Hold E stops.
-- When a route uses 65 mph roads: the route view comes up by itself, so
-  the amber shows where they are; E avoids them, hold E keeps them.
+- When nothing connects under the speed limit: it says so with the route
+  view up; E routes at any speed for this destination, hold E stops.
 
 ### 6.6 MINIMAL
 Speed and the time, with no title, tach, lean or tiles. For long road

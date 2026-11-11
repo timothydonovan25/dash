@@ -23,9 +23,9 @@ Route make_route() {
         p.time_ds = uint32_t(i * 100);       // 10 s per 100 m
         p.name_off = i < 10 ? 1 : 2;
         p.mph = i < 10 ? 45 : 0;
-        p.flags = i < 10 ? 0 : kAttrFast;
+        p.flags = i < 10 ? 0 : kAttrDirt;
     }
-    r.cues[r.n_cues++] = Cue{10, 10000, 2, -90, CueKind::Left, kAttrFast};
+    r.cues[r.n_cues++] = Cue{10, 10000, 2, -90, CueKind::Left, kAttrDirt};
     r.cues[r.n_cues++] = Cue{20, 20000, 2, 0, CueKind::Arrive, 0};
     r.total_dm = 20000;
     r.total_ds = 2000;
@@ -51,7 +51,7 @@ int main() {
         CHECK_NEAR(p.to_cue_dm, 6500, 5);
         CHECK_NEAR(p.remain_dm, 16500, 5);
         CHECK_NEAR(p.remain_ds, 1650, 2);
-        CHECK(p.name_off == 1 && p.mph == 45 && !(p.flags & kAttrFast));
+        CHECK(p.name_off == 1 && p.mph == 45 && !(p.flags & kAttrDirt));
     }
 
     CASE("past the turn: the next cue is the arrival, and the road is the fast one");
@@ -61,7 +61,20 @@ int main() {
         const Progress p = f.update(r, east(1000, 300), true, 1000);
         CHECK(p.cue == 1);
         CHECK_NEAR(p.to_cue_dm, 7000, 5);
-        CHECK(p.flags & kAttrFast);
+        CHECK(p.flags & kAttrDirt);
+    }
+
+    CASE("the posted limit holds 2 s before it changes: no flicker at a junction");
+    {
+        Follower f;
+        CHECK(f.update(r, east(900), true, 0).mph == 45);          // the first reading at once
+        CHECK(f.update(r, east(1000, 300), true, 500).mph == 45);  // the next road reads 0
+        CHECK(f.update(r, east(900), true, 900).mph == 45);        // back: the hold starts over
+        CHECK(f.update(r, east(1000, 300), true, 1000).mph == 45);
+        CHECK(f.update(r, east(1000, 400), true, 2900).mph == 45); // 1.9 s on it
+        CHECK(f.update(r, east(1000, 500), true, 3000).mph == 0);  // 2 s: it changes
+        f.reset();
+        CHECK(f.update(r, east(1000, 500), true, 3100).mph == 0);  // a new route reads at once
     }
 
     CASE("30 m off is still on the route; 80 m off for 5 s asks for a reroute once");

@@ -146,7 +146,8 @@ void Builder::emit(Point p, uint32_t dist_dm, uint32_t time_ds, const Attr& a) {
     q.name_off = a.name_off;
     q.mph = a.mph;
     q.flags = a.flags;
-    q.pad[0] = q.pad[1] = 0;
+    q.cap_mph = a.cap_mph;
+    q.pad = 0;
 }
 
 void Builder::add(const Leg& leg) {
@@ -182,6 +183,7 @@ void Builder::add(const Leg& leg) {
         r_.pts[r_.n_pts - 1].name_off = a.name_off;
         r_.pts[r_.n_pts - 1].mph = a.mph;
         r_.pts[r_.n_pts - 1].flags = a.flags;
+        r_.pts[r_.n_pts - 1].cap_mph = a.cap_mph;
     }
 
     const uint32_t base_dm = dist_dm_;
@@ -229,10 +231,6 @@ void Builder::add(const Leg& leg) {
     }
     if (!ok_) return;
     const uint32_t len = end > start ? uint32_t(end - start + 0.5) : 0;
-    if (a.flags & kAttrFast) {
-        if (r_.fast_dm == 0) r_.first_fast_name = a.name_off;
-        r_.fast_dm += len;
-    }
     dist_dm_ = base_dm + len;
     time_ds_ = base_ds + uint32_t((end - start) * ds_per_dm + 0.5);
     first_ = false;
@@ -402,7 +400,7 @@ bool snap(Graph& g, uint32_t variant_flags, Point p, Snap& out, uint32_t max_dm,
     bool read_ok = g.near(p.lat_e7, p.lon_e7, ring, [&](uint32_t ai) {
         Attr a;
         if (!g.attr(ai, a)) return false;
-        if (!allowed(a.flags, variant_flags)) return true;
+        if (!allowed(a, variant_flags)) return true;
         const uint32_t n = a.geom_n + 2u;
         Point prev{}, q{};
         double along = 0, best_along = 0, best_d = 1e18;
@@ -459,15 +457,16 @@ Status query(Graph& g, uint32_t vf, Point from, Point to, SearchMem mem, Route& 
     const uint32_t errors = g.cache().errors();
     const bool found_s = snap(g, vf, from, s);
     const bool found_t = found_s && snap(g, vf, to, t);
-    // Avoiding 65 mph roads while on one: a slow road nearby (a frontage
-    // road, a parallel street) is not where the rider is, and a route from
-    // it would leave them off the route until they found it. No start, so
-    // the navigator routes from the 65 mph road itself (Navigator::answered).
+    // Under a speed limit while on a road over it: a slower road nearby (a
+    // frontage road, a parallel street) is not where the rider is, and a
+    // route from it would leave them off the route until they found it. No
+    // start, so the navigator routes from the fast road itself
+    // (Navigator::answered).
     Snap any;
-    if (found_s && (vf & kNoFast) && snap(g, vf & ~kNoFast, from, any, kOnFastDm) &&
+    if (found_s && (vf & kLimitFlags) && snap(g, vf & ~kLimitFlags, from, any, kOnRoadDm) &&
         any.off_dm < s.off_dm) {
         Attr a;
-        if (g.attr(any.attr, a) && (a.flags & kAttrFast)) return Status::NoStart;
+        if (g.attr(any.attr, a) && !allowed(a, vf)) return Status::NoStart;
     }
     if (g.cache().errors() != errors) return Status::ReadError;
     if (!found_s) return Status::NoStart;

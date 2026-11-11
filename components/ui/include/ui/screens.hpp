@@ -63,7 +63,9 @@ private:
     Label       trip_;
     Label       hr_;
     Label       hr_unit_;
-    Widget*     list_[20] = {};
+    Label       lim_;          // the road's posted limit, while routing
+    Label       lim_cap_;
+    Widget*     list_[22] = {};
 };
 
 // The dedicated now-playing screen: title/artist/album at a size actually
@@ -133,10 +135,11 @@ private:
 // Turn-by-turn routing on the map from the card (core::route,
 // docs/navigation.md). Two views. The picker lists where to go: the
 // waypoints that are set, the card's favourites, the nearest fuel and food,
-// and a last row for dirt roads; E goes, and on a waypoint row hold E drops
-// it here. Guidance shows the next turn as an arrow, its distance and road,
-// what is left, and the road's posted limit; hold E stops. When a route
-// uses 65 mph roads the rider is asked: E avoids them, hold E keeps them.
+// then the speed limit (E up, hold E down: 50 to 75 by 5, off) and dirt roads; E
+// goes, and on a waypoint row hold E drops it here. Guidance shows the next
+// turn as an arrow, its distance and road, what is left, and the road's
+// posted limit; hold E stops. When nothing connects under the speed limit
+// the rider is told: E routes at any speed, hold E stops.
 class NavScreen final : public Screen {
 public:
     const char* name() const override { return "NAV"; }
@@ -186,8 +189,8 @@ private:
     Label     remain_;
     Label     status_;
     Label     hint_;
-    // The route view, in place of the arrow and the numbers: on its own at
-    // the 65 mph question, and E while guiding.
+    // The route view, in place of the arrow and the numbers: on its own
+    // when no route fits the speed limit, and E while guiding.
     MapView   map_;
     bool      show_map_ = false;    // laid out with the map
     bool      want_map_ = false;    // the rider's E while guiding
@@ -198,9 +201,10 @@ private:
     uint8_t   phase_ = 0;
     uint8_t   focus_ = 0;
     mutable int reset_focus_ = -1;  // where to put nav's cursor after a handled press
-    uint8_t   rows_ = 0;            // "Where to?" + destinations + the dirt row
+    uint8_t   rows_ = 0;            // "Where to?" + destinations + speed limit + dirt
     uint8_t   n_dest_ = 0;
     bool      avoid_dirt_ = false;
+    uint8_t   limit_ix_ = 0;        // core::config::kNavLimitMph index
     uint8_t   kind_[core::state::Nav::kMaxDest] = {};
     uint8_t   waypoint_[core::state::Nav::kMaxDest] = {};
     // The search.

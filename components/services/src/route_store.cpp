@@ -47,7 +47,6 @@ void do_query(RouteMailbox& box, RouteEngine& eng) {
     if (box.status != Status::Ok) return;
     // The names `logic` and the screen need, read here where the card is.
     for (uint32_t i = 0; i < d.route.n_cues; ++i) name_into(eng.graph, d.route.cues[i].name_off, d.cue_names[i]);
-    name_into(eng.graph, d.route.first_fast_name, d.fast_name);
     d.n_labels = uint8_t(longest_roads(d.route, d.labels, core::state::Nav::kMaxLabels));
     for (uint8_t i = 0; i < d.n_labels; ++i) name_into(eng.graph, d.labels[i].name_off, d.label_names[i]);
 }

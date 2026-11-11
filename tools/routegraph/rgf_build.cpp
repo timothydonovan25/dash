@@ -240,17 +240,20 @@ bool read_rgi(const std::string& path, Rgi& out, std::string& err) {
 int route_mph(const RgiEdge& e) {
     int mph = e.mph;
     if (mph == 0) {
-        static const int kDefault[] = {25, 60, 55, 50, 45, 40, 25, 15, 15, 20};
-        mph = kDefault[e.cls < 10 ? e.cls : 0];
+        static const int kDefault[] = {25, 60, 55, 50, 45, 40, 25, 15, 15, 20, 70};
+        mph = kDefault[e.cls < 11 ? e.cls : 0];
         if (e.flags & kAttrLink) mph = 35;
         if ((e.flags & kAttrDirt) && mph > 35) mph = 35;
     }
     return std::max(5, std::min(mph, kCruiseCapMph));
 }
 
-bool is_fast(const RgiEdge& e) {
-    if (e.mph) return e.mph >= 65;
-    return e.cls == uint8_t(RoadClass::Trunk);
+int posted_mph(const RgiEdge& e) {
+    if (e.mph) return e.mph;
+    if (e.cls == uint8_t(RoadClass::Motorway)) return 70;
+    if (e.cls == uint8_t(RoadClass::Trunk)) return 65;
+    if (e.cls == uint8_t(RoadClass::Primary)) return 55;
+    return 0;
 }
 
 // --- .rgf ------------------------------------------------------------------------
@@ -303,8 +306,8 @@ std::vector<uint8_t> build_rgf(const Rgi& in, const Options& opt, Report* rep) {
         a.weight_ds = weight_ds(e);
         a.cls = RoadClass(e.cls);
         a.mph = e.mph;
-        a.flags = uint8_t((e.flags & (kAttrOneway | kAttrLink | kAttrDirt | kAttrRoundabout)) |
-                          (is_fast(e) ? kAttrFast : 0));
+        a.flags = uint8_t(e.flags & (kAttrOneway | kAttrLink | kAttrDirt | kAttrRoundabout));
+        a.cap_mph = uint8_t(std::min(posted_mph(e), 255));
         geom.insert(geom.end(), in.geom.begin() + e.geom_off, in.geom.begin() + e.geom_off + e.geom_n);
     }
 
@@ -366,7 +369,7 @@ std::vector<uint8_t> build_rgf(const Rgi& in, const Options& opt, Report* rep) {
         Contractor c(N);
         for (uint32_t i = 0; i < E; ++i) {
             const Attr& a = attrs[i];
-            if (!allowed(a.flags, vf)) continue;
+            if (!allowed(a, vf)) continue;
             c.add_arc(a.from, a.to, a.weight_ds, i);
             if (!(a.flags & kAttrOneway)) c.add_arc(a.to, a.from, a.weight_ds, i);
         }
@@ -412,7 +415,7 @@ uint32_t reference_ds(const std::vector<uint8_t>& rgf, uint32_t vf, uint32_t fro
     for (uint32_t i = 0; i < h.attr_count; ++i) {
         Attr a;
         std::memcpy(&a, rgf.data() + h.attrs_off + i * sizeof(Attr), sizeof a);
-        if (!allowed(a.flags, vf)) continue;
+        if (!allowed(a, vf)) continue;
         adj[a.from].push_back({a.to, a.weight_ds});
         if (!(a.flags & kAttrOneway)) adj[a.to].push_back({a.from, a.weight_ds});
     }

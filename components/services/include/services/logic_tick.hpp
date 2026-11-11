@@ -107,7 +107,6 @@ struct LogicState {
     core::state::NavDest nav_list[core::state::Nav::kMaxDest];
     uint8_t  nav_list_n = 0;
     char     nav_target[16] = {};
-    bool     fast_presumed = false;   // the adopted route's first 65 mph road has no sign
     bool     route_traced = false;    // RouteTrace holds a route
     // "Where to?" (core/route/search.hpp): what has been typed, and what
     // the card said about it.

@@ -560,11 +560,12 @@ struct PhoneDest {
 };
 
 struct Nav {
-    static constexpr unsigned kMaxDest = 10;   // + "Where to?" and the dirt row = ui::Table::kRows
+    static constexpr unsigned kMaxDest = 9;    // + "Where to?", speed limit and dirt rows = ui::Table::kRows
     uint8_t  phase = 0;          // core::route::Phase
     uint8_t  status = 0;         // core::route::Status of the last answer
     uint32_t map_date = 0;       // yyyymmdd of the OSM data, 0 for no map
     bool     avoid_dirt = false;
+    uint8_t  max_mph = 0;        // the speed limit setting, 0 none
     // The picker: waypoints that are set, the card's favourites, the
     // nearest fuel and food.
     NavDest  dest[kMaxDest];
@@ -579,7 +580,7 @@ struct Nav {
     float    remain_mi = 0.0f;
     uint32_t remain_s = 0;
     uint8_t  limit_mph = 0;      // the road's tagged limit, 0 unknown
-    bool     on_fast = false;    // on a 65 mph road now
+    bool     over_limit = false; // on a road over the speed limit now (a detour)
     bool     off_route = false;
     // Rally pace notes (core/route/pace.hpp): the next bends on the road
     // ahead, nearest first. `pace_gap_ft[0]` is to the first (0 when the
@@ -599,10 +600,6 @@ struct Nav {
     };
     Label    labels[kMaxLabels];
     uint8_t  n_labels = 0;
-    // The 65 mph question.
-    char     fast_road[24] = {};
-    float    fast_mi = 0.0f;
-    bool     fast_presumed = false;  // untagged divided highway, not a sign
 
     // "Where to?" (core/route/search.hpp), spelled with the pod.
     enum Search : uint8_t { SearchOff = 0, SearchTyping, SearchNumber };

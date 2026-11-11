@@ -34,8 +34,8 @@ public:
 
 // A 6 x 6 grid of junctions 200 m apart near Fayetteville. Rows run east
 // (named "Row k"), columns north ("Col k"). Row 5 is an untagged divided
-// highway (fast); column 2 is one way, north only; a dirt track runs
-// diagonally from (0,0) to (2,2).
+// highway (judged 65); Row 4's first block is posted 70; column 2 is one
+// way, north only; a dirt track runs diagonally from (0,0) to (2,2).
 constexpr int kN = 6;
 constexpr int32_t kLat0 = 360000000, kLon0 = -941600000;
 constexpr int32_t kStepLat = 18000;          // ~200 m
@@ -79,6 +79,7 @@ Rgi town() {
         for (int c = 0; c + 1 < kN; ++c)
             road(g, id(r, c), id(r, c + 1), r == 5 ? RoadClass::Trunk : RoadClass::Residential, 0, nm, c == 3);
     }
+    g.edges[size_t(4 * (kN - 1))].mph = 70;
     for (int c = 0; c < kN; ++c) {
         const uint32_t nm = add_name(g, "Col " + std::to_string(c));
         for (int r = 0; r + 1 < kN; ++r)
@@ -138,30 +139,41 @@ int main() {
     auto rig = std::make_unique<Rig>(file);
     Graph& g = rig->g;
 
-    CASE("the file opens and carries four variants");
+    CASE("the file opens and carries fourteen variants: no limit and 50 to 75 by 5, dirt or not");
     CHECK(g.open(*rig->src) == OpenResult::Ok);
-    CHECK(g.header().variant_count == 4);
+    CHECK(g.header().variant_count == 14);
     CHECK(g.header().node_count == kN * kN);
     CHECK(g.header().osm_date == 20261102);
-    CHECK(g.variant(0) >= 0 && g.variant(kNoFast) >= 0 && g.variant(kNoFast | kNoDirt) >= 0);
+    for (uint32_t dirt : {0u, kNoDirt})
+        for (uint8_t mph : {0, 50, 55, 60, 65, 70, 75}) CHECK(g.variant(limit_flags(mph) | dirt) >= 0);
+    CHECK(g.variant(limit_flags(45)) < 0);
 
-    CASE("the divided highway is fast, the track is dirt");
+    CASE("judged limits: the untagged divided highway 65, the tag 70, untagged streets 0; the track is dirt");
     {
-        int fast = 0, dirt = 0;
+        int c65 = 0, c70 = 0, c0 = 0, dirt = 0;
         for (uint32_t i = 0; i < g.header().attr_count; ++i) {
             Attr a;
             g.attr(i, a);
-            if (a.flags & kAttrFast) { ++fast; CHECK(name(g, a.name_off) == "Row 5"); }
+            if (a.cap_mph == 65) { ++c65; CHECK(name(g, a.name_off) == "Row 5" && a.mph == 0); }
+            else if (a.cap_mph == 70) { ++c70; CHECK(name(g, a.name_off) == "Row 4" && a.mph == 70); }
+            else if (a.cap_mph == 0) ++c0;
             if (a.flags & kAttrDirt) { ++dirt; CHECK(a.cls == RoadClass::Track); }
         }
-        CHECK(fast == kN - 1);
+        CHECK(c65 == kN - 1);
+        CHECK(c70 == 1);
+        CHECK(c65 + c70 + c0 == int(g.header().attr_count));
         CHECK(dirt == 2);
+        // Over the limit is out; at it is in.
+        CHECK(!allowed(0, 65, limit_flags(60)) && allowed(0, 65, limit_flags(65)));
+        CHECK(!allowed(0, 55, limit_flags(50)) && allowed(0, 50, limit_flags(50)));
+        CHECK(allowed(0, 0, limit_flags(50)) && allowed(0, 75, 0));
+        CHECK(!allowed(kAttrDirt, 0, kNoDirt) && allowed(kAttrDirt, 0, limit_flags(50)));
     }
 
     CASE("every node pair, every variant: the hierarchy's cost is Dijkstra's");
     {
         int mismatches = 0, routes = 0, unreachable = 0;
-        for (int v = 0; v < 4; ++v) {
+        for (int v = 0; v < g.header().variant_count; ++v) {
             const uint32_t vf = g.header().variants[v].flags;
             for (uint32_t s = 0; s < uint32_t(kN * kN); ++s)
                 for (uint32_t t = 0; t < uint32_t(kN * kN); ++t) {
@@ -169,7 +181,7 @@ int main() {
                     Attr aa, ab;
                     g.attr(a.attr, aa);
                     g.attr(b.attr, ab);
-                    if (!allowed(aa.flags, vf) || !allowed(ab.flags, vf)) continue;
+                    if (!allowed(aa, vf) || !allowed(ab, vf)) continue;
                     QueryStats st;
                     const Status q = query(g, vf, a, b, rig->search.mem(), rig->route, &st);
                     const uint32_t want = routegraph::reference_ds(file, vf, s, t);
@@ -233,7 +245,6 @@ int main() {
             }
         }
         CHECK(lefts >= 1);
-        CHECK(r.fast_dm == 0);
     }
 
     CASE("the one-way column is only used northbound");
@@ -246,21 +257,45 @@ int main() {
         CHECK(down.weight_ds > up.weight_ds);     // southbound has to go round
     }
 
-    CASE("along Row 5 the full graph takes the highway; kNoFast never does");
+    CASE("along Row 5 the full graph and 65 take the highway; 55 and 60 never do");
     {
         const Point from = at(5, 0), to = at(5, 5);
+        const auto on_highway = [&] {
+            for (uint32_t i = 0; i < rig->route.n_pts; ++i)
+                if (rig->route.pts[i].cap_mph > 55) return true;
+            return false;
+        };
         CHECK(query(g, 0, from, to, rig->search.mem(), rig->route) == Status::Ok);
-        CHECK(rig->route.fast_dm > 0);
-        CHECK(name(g, rig->route.first_fast_name) == "Row 5");
-        // Standing on the highway itself, the no-fast graph snaps to the
-        // nearest road it has and routes round.
+        CHECK(on_highway());
+        CHECK(query(g, limit_flags(65), from, to, rig->search.mem(), rig->route) == Status::Ok);
+        CHECK(on_highway());
+        // Mid-block on the highway itself, the 55 graph has no start: the
+        // rider is on a road over the limit (the navigator then detours).
+        // At a junction a cross street is as near, so that is a start.
+        const Point mid{from.lat_e7, from.lon_e7 + kStepLon / 2};
+        CHECK(query(g, limit_flags(60), mid, to, rig->search.mem(), rig->route) == Status::NoStart);
+        // Beside it, it snaps to the nearest road it has and routes round.
         Point from_off = from, to_off = to;
-        from_off.lat_e7 -= 300;
-        to_off.lat_e7 -= 300;
-        CHECK(query(g, kNoFast, from_off, to_off, rig->search.mem(), rig->route) == Status::Ok);
-        CHECK(rig->route.fast_dm == 0);
-        CHECK(rig->route.variant_flags == kNoFast);
-        for (uint32_t i = 0; i < rig->route.n_pts; ++i) CHECK(!(rig->route.pts[i].flags & kAttrFast));
+        from_off.lat_e7 -= 3000;
+        to_off.lat_e7 -= 3000;
+        CHECK(query(g, limit_flags(55), from_off, to_off, rig->search.mem(), rig->route) == Status::Ok);
+        CHECK(rig->route.variant_flags == limit_flags(55));
+        CHECK(!on_highway());
+    }
+
+    CASE("Row 4's 70 mph block is used with no limit or 70, never under 65");
+    {
+        const Point from = at(4, 0), to = at(4, 1);
+        CHECK(query(g, 0, from, to, rig->search.mem(), rig->route) == Status::Ok);
+        const uint32_t direct = rig->route.total_dm;
+        Point from_off = from, to_off = to;
+        from_off.lat_e7 += 3000;
+        to_off.lat_e7 += 3000;
+        CHECK(query(g, limit_flags(65), from_off, to_off, rig->search.mem(), rig->route) == Status::Ok);
+        CHECK(rig->route.total_dm > direct);
+        for (uint32_t i = 0; i < rig->route.n_pts; ++i) CHECK(rig->route.pts[i].cap_mph <= 65);
+        CHECK(query(g, limit_flags(70), from, to, rig->search.mem(), rig->route) == Status::Ok);
+        CHECK(rig->route.total_dm == direct);            // 70 is at the limit, not over it
     }
 
     CASE("the dirt track is a shortcut only where dirt is allowed");

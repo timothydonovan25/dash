@@ -25,9 +25,9 @@ struct Snap {
 // `ring` cells around the point are searched (the grid's cells are
 // header().cell_e7 wide; ~1 km in the Arkansas build).
 inline constexpr uint32_t kSnapMaxDm = 5000;   // 500 m
-// Within this of a 65 mph road (and nearer it than any other), the rider
-// is on it: a route avoiding them has no start there.
-inline constexpr uint32_t kOnFastDm = 500;     // 50 m, as Follower's off_route_dm
+// Within this of a road over the speed limit (and nearer it than any
+// other), the rider is on it: a route under the limit has no start there.
+inline constexpr uint32_t kOnRoadDm = 500;     // 50 m, as Follower's off_route_dm
 bool snap(Graph& g, uint32_t variant_flags, Point p, Snap& out,
           uint32_t max_dm = kSnapMaxDm, int ring = 1);
 
@@ -90,7 +90,8 @@ struct RoutePoint {
     uint32_t name_off;     // the road this point's segment is on
     uint8_t  mph;          // its tagged limit, 0 if none
     uint8_t  flags;        // its Attr flags
-    uint8_t  pad[2];
+    uint8_t  cap_mph;      // its Attr::cap_mph, for the speed limit
+    uint8_t  pad;
 };
 
 enum class CueKind : uint8_t {
@@ -120,10 +121,8 @@ struct Route {
     uint32_t n_cues = 0;
     uint32_t total_dm = 0;
     uint32_t total_ds = 0;
-    uint32_t fast_dm = 0;          // how much of it is on 65 mph roads
-    uint32_t first_fast_name = 0;  // the first of them, for the alert
     uint32_t variant_flags = 0;    // which graph it came from
-    void clear() { n_pts = n_cues = total_dm = total_ds = fast_dm = first_fast_name = 0; }
+    void clear() { n_pts = n_cues = total_dm = total_ds = 0; }
 };
 
 // The roads a route spends longest on, for the route view's names: up to

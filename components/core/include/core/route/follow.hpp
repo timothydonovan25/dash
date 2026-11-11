@@ -16,6 +16,11 @@ struct FollowConfig {
     uint32_t arrive_dm    = 300;     // within 30 m of the end
     uint32_t back_segs    = 8;       // how far back along the line to look
     uint32_t ahead_segs   = 400;     // and forward
+    // A new posted limit shows once the bike has been on it this long. At
+    // a junction the nearest segment can swap between two roads, and an
+    // untagged stub between two tagged roads reads 0, so the raw value
+    // flickered.
+    uint32_t limit_hold_ms = 2000;
 };
 
 struct Progress {
@@ -31,8 +36,9 @@ struct Progress {
     uint32_t remain_dm = 0;
     uint32_t remain_ds = 0;       // at the graph's speeds
     uint32_t name_off  = 0;       // the road the bike is on
-    uint8_t  mph       = 0;       // its tagged limit, 0 unknown
+    uint8_t  mph       = 0;       // its tagged limit, 0 unknown; held (limit_hold_ms)
     uint8_t  flags     = 0;       // its Attr flags
+    uint8_t  cap_mph   = 0;       // its Attr::cap_mph (not held)
 };
 
 class Follower {
@@ -47,6 +53,10 @@ private:
     Progress last_{};
     uint32_t seg_ = 0;
     uint32_t off_since_ms_ = 0;
+    uint8_t  shown_mph_ = 0;      // the limit Progress::mph reports
+    uint8_t  cand_mph_ = 0;       // the raw limit, if different, and since when
+    uint32_t cand_ms_ = 0;
+    bool     have_mph_ = false;   // shown_mph_ has been set on this route
     bool off_ = false;
     bool asked_ = false;
     bool arrived_ = false;

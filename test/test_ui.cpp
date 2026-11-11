@@ -1637,7 +1637,7 @@ int main() {
         f.nav.dest[1] = core::state::NavDest{"Shell", 360000000, -941500000,
                                              core::state::NavDest::Fuel, 0};
         fx.app.update(f);
-        CHECK(fx.app.current().focus_count() == 4);      // Where to?, two places, the dirt row
+        CHECK(fx.app.current().focus_count() == 5);      // Where to?, two places, speed limit, dirt
         fx.sink.posted.clear();
         // The first row opens the search.
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
@@ -1659,6 +1659,26 @@ int main() {
         const size_t before = fx.sink.posted.size();
         fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
         CHECK(fx.sink.posted.size() == before);
+        // The speed limit: E steps up 5 mph (50 ... 75, then off), hold E down.
+        // The value sent is kNavLimitMph's index.
+        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::ConfigSet);
+        CHECK(fx.sink.posted.back().cfg.key == core::config::kKeyNavSpeedLimit);
+        CHECK(fx.sink.posted.back().cfg.val == 1.0f);   // off -> 50
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.val == 6.0f);   // off -> 75, round the bottom
+        f.nav.max_mph = 65;
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.val == 5.0f);   // 65 -> 70
+        fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.val == 3.0f);   // 65 -> 60
+        f.nav.max_mph = 75;
+        fx.app.update(f);
+        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
+        CHECK(fx.sink.posted.back().cfg.val == 0.0f);   // 75 -> off
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
         fx.app.update(f);
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
@@ -1799,7 +1819,7 @@ int main() {
         CHECK(fx.sink.posted.back().i == 0);
     }
 
-    CASE("NAV: guidance draws a turn, asks about 65 mph roads, and hold E stops");
+    CASE("NAV: guidance draws a turn, offers any speed when nothing fits the limit, and hold E stops");
     {
         Fixture fx;
         Screen320x480 s;
@@ -1835,14 +1855,14 @@ int main() {
         fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
         CHECK(!fx.sink.posted.empty() && fx.sink.posted.back().id == core::state::CommandId::NavCancel);
 
-        f.nav.phase = static_cast<uint8_t>(core::route::Phase::AskFast);
-        std::snprintf(f.nav.fast_road, sizeof f.nav.fast_road, "US 412");
-        f.nav.fast_mi = 12.0f;
+        f.nav.phase = static_cast<uint8_t>(core::route::Phase::NoSlowRoute);
+        f.nav.following = false;
+        f.nav.max_mph = 55;
         fx.app.update(f);
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
-        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavAvoidFast);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavAnySpeed);
         fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
-        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavKeepFast);
+        CHECK(fx.sink.posted.back().id == core::state::CommandId::NavCancel);
     }
 
     CASE("NAV: going back to the picker clears the guidance off the glass");
@@ -3840,6 +3860,36 @@ int main() {
                 }
             }
         }
+    }
+
+    CASE("SPEED shows the road's posted limit under the heart rate, only while routing");
+    {
+        Fixture fx;
+        fx.settings.gauge_sweep = false;
+        Screen320x480 s;
+        fx.app.begin(s.canvas);
+        go_to(fx.app, s.canvas, Mode::Cruise, 0);
+        const auto ink_in = [&](const Frame& f, Rect r) {
+            fx.app.update(f);
+            s.wipe();
+            fx.app.render(s.canvas, true);
+            size_t n = 0;
+            for (int16_t y = r.y; y < r.bottom(); ++y)
+                for (int16_t x = r.x; x < r.right(); ++x) {
+                    const Color c = s.px[static_cast<size_t>(y) * kScreenW + x];
+                    if (c != color::kBg && c != 0) ++n;
+                }
+            return n;
+        };
+        const Rect lim{28, 150, 84, 46}, hr{28, 100, 84, 44};
+        Frame f = busy_frame();
+        f.nav.limit_mph = 45;
+        CHECK(ink_in(f, lim) == 0);                      // not routing: nothing
+        f.nav.following = true;
+        CHECK(ink_in(f, lim) > 0);                       // 45, LIMIT
+        CHECK(ink_in(f, hr) == 0);                       // and none of it up in the heart rate's place
+        f.nav.limit_mph = 0;
+        CHECK(ink_in(f, lim) == 0);                      // a road with no posted limit
     }
 
     CASE("SPEED and RACE carry the watch's heart rate, and no space for it when off");

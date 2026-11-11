@@ -7,7 +7,9 @@ void Follower::reset() {
     last_ = Progress{};
     seg_ = 0;
     off_since_ms_ = 0;
-    off_ = asked_ = arrived_ = false;
+    shown_mph_ = cand_mph_ = 0;
+    cand_ms_ = 0;
+    off_ = asked_ = arrived_ = have_mph_ = false;
 }
 
 Progress Follower::update(const Route& r, Point pos, bool fix, uint32_t now_ms) {
@@ -54,8 +56,21 @@ Progress Follower::update(const Route& r, Point pos, bool fix, uint32_t now_ms) 
     p.remain_dm = r.total_dm > p.along_dm ? r.total_dm - p.along_dm : 0;
     p.remain_ds = r.total_ds > at_ds ? r.total_ds - at_ds : 0;
     p.name_off = a.name_off;
-    p.mph = a.mph;
+    // The first reading on a route shows at once; after that a change
+    // has to hold for limit_hold_ms.
+    if (!have_mph_ || a.mph == shown_mph_) {
+        shown_mph_ = cand_mph_ = a.mph;
+        cand_ms_ = now_ms;
+        have_mph_ = true;
+    } else if (a.mph != cand_mph_) {
+        cand_mph_ = a.mph;
+        cand_ms_ = now_ms;
+    } else if (now_ms - cand_ms_ >= cfg_.limit_hold_ms) {
+        shown_mph_ = a.mph;
+    }
+    p.mph = shown_mph_;
     p.flags = a.flags;
+    p.cap_mph = a.cap_mph;
     for (uint32_t c = 0; c < r.n_cues; ++c) {
         if (r.cues[c].dist_dm > p.along_dm || r.cues[c].kind == CueKind::Arrive) {
             p.cue = c;

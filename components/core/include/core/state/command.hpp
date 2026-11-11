@@ -46,8 +46,7 @@ enum class CommandId : uint8_t {
     CrashTest,        // console `crash test`: the countdown now, as if after a crash
     NavGo,            // i: route to Frame::nav.dest[i] (core::route)
     NavCancel,        // stop routing
-    NavAvoidFast,     // the 65 mph question: route without those roads
-    NavKeepFast,      // ... or keep them
+    NavAnySpeed,      // nothing connects under the speed limit: route without it
     NavSearch,        // i: 1 open "Where to?", 0 close it
     NavSearchKey,     // i: a character of core::route::kAlphabet to add, or 8 to delete one
     NavSearchPick,    // i: Frame::nav.hits[i]

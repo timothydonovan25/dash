@@ -32,6 +32,14 @@ enum class Kind : uint8_t { Float = 0, Int, Bool, Enum, Action };
 // services that need it. Trivially copyable so a task can take a snapshot.
 // CONFIG -> Nav -> Avoid dirt, which NAV's picker also switches (by key).
 inline constexpr uint16_t kKeyNavAvoidDirt = 0x1101;
+// CONFIG -> Nav -> Speed limit, which NAV's picker also steps (by key).
+// The setting is an index into kNavLimitMph.
+inline constexpr uint16_t kKeyNavSpeedLimit = 0x1102;
+inline constexpr uint8_t  kNavLimitMph[] = {0, 50, 55, 60, 65, 70, 75};   // 0: no limit
+inline constexpr uint8_t  kNavLimitCount = sizeof(kNavLimitMph);
+inline constexpr uint8_t  nav_limit_mph(uint8_t index) {
+    return index < kNavLimitCount ? kNavLimitMph[index] : 0;
+}
 
 struct Settings {
     // Display
@@ -86,6 +94,9 @@ struct Settings {
     // CRUISE -> NAV (core::route): routes keep off dirt roads (tracks and
     // unpaved surfaces). Switched from NAV's picker as well as here.
     bool     nav_avoid_dirt = false;
+    // ... and roads posted over this (kNavLimitMph's index: off, 50..75).
+    // Off routes on interstates too.
+    uint8_t  nav_speed_limit = 0;
 
     // The start-up gauge sweep (core/sweep): on or off, and how long the
     // needles take to go up and come back.

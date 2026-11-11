@@ -2,7 +2,7 @@
 //
 //   rgf_build in.rgi out.rgf [--check N]
 //   rgf_build --check N --rgf map.rgf
-//   rgf_build --rgf map.rgf --route LAT,LON LAT,LON [--flags F]
+//   rgf_build --rgf map.rgf --route LAT,LON LAT,LON [--limit MPH] [--flags F]
 //   rgf_build --search in.sxi search.idx
 //   rgf_build --idx search.idx --find TEXT LAT,LON [NUMBER]
 //
@@ -11,8 +11,8 @@
 // first, and with a NUMBER places that house on the first street found.
 //
 // --route prints one route the way the dash would ride it: distance, time,
-// 65 mph roads, and each cue with its road. F is the variant: 1 no 65 mph
-// roads, 2 no dirt, 3 neither.
+// and each cue with its road and the limit it is judged by. --limit is the
+// speed limit (50 ... 75); --flags 2 leaves out dirt.
 //
 // --check runs N random node-to-node routes per variant through the
 // dash's own query code (core::route) and holds each against plain
@@ -84,7 +84,7 @@ int check(const std::vector<uint8_t>& rgf, int n, uint32_t seed) {
             Attr as, at;
             g.attr(leaving[s], as);
             g.attr(leaving[t], at);
-            if (!allowed(as.flags, vf) || !allowed(at.flags, vf)) continue;
+            if (!allowed(as, vf) || !allowed(at, vf)) continue;
             const uint32_t want = routegraph::reference_ds(rgf, vf, s, t);
             Snap a, b;
             a.attr = leaving[s]; a.along_dm = 0; a.length_dm = 1;
@@ -140,15 +140,17 @@ int route(const std::vector<uint8_t>& rgf, const char* a, const char* b, uint32_
     Route r = big->route.make();
     QueryStats st;
     const Status q = query(g, vf, pt(la, lo), pt(lb, ob), big->search.mem(), r, &st);
-    std::printf("%s: %.2f mi, %.0f min, %u points; 65 mph roads %.2f mi; settled %u, block reads %u\n",
-                to_string(q), r.total_dm / 16093.44, r.total_ds / 600.0, r.n_pts, r.fast_dm / 16093.44,
+    std::printf("%s: %.2f mi, %.0f min, %u points; settled %u, block reads %u\n",
+                to_string(q), r.total_dm / 16093.44, r.total_ds / 600.0, r.n_pts,
                 st.settled, st.cache_misses);
     for (uint32_t i = 0; i < r.n_cues; ++i) {
         char name[64];
         g.name(r.cues[i].name_off, name, sizeof name);
-        std::printf("  %6.2f mi  %-12s %4d deg  %s%s\n", r.cues[i].dist_dm / 16093.44,
-                    to_string(r.cues[i].kind), r.cues[i].turn_deg, name,
-                    (r.cues[i].flags & kAttrFast) ? "  [65]" : "");
+        const uint8_t cap = r.pts[r.cues[i].point].cap_mph;
+        std::printf("  %6.2f mi  %-12s %4d deg  %s", r.cues[i].dist_dm / 16093.44,
+                    to_string(r.cues[i].kind), r.cues[i].turn_deg, name);
+        if (cap) std::printf("  [%u]", unsigned(cap));
+        std::printf("\n");
     }
     return q == Status::Ok ? 0 : 1;
 }
@@ -238,7 +240,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--check") && i + 1 < argc) n_check = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--route") && i + 2 < argc) { route_a = argv[++i]; route_b = argv[++i]; }
-        else if (!std::strcmp(argv[i], "--flags") && i + 1 < argc) flags = uint32_t(std::atoi(argv[++i]));
+        else if (!std::strcmp(argv[i], "--flags") && i + 1 < argc) flags |= uint32_t(std::atoi(argv[++i]));
+        else if (!std::strcmp(argv[i], "--limit") && i + 1 < argc) flags |= limit_flags(uint8_t(std::atoi(argv[++i])));
         else if (!std::strcmp(argv[i], "--rgf") && i + 1 < argc) rgf_path = argv[++i];
         else if (!in) in = argv[i];
         else if (!outp) outp = argv[i];

@@ -41,7 +41,6 @@ struct RouteData {
     core::route::RoutePoint pts[kRoutePts];
     core::route::Cue        cues[kRouteCues];
     char                    cue_names[kRouteCues][kRoadName];
-    char                    fast_name[kRoadName];
     core::route::RoadLabel  labels[core::state::Nav::kMaxLabels];
     char                    label_names[core::state::Nav::kMaxLabels][kRoadName];
     uint8_t                 n_labels = 0;

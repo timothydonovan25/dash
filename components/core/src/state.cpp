@@ -84,8 +84,7 @@ const char* command_name(CommandId id) {
         case CommandId::NavClearWaypoint:  return "nav.clear";
         case CommandId::NavGo:             return "nav.go";
         case CommandId::NavCancel:         return "nav.cancel";
-        case CommandId::NavAvoidFast:      return "nav.avoid65";
-        case CommandId::NavKeepFast:       return "nav.keep65";
+        case CommandId::NavAnySpeed:       return "nav.anyspeed";
         case CommandId::NavSearch:         return "nav.search";
         case CommandId::NavSearchKey:      return "nav.key";
         case CommandId::NavSearchPick:     return "nav.pick";

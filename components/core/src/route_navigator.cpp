@@ -7,7 +7,6 @@ const char* to_string(Phase p) {
         case Phase::NoMap:       return "no map";
         case Phase::Idle:        return "idle";
         case Phase::Routing:     return "routing";
-        case Phase::AskFast:     return "65 mph?";
         case Phase::NoSlowRoute: return "no slow route";
         case Phase::Guiding:     return "guiding";
         case Phase::Rerouting:   return "rerouting";
@@ -28,7 +27,7 @@ void Navigator::set_map(bool ok) {
 }
 
 uint32_t Navigator::flags() const {
-    return (choice_ == FastChoice::Avoid && !fast_detour_ ? kNoFast : 0u) | (avoid_dirt_ ? kNoDirt : 0u);
+    return (lifted_ || detour_ ? 0u : limit()) | (avoid_dirt_ ? kNoDirt : 0u);
 }
 
 void Navigator::request_from(Point here) {
@@ -40,8 +39,7 @@ void Navigator::request_from(Point here) {
 bool Navigator::start(Point to, Point here, bool fix) {
     if (phase_ == Phase::NoMap || !fix) return false;
     dest_ = to;
-    choice_ = FastChoice::Unasked;
-    have_route_ = fast_detour_ = false;
+    have_route_ = lifted_ = detour_ = false;
     follower_.reset();
     phase_ = Phase::Routing;
     request_from(here);
@@ -51,26 +49,15 @@ bool Navigator::start(Point to, Point here, bool fix) {
 void Navigator::cancel() {
     if (phase_ == Phase::NoMap) return;
     phase_ = Phase::Idle;
-    pending_ = have_route_ = want_reroute_ = fast_detour_ = false;
+    pending_ = have_route_ = want_reroute_ = lifted_ = detour_ = false;
     follower_.reset();
 }
 
-void Navigator::avoid_fast() {
-    if (phase_ != Phase::AskFast) return;
-    choice_ = FastChoice::Avoid;
+void Navigator::any_speed() {
+    if (phase_ != Phase::NoSlowRoute) return;
+    lifted_ = true;
     phase_ = Phase::Routing;
     request_from(here_);
-}
-
-void Navigator::keep_fast() {
-    if (phase_ == Phase::AskFast) {
-        choice_ = FastChoice::Keep;
-        phase_ = Phase::Guiding;
-    } else if (phase_ == Phase::NoSlowRoute) {
-        choice_ = FastChoice::Keep;
-        phase_ = Phase::Routing;
-        request_from(here_);
-    }
 }
 
 bool Navigator::take_request(Request& out) {
@@ -81,7 +68,7 @@ bool Navigator::take_request(Request& out) {
     return true;
 }
 
-bool Navigator::answered(Status s, const Route& r, uint32_t now_ms) {
+bool Navigator::answered(Status s, const Route&, uint32_t now_ms) {
     in_flight_ = false;
     now_ms_ = now_ms;
     // Cancelled while it was out, or a newer request supersedes it.
@@ -91,7 +78,7 @@ bool Navigator::answered(Status s, const Route& r, uint32_t now_ms) {
     if (s == Status::Ok) {
         have_route_ = true;
         follower_.reset();
-        phase_ = (choice_ == FastChoice::Unasked && r.fast_dm > 0) ? Phase::AskFast : Phase::Guiding;
+        phase_ = Phase::Guiding;
         return true;
     }
     if (s == Status::NoMap) {
@@ -99,11 +86,12 @@ bool Navigator::answered(Status s, const Route& r, uint32_t now_ms) {
         return false;
     }
     if ((phase_ == Phase::Rerouting || phase_ == Phase::Routing) && s == Status::NoStart &&
-        (req_.variant_flags & kNoFast)) {
-        // Avoiding 65 mph roads, but on one (a wrong turn onto the
-        // highway, or starting from one): no slow road to start from. Route from here with them
-        // allowed; tick() avoids them again once the rider is off it.
-        fast_detour_ = true;
+        (req_.variant_flags & kLimitFlags)) {
+        // Under a speed limit, but on a road over it (a wrong turn onto
+        // the highway, or starting from one): no slower road to start
+        // from. Route from here with it lifted; tick() puts it back once
+        // the rider is off that road.
+        detour_ = true;
         request_from(here_);
         return false;
     }
@@ -113,7 +101,7 @@ bool Navigator::answered(Status s, const Route& r, uint32_t now_ms) {
         want_reroute_ = true;
         return false;
     }
-    if ((r.variant_flags & kNoFast) && (s == Status::NoRoute || s == Status::NoStart || s == Status::NoDest)) {
+    if ((req_.variant_flags & kLimitFlags) && (s == Status::NoRoute || s == Status::NoStart || s == Status::NoDest)) {
         phase_ = Phase::NoSlowRoute;
         return false;
     }
@@ -122,8 +110,8 @@ bool Navigator::answered(Status s, const Route& r, uint32_t now_ms) {
 }
 
 bool Navigator::following() const {
-    return have_route_ && (phase_ == Phase::Guiding || phase_ == Phase::AskFast ||
-                           phase_ == Phase::Rerouting || phase_ == Phase::Arrived);
+    return have_route_ && (phase_ == Phase::Guiding || phase_ == Phase::Rerouting ||
+                           phase_ == Phase::Arrived);
 }
 
 Progress Navigator::tick(const Route* live, Point here, bool fix, uint32_t now_ms) {
@@ -140,11 +128,11 @@ Progress Navigator::tick(const Route* live, Point here, bool fix, uint32_t now_m
         want_reroute_ = false;
     } else if (want_reroute_ && fix && phase_ == Phase::Guiding && !waiting() &&
                now_ms - last_request_ms_ >= cfg_.reroute_gap_ms) {
-        want_reroute_ = fast_detour_ = false;    // off it by an exit of the rider's own
+        want_reroute_ = detour_ = false;         // off it by an exit of the rider's own
         phase_ = Phase::Rerouting;
         request_from(here);
-    } else if (fast_detour_ && p.on && !(p.flags & kAttrFast) && phase_ == Phase::Guiding && !waiting()) {
-        fast_detour_ = false;                    // off the 65 mph road: the slow way from here
+    } else if (detour_ && p.on && allowed(p.flags, p.cap_mph, limit()) && phase_ == Phase::Guiding && !waiting()) {
+        detour_ = false;                         // off the fast road: under the limit from here
         phase_ = Phase::Rerouting;
         request_from(here);
     }

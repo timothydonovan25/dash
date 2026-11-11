@@ -6,11 +6,11 @@
 // layout is about locality: nodes are numbered along a Hilbert curve, and
 // each node's edges sit together.
 //
-// A file holds up to four *variants* of the same roads: the full graph,
-// and the graph without 65 mph roads, without dirt, without both. A
-// contraction hierarchy cannot drop roads at query time, so "avoid 65 mph
-// roads" is a different graph, chosen by `Variant::flags`. Coordinates,
-// geometry, names and the snapping grid are shared.
+// A file holds up to fourteen *variants* of the same roads: the rider's
+// speed limit (none, or 50 to 75 mph in steps of 5) times dirt allowed or
+// not. A contraction hierarchy cannot drop roads at query time, so "no road
+// over 55" is a different graph, chosen by `Variant::flags`. Coordinates, geometry,
+// names and the snapping grid are shared.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +19,7 @@ namespace core::route {
 
 enum class RoadClass : uint8_t {
     None = 0, Trunk, Primary, Secondary, Tertiary, Unclassified,
-    Residential, LivingStreet, Service, Track,
+    Residential, LivingStreet, Service, Track, Motorway,
 };
 
 enum PoiKind : uint8_t { PoiFuel = 1, PoiFood = 2, PoiParking = 3 };
@@ -28,16 +28,21 @@ enum PoiKind : uint8_t { PoiFuel = 1, PoiFood = 2, PoiParking = 3 };
 inline constexpr uint8_t kAttrOneway = 1;   // only from -> to
 inline constexpr uint8_t kAttrLink   = 2;   // a ramp
 inline constexpr uint8_t kAttrDirt   = 4;
-inline constexpr uint8_t kAttrFast   = 8;   // 65 mph or more, tagged or presumed
 inline constexpr uint8_t kAttrRoundabout = 16;
 
-// Variant::flags: which roads the variant leaves out.
-inline constexpr uint32_t kNoFast = 1;
-inline constexpr uint32_t kNoDirt = 2;
+// Variant::flags: which roads the variant leaves out. Bits 8..15 are a
+// speed limit in mph: nothing whose Attr::cap_mph is over it (0: none).
+inline constexpr uint32_t kNoDirt     = 2;
+inline constexpr uint32_t kLimitShift = 8;
+inline constexpr uint32_t kLimitFlags = 0xFFu << kLimitShift;
+inline constexpr uint32_t limit_flags(uint8_t max_mph) { return uint32_t(max_mph) << kLimitShift; }
+inline constexpr uint8_t  limit_mph(uint32_t variant_flags) {
+    return uint8_t(variant_flags >> kLimitShift);
+}
 
 inline constexpr char     kMagic[4]    = {'R', 'G', 'F', '1'};
-inline constexpr uint16_t kVersion     = 1;
-inline constexpr size_t   kMaxVariants = 4;
+inline constexpr uint16_t kVersion     = 2;   // 2: speed-limit variants, interstates
+inline constexpr size_t   kMaxVariants = 14;
 inline constexpr uint32_t kNone        = 0xFFFFFFFFu;
 
 struct Point {
@@ -58,7 +63,11 @@ struct Attr {
     RoadClass cls;
     uint8_t  mph;           // the tagged limit, 0 when OSM has none
     uint8_t  flags;
-    uint8_t  pad[3];
+    // The limit the speed-limit variants judge it by: the tag, else 70 for
+    // an interstate, 65 a divided highway, 55 a primary road; 0 for a
+    // lesser road with no tag (taken as under any limit).
+    uint8_t  cap_mph;
+    uint8_t  pad[2];
 };
 static_assert(sizeof(Attr) == 32, "on-card layout");
 
@@ -119,14 +128,18 @@ struct Header {
     uint32_t cell_items;
     Variant  variants[kMaxVariants];
 };
-static_assert(sizeof(Header) == 144, "on-card layout");
+static_assert(sizeof(Header) == 304, "on-card layout");
 
 // Whether a variant carries this road. The builder and the snapper both
 // ask, so a route never starts on a road its graph does not have.
-inline bool allowed(uint8_t attr_flags, uint32_t variant_flags) {
-    if ((variant_flags & kNoFast) && (attr_flags & kAttrFast)) return false;
+inline bool allowed(uint8_t attr_flags, uint8_t cap_mph, uint32_t variant_flags) {
+    const uint8_t limit = limit_mph(variant_flags);
+    if (limit && cap_mph > limit) return false;
     if ((variant_flags & kNoDirt) && (attr_flags & kAttrDirt)) return false;
     return true;
+}
+inline bool allowed(const Attr& a, uint32_t variant_flags) {
+    return allowed(a.flags, a.cap_mph, variant_flags);
 }
 
 }  // namespace core::route

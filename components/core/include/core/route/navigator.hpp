@@ -1,21 +1,20 @@
 // The turn-by-turn state machine (docs/navigation.md §5, §7): a destination
-// chosen, a route asked for, the 65 mph question, following, rerouting,
-// arriving.
+// chosen, a route asked for, following, rerouting, arriving.
 //
 // Pure. `logic` owns one. It feeds it the rider's commands, the route
 // service's answers and the position; it posts whatever request
 // take_request() hands it when the mailbox is free; and it follows the
 // route the navigator adopted (answered() returning true).
 //
-// The 65 mph rule: the bike can't hold 65. The first route to a
-// destination comes from the full graph; if any of it is on a 65 mph road
-// (tagged, or a divided highway with no tag), the rider is asked. Avoid
-// asks again on the graph without those roads; keep follows the first. The
-// answer stands for that destination's reroutes. If nothing connects
-// without them, the rider is told and may still keep the fast route.
+// The speed limit: the rider's setting (NAV's picker, or CONFIG -> Nav),
+// off, 65 or 55 mph. Every route comes from the graph without roads posted
+// over it (or presumed over it: an untagged divided highway is 65, an
+// interstate 70). If nothing connects under it, the rider is told and may
+// lift it for that destination.
 #pragma once
 #include <cstdint>
 #include "core/route/follow.hpp"
+#include "core/route/rgf.hpp"
 #include "core/route/route.hpp"
 
 namespace core::route {
@@ -24,16 +23,13 @@ enum class Phase : uint8_t {
     NoMap,         // no usable map file
     Idle,          // nothing chosen
     Routing,       // the first route to a destination is being worked out
-    AskFast,       // it uses 65 mph roads: avoid or keep? (followed meanwhile)
-    NoSlowRoute,   // avoiding them leaves no route: keep, or cancel
+    NoSlowRoute,   // nothing connects under the speed limit: lift it, or cancel
     Guiding,
     Rerouting,     // off the route: a new one from here is being worked out
     Arrived,
     Failed,        // no route at all; status() says why
 };
 const char* to_string(Phase p);
-
-enum class FastChoice : uint8_t { Unasked, Keep, Avoid };
 
 struct Request {
     Point    from{};
@@ -59,9 +55,11 @@ public:
     // Go to `to`. False (and nothing changes) without a map or a fix.
     bool start(Point to, Point here, bool fix);
     void cancel();
-    void avoid_fast();       // AskFast: route again without 65 mph roads
-    void keep_fast();        // AskFast or NoSlowRoute: use the fast route
+    void any_speed();        // NoSlowRoute: route again with no speed limit
     void set_avoid_dirt(bool on) { avoid_dirt_ = on; }
+    // The fastest road a route may use, mph; 0 for any. Taken by the next
+    // request.
+    void set_max_mph(uint8_t mph) { max_mph_ = mph; }
 
     // A request for the mailbox, once. Call only when the mailbox is free.
     bool take_request(Request& out);
@@ -76,8 +74,10 @@ public:
 
     Phase      phase() const { return phase_; }
     Status     status() const { return status_; }
-    FastChoice fast_choice() const { return choice_; }
     bool       avoid_dirt() const { return avoid_dirt_; }
+    uint8_t    max_mph() const { return max_mph_; }
+    // The speed limit as variant flags, 0 for none.
+    uint32_t   limit() const { return limit_flags(max_mph_); }
     // Whether the live route should be shown and followed at all.
     bool       following() const;
     Point      destination() const { return dest_; }
@@ -90,8 +90,9 @@ private:
     Follower follower_;
     Phase    phase_ = Phase::NoMap;
     Status   status_ = Status::Ok;
-    FastChoice choice_ = FastChoice::Unasked;
     bool     avoid_dirt_ = false;
+    uint8_t  max_mph_ = 0;
+    bool     lifted_ = false;       // the rider lifted the limit for this destination
     Point    dest_{};
     Point    here_{};
     Request  req_{};
@@ -99,7 +100,7 @@ private:
     bool     in_flight_ = false;    // posted, not yet answered
     bool     have_route_ = false;   // a route has been adopted for this destination
     bool     want_reroute_ = false; // off the route long enough; asks once the gap allows
-    bool     fast_detour_ = false;  // avoiding 65 mph roads but on one: this route may use them
+    bool     detour_ = false;       // under a limit but on a road over it: this route may use them
     uint32_t last_request_ms_ = 0;
     uint32_t arrived_ms_ = 0;
     uint32_t now_ms_ = 0;

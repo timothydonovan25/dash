@@ -8,6 +8,10 @@ namespace {
 const char* const kUnitOptions[] = {"Imperial", "Metric"};
 const char* const kSpeedoOptions[] = {"Wheels", "Fused"};
 const char* const kPaletteOptions[] = {"Standard", "Contrast"};
+// In kNavLimitMph's order (config.hpp).
+const char* const kNavLimitOptions[] = {"Off", "50 mph", "55 mph", "60 mph", "65 mph", "70 mph", "75 mph"};
+static_assert(sizeof(kNavLimitOptions) / sizeof(kNavLimitOptions[0]) == kNavLimitCount,
+              "a label per kNavLimitMph entry");
 // In kFrameRateHz's order (config.hpp).
 const char* const kFrameRateOptions[] = {"10 Hz", "20 Hz", "30 Hz", "60 Hz", "120 Hz", "Unlimited"};
 static_assert(sizeof(kFrameRateOptions) / sizeof(kFrameRateOptions[0]) == kFrameRateCount,
@@ -178,8 +182,11 @@ const ConfigItem kItems[] = {
     boolean(0x0F01,"Watch HR",  "Heart rate", FIELD(hr_on)),
     num   (0x0F02, "Max HR",    "Heart rate", Kind::Int, 120, 230, 1, "bpm", FIELD(hr_max_bpm)),
 
-    // Routing (core::route, docs/navigation.md): keep routes off dirt.
+    // Routing (core::route, docs/navigation.md): keep routes off dirt, and
+    // off roads posted over the speed limit.
     boolean(kKeyNavAvoidDirt,"Avoid dirt", "Nav", FIELD(nav_avoid_dirt)),
+    choice(kKeyNavSpeedLimit, "Speed limit", "Nav", FIELD(nav_speed_limit),
+           kNavLimitOptions, kNavLimitCount),
 
     // SD card. Eject flushes the log and unmounts, so the card can come out
     // without a write in flight. Nothing remounts it until it has been

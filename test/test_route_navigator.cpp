@@ -11,7 +11,7 @@ constexpr int32_t kLat100m = 8993;
 
 RouteStorage<32, 4> mem;
 
-// 1 km due east; `fast` puts all of it on a 65 mph road.
+// 1 km due east; `fast` puts all of it on a road judged 65 mph.
 Route line(bool fast, uint32_t vflags = 0) {
     Route r = mem.make();
     for (int i = 0; i <= 10; ++i) {
@@ -20,12 +20,11 @@ Route line(bool fast, uint32_t vflags = 0) {
         p.p = Point{kLat0, kLon0 + i * kLon100m};
         p.dist_dm = uint32_t(i * 1000);
         p.time_ds = uint32_t(i * 100);
-        p.flags = fast ? kAttrFast : 0;
+        p.cap_mph = fast ? 65 : 0;
     }
     r.cues[r.n_cues++] = Cue{10, 10000, 0, 0, CueKind::Arrive, 0};
     r.total_dm = 10000;
     r.total_ds = 1000;
-    r.fast_dm = fast ? 10000 : 0;
     r.variant_flags = vflags;
     return r;
 }
@@ -78,82 +77,100 @@ int main() {
         CHECK(q.variant_flags == kNoDirt);
     }
 
-    CASE("a 65 mph route asks; avoid routes again without them");
+    CASE("the speed limit picks the graph: 55 and 65, with dirt too");
     {
         Navigator n;
         n.set_map(true);
-        n.start(kDest, east(0), true);
         Request q;
+        n.set_max_mph(55);
+        n.start(kDest, east(0), true);
         n.take_request(q);
-        const Route fast = line(true);
-        CHECK(n.answered(Status::Ok, fast, 100));   // followed while the rider decides
-        CHECK(n.phase() == Phase::AskFast);
-        CHECK(n.following());
-        n.tick(&fast, east(50), true, 200);
-        n.avoid_fast();
-        CHECK(n.phase() == Phase::Routing);
-        CHECK(n.fast_choice() == FastChoice::Avoid);
-        CHECK(n.take_request(q));
-        CHECK(q.variant_flags == kNoFast);
-        CHECK(q.from.lon_e7 == east(50).lon_e7);    // from where the bike is now
-        CHECK(n.answered(Status::Ok, line(false, kNoFast), 300));
-        CHECK(n.phase() == Phase::Guiding);
+        CHECK(q.variant_flags == limit_flags(55));
+        n.set_max_mph(65);
+        n.set_avoid_dirt(true);
+        n.start(kDest, east(0), true);
+        n.take_request(q);
+        CHECK(q.variant_flags == (limit_flags(65) | kNoDirt));
+        n.set_max_mph(0);
+        n.set_avoid_dirt(false);
+        n.start(kDest, east(0), true);
+        n.take_request(q);
+        CHECK(q.variant_flags == 0);
+        CHECK(limit_mph(limit_flags(55)) == 55 && limit_flags(0) == 0);
     }
 
-    CASE("keep: guiding on the fast route, and it is not asked again on a reroute");
+    CASE("a route under the limit is followed at once: nothing is asked");
     {
         Navigator n;
         n.set_map(true);
+        n.set_max_mph(55);
         n.start(kDest, east(0), true);
         Request q;
         n.take_request(q);
-        const Route fast = line(true);
-        n.answered(Status::Ok, fast, 0);
-        n.keep_fast();
+        CHECK(n.answered(Status::Ok, line(false, limit_flags(55)), 100));
         CHECK(n.phase() == Phase::Guiding);
-        CHECK(n.fast_choice() == FastChoice::Keep);
-        // 100 m off the line for 5 s: a reroute, on the full graph.
+        // A reroute keeps the limit.
+        const Route r = line(false, limit_flags(55));
         uint32_t t = 0;
-        for (; t <= 20000 && n.phase() == Phase::Guiding; t += 1000) n.tick(&fast, east(300, 100), true, t);
+        for (; t <= 20000 && n.phase() == Phase::Guiding; t += 1000) n.tick(&r, east(300, 100), true, t);
         CHECK(n.phase() == Phase::Rerouting);
         CHECK(n.take_request(q));
-        CHECK(q.variant_flags == 0);
-        CHECK(n.answered(Status::Ok, fast, t));
-        CHECK(n.phase() == Phase::Guiding);         // not AskFast: the rider said keep
+        CHECK(q.variant_flags == limit_flags(55));
     }
 
-    CASE("nothing connects without 65 mph roads: told, and may keep them");
+    CASE("nothing connects under the limit: told, and may route at any speed");
     {
         Navigator n;
         n.set_map(true);
+        n.set_max_mph(55);
         n.start(kDest, east(0), true);
         Request q;
-        n.take_request(q);
-        n.answered(Status::Ok, line(true), 0);
-        n.avoid_fast();
         n.take_request(q);
         RouteStorage<2, 2> e;
         Route none = e.make();
-        none.variant_flags = kNoFast;
         CHECK(!n.answered(Status::NoRoute, none, 10));
         CHECK(n.phase() == Phase::NoSlowRoute);
-        n.keep_fast();
+        CHECK(!n.following());
+        n.any_speed();
         CHECK(n.phase() == Phase::Routing);
         CHECK(n.take_request(q));
         CHECK(q.variant_flags == 0);
+        CHECK(n.answered(Status::Ok, line(true), 20));
+        CHECK(n.phase() == Phase::Guiding);
+        // Lifted for this destination's reroutes too.
+        const Route r = line(true);
+        uint32_t t = 0;
+        for (; t <= 20000 && n.phase() == Phase::Guiding; t += 1000) n.tick(&r, east(300, 100), true, t);
+        CHECK(n.take_request(q));
+        CHECK(q.variant_flags == 0);
+        // A new destination puts it back.
+        n.start(kDest, east(0), true);
+        n.take_request(q);
+        CHECK(q.variant_flags == limit_flags(55));
     }
 
-    CASE("avoiding 65 mph but on one: routed along it, then the slow way once off it");
+    CASE("no route at all with no limit set is Failed, not NoSlowRoute");
     {
         Navigator n;
         n.set_map(true);
         n.start(kDest, east(0), true);
         Request q;
         n.take_request(q);
-        n.answered(Status::Ok, line(true), 0);
-        n.avoid_fast();
+        RouteStorage<2, 2> e;
+        Route none = e.make();
+        CHECK(!n.answered(Status::NoRoute, none, 10));
+        CHECK(n.phase() == Phase::Failed);
+    }
+
+    CASE("under 55 but on a faster road: routed along it, then under the limit once off it");
+    {
+        Navigator n;
+        n.set_map(true);
+        n.set_max_mph(55);
+        n.start(kDest, east(0), true);
+        Request q;
         n.take_request(q);
-        const Route slow = line(false, kNoFast);
+        const Route slow = line(false, limit_flags(55));
         n.answered(Status::Ok, slow, 10);
         CHECK(n.phase() == Phase::Guiding);
         // Off onto the highway, out of reach of any slow road.
@@ -162,24 +179,38 @@ int main() {
             n.tick(&slow, east(300, 100), true, t);
         CHECK(n.phase() == Phase::Rerouting);
         CHECK(n.take_request(q));
-        CHECK(q.variant_flags == kNoFast);
+        CHECK(q.variant_flags == limit_flags(55));
         CHECK(!n.answered(Status::NoStart, slow, t));
         CHECK(n.phase() == Phase::Rerouting);       // straight away, not after the gap
         CHECK(n.take_request(q));
-        CHECK(q.variant_flags == 0);                // this once, 65 mph roads allowed
+        CHECK(q.variant_flags == 0);                // this once, no limit
         // The detour: on the highway for 500 m, then off it.
         Route detour = line(true);
-        for (uint32_t i = 5; i < detour.n_pts; ++i) detour.pts[i].flags = 0;
+        for (uint32_t i = 5; i < detour.n_pts; ++i) detour.pts[i].cap_mph = 0;
         CHECK(n.answered(Status::Ok, detour, t));
-        CHECK(n.phase() == Phase::Guiding);         // not asked again
-        CHECK(n.fast_choice() == FastChoice::Avoid);
+        CHECK(n.phase() == Phase::Guiding);
         n.tick(&detour, east(200), true, t += 1000);
         CHECK(n.phase() == Phase::Guiding);         // still on it
         CHECK(!n.take_request(q));
         n.tick(&detour, east(700), true, t += 1000);
-        CHECK(n.phase() == Phase::Rerouting);       // off it: avoiding again
+        CHECK(n.phase() == Phase::Rerouting);       // off it: under the limit again
         CHECK(n.take_request(q));
-        CHECK(q.variant_flags == kNoFast);
+        CHECK(q.variant_flags == limit_flags(55));
+    }
+
+    CASE("a road over 55 but not 65 is no detour under a 65 limit");
+    {
+        Navigator n;
+        n.set_map(true);
+        n.set_max_mph(65);
+        n.start(kDest, east(0), true);
+        Request q;
+        n.take_request(q);
+        const Route r = line(true, limit_flags(65));          // judged 65: not over 65
+        n.answered(Status::Ok, r, 0);
+        n.tick(&r, east(200), true, 1000);
+        CHECK(n.phase() == Phase::Guiding);
+        CHECK(!n.take_request(q));
     }
 
     CASE("a failed reroute keeps the old route and tries again after the gap");

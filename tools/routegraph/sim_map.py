@@ -5,7 +5,7 @@ CRUISE -> NAV has a map in the sim (docs/navigation.md).
     python3 tools/routegraph/sim_map.py build-host/rgf_build [sim_card]
 
 Writes sim_card/route/map.rgf (a 9 x 9 grid of streets 200 m apart, one
-divided highway along the south edge so the 65 mph question comes up, a
+divided highway along the south edge for the 55 mph limit to leave out, a
 dirt track on the diagonal), sim_card/route/search.idx (its streets with
 house numbers 100 a block, the town "Simtown", two places) and
 sim_card/route/destinations.csv. No OSM
@@ -58,12 +58,13 @@ def main():
             if r == 0:
                 road(nid(r, c), nid(r, c + 1), "trunk", "M-59")          # untagged divided highway
             else:
-                road(nid(r, c), nid(r, c + 1), "residential", f"{streets[r]} St")
+                road(nid(r, c), nid(r, c + 1), "residential", f"{streets[r]} St", mph=25)
     for c in range(N):
         for r in range(N - 1):
             ow = F_ONEWAY if c == 4 else 0                               # Main St runs north only
+            # Posted limits, so the dash has one to show (and change at a turn).
             road(nid(r, c), nid(r + 1, c), "tertiary" if c == 4 else "residential",
-                 "Main St" if c == 4 else f"{c + 1}th Ave", ow)
+                 "Main St" if c == 4 else f"{c + 1}th Ave", ow, 35 if c == 4 else 30)
     for k in range(N - 1):
         road(nid(k, k), nid(k + 1, k + 1), "track", "Gravel Rd", F_DIRT)
     pois = [(nodes[nid(2, 6)][0], nodes[nid(2, 6)][1], 1, name("Speedway")),
