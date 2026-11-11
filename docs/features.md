@@ -904,7 +904,7 @@ response): check the C6's antenna. The watch has run on the demo.
 - **Priority demotion.** ESP-Hosted makes its SDIO/RPC tasks at priority 23
   with no core affinity, and `ble` lowers them to 8 by name.
 - The bond store writes flash only when the bike is still (§28).
-- The Android companion app is in `~/phone`, not in this repo.
+- The Android companion apps are in `~/phone/media-player` and `~/phone/backpack`, not in this repo.
 - **An iPhone needs no app** (1.59, `radio-and-updates.md` §11.1.1). Once it is let
   in, `ble` finds its AMS and ANCS and subscribes: what is playing, the
   transport keys (as AMS remote commands), and calls, missed calls and

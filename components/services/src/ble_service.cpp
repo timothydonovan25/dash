@@ -1661,6 +1661,15 @@ void ble_task(void* arg) {
                         diag_dirty = true;
                         break;
                     }
+                    core::nav::InputEvent press;
+                    if (core::media::parse_button(e.data, e.len, press)) {
+                        // The pod's stand-in (`B`): into the same queue the pod and console post to.
+                        services::post_input_event(press);
+                        diag.last_tag = 'B';
+                        diag_dirty = true;
+                        d.health->report_ok(Dev::Phone, now);
+                        break;
+                    }
                     core::route::Dest go;
                     if (core::route::parse_go(reinterpret_cast<const char*>(e.data), e.len, go)) {
                         // A destination typed on the phone (`G`): `logic` routes.

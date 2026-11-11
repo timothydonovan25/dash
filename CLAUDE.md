@@ -48,7 +48,7 @@ firmware: `firmware.txt` (2.0, `fps-counter`).
 | Superseded: S3 board, S3 respin, platform choice, first K-line adapter; `panel_test/` (an S3 panel test) | `docs/history/` — reasoning only, not current facts |
 | Choosing a sunlight-readable panel; enclosure rules (ASA, no fan, gaskets, isolators) | `docs/history/p4-platform-selection.md` §4, §7 (the one live part of it) |
 
-The Android companion app is **not in this repo**: it is `~/phone`, its own
+The Android companion apps are **not in this repo**: `~/phone/media-player` (the XP3900 player) and `~/phone/backpack` (an S26: the link without the player, plus the pod over `B`), each its own
 Gradle/Kotlin tree. The only thing shared is the §11.1 GATT contract in
 `docs/radio-and-updates.md`, which stays here.
 

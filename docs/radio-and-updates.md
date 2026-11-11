@@ -75,6 +75,7 @@ S 1
 | `N` | Notification | `N<kind> <who>` 0x1F `<text>`, one write — see below |
 | `K` | sos acKnowledge | `K <id> <code>`: the answer to Ctrl's `X` — see below |
 | `G` | Go to | `G <lat> <lon> [name]`: a destination for NAV — see below |
+| `B` | Button | `B A`..`B E` a short pod press, `B a`..`B e` a long one — see below |
 
 Rules the firmware side depends on:
 
@@ -150,6 +151,16 @@ Rules the firmware side depends on:
   Nothing comes back on Ctrl. The app sends it from Settings → "Send a
   destination to the dash" (`NavProto.kt`), geocoding with Android's
   `Geocoder` or taking "lat, lon" typed in.
+
+- **`B` is the pod, from the phone** (2.16), for a dash whose pod cable or
+  expander has died. One write is one press, already decoded: upper case
+  short, lower case long (`core::media::parse_button`), posted with
+  `post_input_event` into the queue the pod and the USB console's `btn`/`long`
+  use. Nothing is held, so a lost write loses a press and never invents a
+  long one; there is no `hold` mask and so no Doom. Feed is encrypted-only,
+  so only the bonded phone can press. The phone refuses a press while it is
+  not linked rather than queueing it. Sent by the backpack app
+  (`~/phone/backpack`, a touchscreen phone carried in a backpack).
 
 `Media.src` records which path fed the data: `kSrcPhone` for the feed,
 `kSrcAms` for an iPhone (§11.1.1).

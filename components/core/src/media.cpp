@@ -148,6 +148,17 @@ bool ringing(const state::Notify& n, uint32_t now_ms) {
     return n.ringing && static_cast<int32_t>(now_ms - n.at_ms) < static_cast<int32_t>(kRingTimeoutMs);
 }
 
+bool parse_button(const uint8_t* data, size_t len, nav::InputEvent& e) {
+    // A trailing newline is allowed, as on every Feed line.
+    if (len == 4 && data[3] == '\n') len = 3;
+    if (len != 3 || data[0] != 'B' || data[1] != ' ') return false;
+    const uint8_t c = data[2];
+    if (c >= 'A' && c <= 'E') e = {static_cast<nav::Button>(c - 'A'), nav::Press::Short};
+    else if (c >= 'a' && c <= 'e') e = {static_cast<nav::Button>(c - 'a'), nav::Press::Long};
+    else return false;
+    return true;
+}
+
 size_t ctrl_line(uint8_t cmd, uint8_t out[3]) {
     if (cmd > 2) return 0;
     out[0] = 'C';

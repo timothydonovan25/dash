@@ -10,6 +10,7 @@
 // boundary, so a long title never leaves half a multibyte character for the
 // font to draw as garbage.
 #pragma once
+#include "core/nav/nav.hpp"
 #include "core/state/vehicle.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -48,6 +49,12 @@ char apply_line(state::Media& m, const uint8_t* data, size_t len,
 // untouched otherwise. Separate from apply_line() because a notification is
 // not media: it lives in its own slot and survives a new song.
 bool apply_notify(state::Notify& n, const uint8_t* data, size_t len, uint32_t now_ms);
+
+// §11.1 tag `B`: a pod button pressed on the phone, for a dash whose pod is
+// gone. `B A`..`B E` a short press, `B a`..`B e` a long one; already decoded,
+// so a dropped write loses one press and never holds a button down.
+// Returns false, `e` untouched, for anything else.
+bool parse_button(const uint8_t* data, size_t len, nav::InputEvent& e);
 
 // A call stops ringing when the phone says so, or after this long without
 // hearing: a phone that drops out mid-ring must not ring on the dash forever.

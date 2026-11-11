@@ -224,5 +224,23 @@ int main() {
         CHECK(core::media::kMaxNotifyLine == 3 + 31 + 1 + 95);
     }
 
+    CASE("B: a pod button from the phone");
+    {
+        core::nav::InputEvent e{core::nav::Button::A, core::nav::Press::Short};
+        const auto put = [&](const char* s) {
+            return core::media::parse_button(reinterpret_cast<const uint8_t*>(s), std::strlen(s), e);
+        };
+        CHECK(put("B C"));
+        CHECK(e.button == core::nav::Button::C && e.press == core::nav::Press::Short);
+        CHECK(put("B e\n"));
+        CHECK(e.button == core::nav::Button::E && e.press == core::nav::Press::Long);
+        CHECK(!put("B F"));
+        CHECK(!put("B"));
+        CHECK(!put("B AA"));
+        CHECK(!put("BA"));
+        CHECK(!put("T B A"));
+        CHECK(e.button == core::nav::Button::E);   // a refused line leaves it alone
+    }
+
     return check::report("media");
 }
