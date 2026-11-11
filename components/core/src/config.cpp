@@ -85,6 +85,7 @@ const ConfigItem kItems[] = {
     boolean(0x0107,"Popups",       "Display", FIELD(popups)),
     boolean(0x0108,"12h clock",    "Display", FIELD(clock_12h)),
     choice(0x0109, "Palette",      "Display", FIELD(palette), kPaletteOptions, 2),
+    boolean(0x010A,"Demo mode",    "Display", FIELD(demo_mode)),
 
     // Start-up sweep. Its own submenu so it is easy to find and turn off.
     boolean(0x0B01,"Gauge sweep",  "Startup", FIELD(gauge_sweep)),

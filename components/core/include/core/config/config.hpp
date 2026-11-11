@@ -58,6 +58,9 @@ struct Settings {
     // performance run ends (core::stunt, core::perf). Notifications have
     // their own switch, under Phone.
     bool    popups         = true;
+    // Demo mode: the dash waved around on a table or a stand. The perf
+    // timers and the stunt scorer are not run, so a tilt is not a wheelie.
+    bool    demo_mode      = false;
     // CONFIG -> Diag -> FPS counter: the render rate, small, in the top-left
     // corner of every screen. For bring-up and tuning; off by default.
     bool    show_fps       = false;

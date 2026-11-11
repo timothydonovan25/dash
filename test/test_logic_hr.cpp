@@ -119,5 +119,17 @@ int main() {
         CHECK(b.slots.hr_recovery.get().count == 0);
     }
 
+    CASE("demo mode: a standing start times nothing");
+    {
+        for (bool demo : {false, true}) {
+            Bike b;
+            b.settings.demo_mode = demo;
+            b.run(3000, 0.0f, false, 1500.0f, 0);              // stopped: armed
+            for (float mph = 1.0f; mph <= 40.0f; mph += 1.0f)  // ~8 mph/s
+                b.run(120, mph, false, 6000.0f, 0);
+            CHECK((b.slots.perf.get().seq != 0) == !demo);
+        }
+    }
+
     return check::report("logic_hr");
 }

@@ -1349,7 +1349,9 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // --- performance timers ---------------------------------------------
     // Every pass: a threshold is interpolated between passes, so more of
     // them is finer timing, and the fused speed is fresh on each one.
-    {
+    // Demo mode: not run, so the slot keeps its last result.
+    const bool demo = d.settings && d.settings->demo_mode;
+    if (!demo) {
         const bool metric = d.settings && d.settings->unit_system ==
                                               static_cast<uint8_t>(core::units::System::Metric);
         core::perf::Input pin;
@@ -1380,7 +1382,7 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
     // --- wheelies and stoppies -------------------------------------------
     // Scheduled passes only: points are an integral over time, and an event
     // pass would sample the same IMU reading again.
-    if (scheduled) {
+    if (scheduled && !demo) {
         core::stunt::Input sti;
         sti.t_ms = now;
         sti.pitch_deg = att.pitch_deg;
