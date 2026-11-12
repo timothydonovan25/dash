@@ -9,5 +9,5 @@
 # from which project built it: "bike" (the root) or "demo" (demo_p4/).
 # Every build is also copied to releases/ at the repo root, which keeps them
 # all; a rebuild of the same version on the same day replaces its file.
-version 2.19
-feature road label room
+version 2.20
+feature demo mode
