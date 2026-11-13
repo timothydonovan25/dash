@@ -181,7 +181,7 @@ int main() {
         // one cell per name.
         CHECK(contains(head, ",Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,"
                              "NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct,"
-                             "ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw\n"));
+                             "ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw,FrontPsi,RearPsi\n"));
         const auto commas = [](const char* p) {
             size_t c = 0;
             for (; *p && *p != '\n'; ++p) c += *p == ',';
@@ -193,7 +193,7 @@ int main() {
         r.fused_mph = 30.5f;
         r.alt_ft = 5280.4f;
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",5280,0,0,0.00,0,0.00,0,0,0,0,0,0,0\n"));     // whole feet, no HR, not routing
+        CHECK(contains(line, ",5280,0,0,0.00,0,0.00,0,0,0,0,0,0,0,0.0,0.0\n"));     // whole feet, no HR, not routing
         r.hr_bpm = 142;
         format_csv(line, sizeof line, r);
         CHECK(contains(line, ",5280,142,"));              // heart rate
@@ -201,19 +201,23 @@ int main() {
         r.nav_dest_mi = 12.345f;
         r.limit_mph = 45;
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",142,413,12.35,45,0.00,0,0,0,0,0,0,0\n"));    // routing
+        CHECK(contains(line, ",142,413,12.35,45,0.00,0,0,0,0,0,0,0,0.0,0.0\n"));    // routing
         r.vbat = 13.84f;
         r.shift_lamps = 6;
         r.slip_pct = -25;                     // a wheel locking
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",45,13.84,6,-25,0,0,0,0,0\n"));   // no ECU: its five read 0
+        CHECK(contains(line, ",45,13.84,6,-25,0,0,0,0,0,0.0,0.0\n"));   // no ECU: its five read 0
         r.tps_pct = 67;
         r.map_kpa = 93;
         r.engine_f = 203;
         r.intake_f = -4;                      // a cold morning
         r.inj_raw = 4618;
         format_csv(line, sizeof line, r);
-        CHECK(contains(line, ",45,13.84,6,-25,67,93,203,-4,4618\n"));   // volts, lamps, slip, ECU: last
+        CHECK(contains(line, ",45,13.84,6,-25,67,93,203,-4,4618,0.0,0.0\n"));   // volts, lamps, slip, ECU
+        r.front_psi = 14.04f;
+        r.rear_psi = 0.0f;                    // no sensor heard
+        format_csv(line, sizeof line, r);
+        CHECK(contains(line, ",4618,14.0,0.0\n"));   // tyres: last
         CHECK(contains(line, ",31.25,"));
         CHECK(contains(line, ",45296.12,"));
         CHECK(contains(line, ",30.50,"));

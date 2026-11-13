@@ -281,6 +281,10 @@ bool take_input_event(core::nav::InputEvent& out);
 // Console `pod trace`: for this long `input` logs every raw pod change,
 // every decoded press and, once a second, its reads and failed reads.
 void trace_pod(uint32_t ms);
+// Console `tpms sniff [dBm]`: for this long `ble` scans and logs every
+// advert heard at `floor_dbm` or nearer (-70: a sensor held by the dash),
+// as hex, and what core::tpms made of it.
+void sniff_tpms(uint32_t ms, int8_t floor_dbm);
 // Console `hold <mask>`: buttons held on the laptop (tools/pod_keys.py),
 // bit 0 = A. `input` ORs them into the pod's before debounce, so they are
 // decoded, and reach Doom, exactly as the pod's would. A mask not repeated

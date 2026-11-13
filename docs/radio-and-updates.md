@@ -12,7 +12,7 @@ below (§4, §9.3, §10.1, §13 …) refers to `system-architecture.md`.
 |---|---|
 | 11.1 | No Bluetooth Classic; the Dash Media GATT contract (Feed tags, rules) shared with the Android app |
 | 11.1.1 | An iPhone: AMS and ANCS, no app |
-| 11.2 | TPMS (not written) |
+| 11.2 | TPMS (written; decoders unproven) |
 | 11.3 | Radio roles (phone, watch, observer), the NimBLE timer bug, which phone gets in |
 | 11.4 | Task and core placement: NimBLE on core 1, ESP-Hosted demoted |
 | 11.5–11.6 | The `Media`/`Tpms` state, where it shows |
@@ -211,6 +211,11 @@ Android app's service-UUID scan still finds it.
 DIAG → Radio's Ctrl row shows `AMS + ANCS` for an iPhone that is live.
 
 ### 11.2 TPMS
+
+**As built** (features §24.4): `core/tpms` holds the decoders and the
+two-wheel `Tracker` with its learn; `ble`'s `TpmsLink` scans, publishes the
+`tpms` slot and posts a learned ID as a ConfigSet. The sketch below is the
+design it came from. An ID is 24 bits, since a ConfigSet's value is a float.
 
 BLE TPMS sensors are almost all **advertising-only beacons**. They never
 connect. They put pressure, temperature, battery, and an ID into the

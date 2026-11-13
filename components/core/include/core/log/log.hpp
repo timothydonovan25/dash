@@ -90,6 +90,11 @@ struct Record {
     int16_t  engine_f    = 0;
     int16_t  intake_f    = 0;
     uint16_t inj_raw     = 0;
+
+    // Tyre pressures from the TPMS sensors (core/tpms), psi; 0 for a wheel
+    // with no sensor bound or none heard lately.
+    float    front_psi   = 0.0f;
+    float    rear_psi    = 0.0f;
 };
 
 enum Flags : uint16_t {

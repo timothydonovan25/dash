@@ -165,6 +165,15 @@ void handle(const char* line, ui::ICommandSink& commands, const services::Deps& 
         }
         return;
     }
+    // `tpms sniff [dBm]`: -70 by default; -100 for everything, or a C6
+    // without its antenna, which hears everything weak.
+    if (std::strncmp(line, "tpms sniff", 10) == 0 && (line[10] == '\0' || line[10] == ' ')) {
+        const long dbm = line[10] ? std::strtol(line + 11, nullptr, 10) : -70;
+        const int8_t floor_dbm = static_cast<int8_t>(dbm < -127 ? -127 : dbm > 0 ? 0 : dbm);
+        ESP_LOGI(kTag, "sniffing BLE adverts at %d dBm or nearer for 60 s", floor_dbm);
+        services::sniff_tpms(60000, floor_dbm);
+        return;
+    }
     if (std::strcmp(line, "pod trace") == 0) {
         ESP_LOGI(kTag, "tracing the pod for 30 s");
         services::trace_pod(30000);

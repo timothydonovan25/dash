@@ -55,6 +55,8 @@ enum class CommandId : uint8_t {
     ServiceDone,      // CONFIG -> Service -> Mark done: the interval starts again
     OdoSet,           // f: miles. Console `odo`, the laptop only
     EngHoursSet,      // f: hours. Console `hours`
+    TpmsLearnFront,   // CONFIG -> TPMS: the next new sensor is the front's (core/tpms)
+    TpmsLearnRear,
 };
 
 struct Command {

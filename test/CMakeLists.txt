@@ -57,6 +57,7 @@ add_library(core STATIC
     ${CORE}/src/hr.cpp
     ${CORE}/src/crash.cpp
     ${CORE}/src/ecu.cpp
+    ${CORE}/src/tpms.cpp
     ${CORE}/src/route_graph.cpp
     ${CORE}/src/route_query.cpp
     ${CORE}/src/route_follow.cpp
@@ -95,7 +96,7 @@ add_library(hal STATIC ${HAL}/src/status.cpp)
 target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
-          attitude jump nmea input tach log detail delta gear gearcal c6 power media apple pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt hr crash ecu qr
+          attitude jump nmea input tach log detail delta gear gearcal c6 power media apple pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt hr crash ecu qr tpms
           route_follow route_navigator route_dest route_pace)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)

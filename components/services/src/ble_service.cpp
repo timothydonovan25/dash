@@ -25,9 +25,11 @@
 // sees it, and its bond (if it asks for one) is never stored: the store holds
 // phones, and core::ble counts them.
 //
-// Not here yet: the TPMS observer (§11.2). It waits on a sensor to sniff;
-// the decoders are a guess until then. The observer role is on (it came
-// with the central role, for the watch), but nothing scans for TPMS.
+// And an observer, for the TPMS sensors (§11.2, core/tpms): a passive scan
+// whenever a wheel has a sensor bound, a learn is open or the console's
+// `tpms sniff` runs. NimBLE runs one scan at a time, so while the watch
+// search scans, its adverts feed the TPMS decoder too, and the TPMS scan
+// waits for it. The decoders are a guess until a Wistek sensor is sniffed.
 //
 // One file-scope object, `g_ctx`, is the exception to rule 1 in this
 // component. NimBLE's sync and reset callbacks take no argument, so there is
@@ -41,6 +43,7 @@
 #include "core/media/apple.hpp"
 #include "core/crash/crash.hpp"
 #include "core/media/feed.hpp"
+#include "core/tpms/tpms.hpp"
 
 #include "esp_hosted.h"
 #include "esp_hosted_event.h"
@@ -202,6 +205,9 @@ struct Event {
         HrSvc, HrChr, HrDsc, HrSubscribed, HrEnc, HrData,
         // The iPhone's AMS and ANCS (AppleLink).
         AppleSvc, AppleChr, AppleDsc, AppleWrite, AppleData,
+        // A TPMS reading (data: a core::tpms::Reading), and for `tpms
+        // sniff` an advert as heard (data: its AD bytes, code: rssi).
+        TpmsAdv, TpmsSniff,
     };
     Kind     kind;
     uint8_t  len;       // Line: bytes in `data`
@@ -268,6 +274,18 @@ struct Ctx {
     ble_addr_t hr_seen[kHrSeen] = {};
     bool       hr_named[kHrSeen] = {};
     int        hr_seen_n = 0;
+
+    // TPMS (core/tpms). Until when the console's `tpms sniff` runs (0: not).
+    std::atomic<uint32_t> tpms_sniff_until{0};
+    std::atomic<int8_t>   tpms_sniff_floor{-70};   // dBm; quieter is not logged
+    // Each sensor and sniffed advertiser is passed on at most once a
+    // second: with the controller's duplicate filter off, a sensor heard
+    // five times a second would fill the queue the phone's lines share.
+    // Host task only.
+    static constexpr int kTpmsSeen = 8;
+    ble_addr_t tpms_addr[kTpmsSeen] = {};
+    uint32_t   tpms_ms[kTpmsSeen] = {};
+    int        tpms_next = 0;
 };
 Ctx g_ctx;
 
@@ -484,12 +502,63 @@ void hr_post(Event::Kind k, uint16_t conn, int32_t code, uint16_t h1 = 0, uint16
     post(e);
 }
 
+// Whether `addr` was passed on in the last second; if not, it is now.
+bool tpms_throttled(const ble_addr_t& addr, uint32_t now) {
+    for (int i = 0; i < Ctx::kTpmsSeen; ++i) {
+        if (ble_addr_cmp(&g_ctx.tpms_addr[i], &addr) != 0) continue;
+        if (now - g_ctx.tpms_ms[i] < 1000) return true;
+        g_ctx.tpms_ms[i] = now;
+        return false;
+    }
+    const int i = g_ctx.tpms_next;
+    g_ctx.tpms_next = (i + 1) % Ctx::kTpmsSeen;
+    g_ctx.tpms_addr[i] = addr;
+    g_ctx.tpms_ms[i] = now;
+    return false;
+}
+
+// Every advert any scan hears: a TPMS reading, or for `tpms sniff` a near one.
+void tpms_report(const ble_gap_disc_desc& dd) {
+    core::tpms::Reading r;
+    const bool decoded = core::tpms::decode(dd.data, dd.length_data, r);
+    const uint32_t until = g_ctx.tpms_sniff_until.load(std::memory_order_relaxed);
+    const uint32_t now = now_ms();
+    const bool sniff = until != 0 && static_cast<int32_t>(until - now) > 0 &&
+                       dd.rssi >= g_ctx.tpms_sniff_floor.load(std::memory_order_relaxed);
+    if (!decoded && !sniff) return;
+    if (tpms_throttled(dd.addr, now)) return;
+    Event e{};
+    e.code = dd.rssi;
+    e.peer.type = dd.addr.type;
+    std::memcpy(e.peer.addr, dd.addr.val, sizeof(e.peer.addr));
+    if (decoded) {
+        e.kind = Event::TpmsAdv;
+        static_assert(sizeof r <= sizeof e.data, "a reading fits an event");
+        std::memcpy(e.data, &r, sizeof r);
+        e.len = sizeof r;
+        post(e);
+    }
+    if (sniff) {
+        e.kind = Event::TpmsSniff;
+        const size_t n = dd.length_data < sizeof e.data ? dd.length_data : sizeof e.data;
+        std::memcpy(e.data, dd.data, n);
+        e.len = static_cast<uint8_t>(n);
+        post(e);
+    }
+}
+
+int tpms_disc_event(ble_gap_event* ev, void*) {
+    if (ev->type == BLE_GAP_EVENT_DISC) tpms_report(ev->disc);
+    return 0;
+}
+
 int hr_disc_event(ble_gap_event* ev, void*) {
     if (ev->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         hr_post(Event::HrScanDone, 0, ev->disc_complete.reason);
         return 0;
     }
     if (ev->type != BLE_GAP_EVENT_DISC) return 0;
+    tpms_report(ev->disc);   // the one scan running hears the sensors too
     g_ctx.scan_reports.fetch_add(1, std::memory_order_relaxed);
     const ble_gap_disc_desc& dd = ev->disc;
     const core::hr::Advert a = core::hr::parse_advert(dd.data, dd.length_data);
@@ -1163,6 +1232,9 @@ public:
         }
     }
 
+    // Wants the radio's one scan: looking for the watch, or about to.
+    bool searching() const { return step_ != Step::Off && step_ != Step::Live; }
+
     // With DIAG's once-a-second sample.
     void sample_rssi() {
         if (conn_ == BLE_HS_CONN_HANDLE_NONE) return;
@@ -1212,6 +1284,7 @@ private:
         heard_ = 0;
         ++scans_started_;
         g_ctx.hr_seen_n = 0;   // the host task reads it only during a scan
+        if (ble_gap_disc_active()) ble_gap_disc_cancel();   // the TPMS scan's
         ble_gap_disc_params p{};
         p.passive = 0;             // active: the name is often in the scan response
         // The C6's controller filters duplicates by address and never forgets
@@ -1571,6 +1644,132 @@ private:
     core::media::ancs::Tracker tracker_;
 };
 
+// The TPMS sensors (core/tpms), from this task's side: the scan, the learn,
+// the `tpms` slot and the two wheels' health. The decoding is core's.
+class TpmsLink {
+public:
+    explicit TpmsLink(Deps& d) : d_(d) {}
+
+    void publish_initial() { d_.slots->tpms.publish(tracker_.publish()); }
+
+    void on_event(const Event& e, uint32_t now) {
+        if (e.kind == Event::TpmsSniff) {
+            log_sniff(e);
+            return;
+        }
+        if (e.kind != Event::TpmsAdv || e.len != sizeof(core::tpms::Reading)) return;
+        core::tpms::Reading r;
+        std::memcpy(&r, e.data, sizeof r);
+        uint32_t ids[2];
+        bound(ids);
+        const bool was[2] = {tracker_.publish().front.valid, tracker_.publish().rear.valid};
+        const core::tpms::Tracker::Learned l = tracker_.on_reading(r, ids, now);
+        if (l.any) {
+            const bool front = l.wheel == core::tpms::Wheel::Front;
+            ESP_LOGI(kTag, "tpms: sensor %06" PRIX32 " learned as the %s (%.1f psi, %d dBm)",
+                     l.id, front ? "front" : "rear", static_cast<double>(r.psi),
+                     static_cast<int>(e.code));
+            // Settings' one writer is `logic`: the binding goes as an edit.
+            if (d_.commands) {
+                d_.commands->post(core::state::Command::config_set(
+                    front ? core::config::kKeyTpmsFrontId : core::config::kKeyTpmsRearId,
+                    static_cast<float>(l.id)));
+            }
+        }
+        const core::state::Tpms& t = tracker_.publish();
+        if (t.front.valid != was[0] || t.rear.valid != was[1]) {
+            ESP_LOGI(kTag, "tpms: front %s, rear %s", t.front.valid ? "live" : "--",
+                     t.rear.valid ? "live" : "--");
+        }
+        dirty_ = true;
+    }
+
+    void learn(core::tpms::Wheel w, uint32_t now) {
+        tracker_.learn(w, now);
+        ESP_LOGI(kTag, "tpms: learning the %s sensor for %u s",
+                 w == core::tpms::Wheel::Front ? "front" : "rear",
+                 static_cast<unsigned>(core::tpms::kLearnMs / 1000));
+    }
+
+    // Once a loop, after the watch's: it has the scan when it wants it.
+    void poll(bool synced, bool hr_searching, uint32_t now) {
+        uint32_t ids[2];
+        bound(ids);
+        if (tracker_.tick(ids, now)) dirty_ = true;
+        const uint32_t until = g_ctx.tpms_sniff_until.load(std::memory_order_relaxed);
+        const bool sniffing = until != 0 && static_cast<int32_t>(until - now) > 0;
+        const bool want = ids[0] || ids[1] || tracker_.learning() || sniffing;
+        if (synced && !hr_searching) {
+            const bool active = ble_gap_disc_active();
+            if (want && !active && static_cast<int32_t>(now - retry_ms_) >= 0) {
+                scan(now);
+            } else if (!want && active) {
+                ble_gap_disc_cancel();
+            }
+        }
+        if (dirty_) {
+            dirty_ = false;
+            const core::state::Tpms& t = tracker_.publish();
+            d_.slots->tpms.publish(t);
+            health(core::state::Dev::TpmsF, t.front.valid, now);
+            health(core::state::Dev::TpmsR, t.rear.valid, now);
+        }
+    }
+
+private:
+    void bound(uint32_t ids[2]) const {
+        ids[0] = d_.settings ? d_.settings->tpms_front_id : 0;
+        ids[1] = d_.settings ? d_.settings->tpms_rear_id : 0;
+    }
+
+    // Absent until a sensor is bound and heard; a bound one gone quiet is
+    // Absent again (parked, it sleeps), not a fault for keeper to retry.
+    void health(core::state::Dev dev, bool valid, uint32_t now) {
+        if (valid) d_.health->report_ok(dev, now);
+        else d_.health->set_absent(dev);
+    }
+
+    void scan(uint32_t now) {
+        ble_gap_disc_params p{};
+        p.passive = 1;              // the sensors' adverts carry it all
+        p.filter_duplicates = 0;    // the C6's filter never forgets (HrLink::scan)
+        p.itvl = 480;               // 300 ms, 0.625 ms units
+        p.window = 48;              // 30 ms: 10 %, the radio is the phone's too (§11.3)
+        const int rc = ble_gap_disc(g_ctx.own_addr_type, BLE_HS_FOREVER, &p,
+                                    tpms_disc_event, nullptr);
+        if (rc != 0 && rc != BLE_HS_EALREADY) {
+            ESP_LOGW(kTag, "tpms scan would not start: %d", rc);
+            retry_ms_ = now + 1000;
+        }
+    }
+
+    static void log_sniff(const Event& e) {
+        char hex[2 * sizeof e.data + 1];
+        size_t k = 0;
+        for (size_t i = 0; i < e.len; ++i) {
+            k += std::snprintf(hex + k, sizeof hex - k, "%02X", e.data[i]);
+        }
+        hex[k] = '\0';
+        core::tpms::Reading r;
+        const bool ok = core::tpms::decode(e.data, e.len, r);
+        // NimBLE keeps the address little-endian: printed as phones show it.
+        const uint8_t* a = e.peer.addr;
+        ESP_LOGI(kTag, "tpms sniff %02X:%02X:%02X:%02X:%02X:%02X %4d dBm  %s%s",
+                 a[5], a[4], a[3], a[2], a[1], a[0], static_cast<int>(e.code), hex,
+                 ok ? "  (decoded)" : "");
+        if (ok) {
+            ESP_LOGI(kTag, "tpms sniff   id %06" PRIX32 " %.1f psi %.1f C batt %u%% alarm %d",
+                     r.id, static_cast<double>(r.psi), static_cast<double>(r.temp_c),
+                     r.batt_pct, r.alarm ? 1 : 0);
+        }
+    }
+
+    Deps& d_;
+    core::tpms::Tracker tracker_;
+    uint32_t retry_ms_ = 0;
+    bool dirty_ = true;
+};
+
 void ble_task(void* arg) {
     using core::state::Dev;
     Deps& d = *static_cast<Deps*>(arg);
@@ -1622,6 +1821,8 @@ void ble_task(void* arg) {
     hr.publish_initial();
     // The iPhone's AMS and ANCS, off the stack for the same reason.
     static AppleLink apple;
+    static TpmsLink tpms(d);
+    tpms.publish_initial();
 
     d.slots->media.publish(media);
     d.slots->ble_diag.publish(diag);
@@ -1635,6 +1836,7 @@ void ble_task(void* arg) {
             wait = 0;   // drain whatever else arrived, then get on with it
             const uint32_t now = now_ms();
             hr.on_event(e, now);
+            tpms.on_event(e, now);
             AppleLink::Out out;
             apple.on_event(e, now, media, notify, out);
             if (out.tag) {
@@ -1884,6 +2086,12 @@ void ble_task(void* arg) {
                         dropping = true;
                     }
                     break;
+                case core::state::BleRequest::TpmsLearnFront:
+                    tpms.learn(core::tpms::Wheel::Front, now);
+                    break;
+                case core::state::BleRequest::TpmsLearnRear:
+                    tpms.learn(core::tpms::Wheel::Rear, now);
+                    break;
                 default:
                     break;
             }
@@ -2002,11 +2210,18 @@ void ble_task(void* arg) {
             diag_dirty = true;
         }
         hr.poll(synced, now);
+        tpms.poll(synced, hr.searching(), now);
         if (diag_dirty) d.slots->ble_diag.publish(diag);
     }
 }
 
 }  // namespace
+
+void sniff_tpms(uint32_t ms, int8_t floor_dbm) {
+    g_ctx.tpms_sniff_floor.store(floor_dbm, std::memory_order_relaxed);
+    const uint32_t until = now_ms() + ms;
+    g_ctx.tpms_sniff_until.store(until ? until : 1, std::memory_order_relaxed);
+}
 
 void start_ble(Deps& d) {
     g_ctx.q = xQueueCreate(16, sizeof(Event));

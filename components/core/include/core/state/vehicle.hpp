@@ -420,7 +420,7 @@ struct MediaCtrl {
 // CONFIG's phone actions, handed from `logic` to `ble` the same way as
 // MediaCtrl: not display data, and the generation says it is a new request.
 struct BleRequest {
-    enum Op : uint8_t { None = 0, ForgetPhone, PairingMode };
+    enum Op : uint8_t { None = 0, ForgetPhone, PairingMode, TpmsLearnFront, TpmsLearnRear };
     uint8_t op = None;
 };
 

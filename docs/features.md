@@ -36,6 +36,7 @@ how a rider reaches it. Paths are relative to the repo root.
 | `core/input` | 3 | `core/track` | 7.5 |
 | `core/jump` | 14.2 | `core/trip`, `core/units` | 17 |
 | `core/waypoint` | 18 | `core/wifi` | 25 |
+| `core/tpms` (BLE TPMS) | 24.4 | | |
 | `core/route`, `services/route_store` | 6.5, 18 | `tools/routegraph` | 18 |
 | `ui/` widgets, `Shadow`, fonts | 4 | `ui::Toast` | 11.2 |
 | `components/doom` | 31.1 | `sim/` | 29 |
@@ -817,7 +818,7 @@ VIN sense tells them apart, and `ctrl` caps lamp duty on USB.
 ### 23.1 Ride log, the blackbox (`core/log/`)
 - **CSV, with columns named for RaceRender**, so one file is both the
   blackbox and a video overlay source:
-  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct,ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw`
+  `Time,Latitude,Longitude,MPH,RPM,X,Y,Lap,Heading,Gear,Lean,Pitch,GVert,LapTime,Sats,Flags,FrontMPH,RearMPH,GpsMPH,HDOP,GpsUtc,FusedMPH,FusedSigma,AltFt,HR,NavTurnFt,NavDestMi,LimitMPH,Volts,ShiftLamps,SlipPct,ThrottlePct,MapKpa,EngineTempF,IntakeTempF,InjRaw,FrontPsi,RearPsi`
   (`core/src/log.cpp`). `Time` is in seconds, X is longitudinal g and Y is
   lateral g. `Volts` is the battery (0: no reading), `ShiftLamps` how many
   lamps are lit (0–8), `SlipPct` wheel slip against road speed: + the rear
@@ -1001,6 +1002,32 @@ real crash or a real ride.
 - The phone texts only once per SOS (its id, for 10 min: the dash's ids
   restart at power-on) and answers the resends. A text that failed (no
   signal) is tried again on the next resend.
+
+### 24.4 Tyre pressure, BLE TPMS (`core/tpms`, after 2.20)
+
+**Written, not run on the board, and no sensor has been sniffed.** BLE TPMS
+sensors only advertise: pressure, temperature, battery and an ID in the
+manufacturer data. `ble` runs a passive scan (300 ms / 30 ms, duplicate
+filter off) whenever a wheel has a sensor bound, a learn is open, or
+`tpms sniff` runs. The watch search has the radio's one scan when it wants
+it, and the sensors are decoded from its adverts meanwhile.
+
+- **Decoders** (`core::tpms::decode`): one family so far, company ID 0x0100
+  (the `TPMSII` app's sensors): 18 bytes, pressure in Pa, temperature in
+  0.01 °C, battery %, alarm. **Whether the Wistek sensors use it is not
+  known.** A new layout is one function and one test in `core/tpms`.
+- **CONFIG → TPMS**: **Front ID** / **Rear ID** (24-bit, 0 none) and
+  **Learn front** / **Learn rear**. A learn takes the next decoded sensor in
+  60 s that is not the other wheel's, so fit or pump up one wheel's sensor
+  at a time. `ble` posts the ID as a ConfigSet; `logic` stays Settings'
+  writer.
+- **Shows** on STAT (pressure per wheel, `--` without a reading) and DIAG →
+  Sensors (TPMS front/rear Ok when heard, Absent otherwise). A wheel goes
+  `--` 10 min after its last reading (a parked sensor sleeps).
+- **Logs** `FrontPsi`, `RearPsi` (blackbox, last columns; 0 without a
+  reading).
+- **Console `tpms sniff`**: 60 s of every advert at -70 dBm or nearer, as
+  hex, with what the decoder made of it. Hold a sensor by the dash.
 
 ---
 
@@ -1230,8 +1257,6 @@ ninth row, `doom::Program` (a `ui::IProgram`), over doomgeneric
 - **A wire to the ECU.** The board has no CAN transceiver and no spare
   pins. ECU data comes by radio from a separate adapter (§35), and without
   one its fields render `--`.
-- **TPMS.** The observer scan waits on capturing a real sensor. The phone
-  half is written.
 - **USB mass storage.** The ownership seam exists, and the TinyUSB half is
   not written. It must unmount the card first or the FAT is corrupted.
 - **A tuned lap delta.** The matcher is a placeholder (§7.3).

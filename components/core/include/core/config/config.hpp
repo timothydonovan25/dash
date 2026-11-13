@@ -94,6 +94,11 @@ struct Settings {
     // fitted, the radio is BLE's alone.
     bool  ecu_on = false;
 
+    // The BLE TPMS sensors (core/tpms) bound to each wheel, 0 for none.
+    // CONFIG -> TPMS -> Learn sets them; `ble` posts the ConfigSet.
+    uint32_t tpms_front_id = 0;
+    uint32_t tpms_rear_id  = 0;
+
     // CRUISE -> NAV (core::route): routes keep off dirt roads (tracks and
     // unpaved surfaces). Switched from NAV's picker as well as here.
     bool     nav_avoid_dirt = false;
@@ -258,6 +263,9 @@ bool nudge(Settings& s, const ConfigItem& it, int direction);
 // IMU's calibration writes the mount offset through logic like any edit.
 inline constexpr uint16_t kKeyImuRollOffset  = 0x0601;
 inline constexpr uint16_t kKeyImuPitchOffset = 0x0602;
+// ... and `ble`'s TPMS learn writes the sensor it heard (core/tpms).
+inline constexpr uint16_t kKeyTpmsFrontId = 0x1401;
+inline constexpr uint16_t kKeyTpmsRearId  = 0x1402;
 
 // The value as the config screen draws it: "80 %", "Metric", "On".
 size_t format(const Settings& s, const ConfigItem& it, char* buf, size_t n);

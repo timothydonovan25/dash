@@ -24,6 +24,7 @@ dropped after 500 ms, but only if nothing follows it sooner.
 | `long A` … `long E` | both | A long press, after debounce |
 | `hold <0-31>` | bike | The buttons held now, bit 0 = A. Repeated while any is down; lapses after 1 s without one. Debounced and decoded like the pod, and ORed into `Deps::buttons_held`, so Doom plays from it |
 | `odo <miles>` / `hours <h>` | bike | Sets the odometer or the engine hours (after an NVS erase or a board swap); saved the next time the bike is still. Not on the dash anywhere |
+| `tpms sniff [dBm]` | bike | Logs for 60 s every BLE advert at -70 dBm (or the floor given) or nearer, as hex, and what `core::tpms` decodes from it (features §24.4). Hold the sensor by the dash |
 | `pod trace` | bike | Logs the raw pod pins and decoded presses for 30 s |
 | `crash test` | bike | Starts the crash countdown as a crash would; at 0 the SOS goes to the phone (features §24.3). Any button cancels |
 | `c6 hold` / `c6 release` | bike | Holds the C6 in reset: what a dead radio does (`ble: radio lost`, no reboot) |

@@ -421,6 +421,11 @@ void blackbox_row(Deps& d, LogicState& s, uint32_t now,
         const core::state::Heart h = d.slots->heart.get();
         rec.hr_bpm = core::hr::fresh(h, now) ? h.bpm : 0;
     }
+    {
+        const core::state::Tpms t = d.slots->tpms.get();
+        rec.front_psi = t.front.valid ? t.front.psi : 0.0f;
+        rec.rear_psi = t.rear.valid ? t.rear.psi : 0.0f;
+    }
     rec.t_ms = now;
     rec.speed_mph = m.best_mph;
     rec.rpm = e.rpm;
@@ -1073,6 +1078,13 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
             case core::state::CommandId::BlePairingMode:
                 d.slots->ble_request.publish(core::state::BleRequest{
                     core::state::BleRequest::PairingMode});
+                break;
+            case core::state::CommandId::TpmsLearnFront:
+            case core::state::CommandId::TpmsLearnRear:
+                d.slots->ble_request.publish(core::state::BleRequest{
+                    cmd.id == core::state::CommandId::TpmsLearnFront
+                        ? core::state::BleRequest::TpmsLearnFront
+                        : core::state::BleRequest::TpmsLearnRear});
                 break;
             case core::state::CommandId::WifiToggle:
                 d.slots->wifi_request.publish(core::state::WifiRequest{

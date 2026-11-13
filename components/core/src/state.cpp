@@ -93,6 +93,8 @@ const char* command_name(CommandId id) {
         case CommandId::ServiceDone:       return "service.done";
         case CommandId::OdoSet:            return "odo.set";
         case CommandId::EngHoursSet:       return "hours.set";
+        case CommandId::TpmsLearnFront:    return "tpms.learn_front";
+        case CommandId::TpmsLearnRear:     return "tpms.learn_rear";
         case CommandId::GearCalStart:      return "gearcal.start";
         case CommandId::GearCalNext:       return "gearcal.next";
         case CommandId::GearCalSkip:       return "gearcal.skip";

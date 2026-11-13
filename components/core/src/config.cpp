@@ -1,4 +1,5 @@
 #include "core/config/config.hpp"
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -230,6 +231,14 @@ const ConfigItem kItems[] = {
     // ECU (core/ecu): listen for the K-line adapter. Off and on does not
     // choose another adapter; the first heard each power-on is it.
     boolean(0x1301, "Adapter", "ECU", FIELD(ecu_on)),
+
+    // TPMS (core/tpms): which sensor is on which wheel. Learn takes the
+    // next sensor heard in a minute that is not the other wheel's, so fit
+    // and pump up one wheel's at a time. 0 is none; the IDs are 24 bits.
+    num(kKeyTpmsFrontId, "Front ID", "TPMS", Kind::Int, 0, 16777215, 1, "", FIELD(tpms_front_id)),
+    num(kKeyTpmsRearId,  "Rear ID",  "TPMS", Kind::Int, 0, 16777215, 1, "", FIELD(tpms_rear_id)),
+    action(0x1403, "Learn front", "TPMS", state::CommandId::TpmsLearnFront),
+    action(0x1404, "Learn rear",  "TPMS", state::CommandId::TpmsLearnRear),
 };
 
 #undef FIELD
@@ -358,7 +367,8 @@ bool set(Settings& s, const ConfigItem& it, float v) {
         case Kind::Bool:  *static_cast<bool*>(p) = c >= 0.5f; break;
         case Kind::Enum:  *static_cast<uint8_t*>(p) = static_cast<uint8_t>(c + 0.5f); break;
         case Kind::Int: {
-            const int32_t rounded = static_cast<int32_t>(c < 0 ? c - 0.5f : c + 0.5f);
+            // lround, not c + 0.5f: past 2^23 a float has no .5 and that rounds up.
+            const int32_t rounded = static_cast<int32_t>(std::lround(c));
             const bool sign = it.min < 0.0f;
             switch (it.width) {
                 case 1:

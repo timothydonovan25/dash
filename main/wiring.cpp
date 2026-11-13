@@ -135,7 +135,7 @@ services::Deps& build() {
     g_health.set_absent(core::state::Dev::Ecu);       // an option (CONFIG -> ECU), not a fault
     g_health.set_absent(core::state::Dev::Phone);     // until one connects
     g_health.set_absent(core::state::Dev::TpmsF);
-    g_health.set_absent(core::state::Dev::TpmsR);     // no TPMS scan yet (§11.2)
+    g_health.set_absent(core::state::Dev::TpmsR);     // until a bound sensor is heard (§11.2)
 
     // Hand out the references. This is the only place any of these
     //    objects meet each other.

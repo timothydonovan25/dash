@@ -50,4 +50,5 @@ idf_component_register(
          "src/route_pace.cpp"
          "src/crash.cpp"
          "src/ecu.cpp"
+         "src/tpms.cpp"
     INCLUDE_DIRS "include")

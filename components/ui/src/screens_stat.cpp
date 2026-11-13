@@ -67,7 +67,7 @@ void AllDataScreen::update(const Frame& f) {
     row_value(v, sizeof v, f.elec.vbat, 1, "V", f.elec.vbat > 0.0f);
     table_.set_row(6, "Battery", v);
 
-    // TPMS comes over BLE, and the scan is not written yet. The wheels read `--`
+    // TPMS comes over BLE (core/tpms). An unbound or silent wheel reads `--`
     // rather than 0 psi — a zero here would be indistinguishable from a
     // tyre that has actually gone flat.
     unit = "psi";

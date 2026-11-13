@@ -19,9 +19,11 @@ changes.
 **Hardware status.** The P4 board was ordered 2026-10-07 and arrived
 2026-10-28; bring-up is under way. Treat a driver as unproven until
 `docs/bringup.md`'s status table says otherwise. In short: rails, boot,
-panel, SD on 12 V, GPS (stuck at 1 Hz), IMU on the bench, and the C6's SDIO
-link (the Android app has bonded) have run; the shift lamps, the pod on this
-board, tach (bench only), wheels, power-fail and SD-card OTA installs have not. The
+panel, SD on 12 V, GPS (stuck at 1 Hz), IMU on the bench, the C6's SDIO
+link (the Android app has bonded), and on the bench the tach, both wheel
+sensors and the shift lamps have run; the pod on this board, anything at
+speed on the bike, power-fail and SD-card OTA installs have not. The bike's
+whole wiring harness is to be remade. The
 current firmware version is in `firmware.txt`.
 
 ## Doc map
