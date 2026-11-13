@@ -113,6 +113,18 @@ services::Deps& build() {
     bring_up(core::state::Dev::Sd, g_storage.init());
     services::load_settings(g_storage, g_settings);
 
+    // Three key-ons each cut inside 2 s: start on CRUISE -> SPEED, for a
+    // dead pod. Written before ctrl exists, so the flash write stalls nothing.
+    float quick = 0.0f;
+    g_storage.read_f32(hal::kNsLife, hal::kKeyQuickBoots, quick);   // NotPresent: 0
+    quick += 1.0f;
+    if (quick >= hal::kQuickBootsHome) {
+        ESP_LOGW(kTag, "%.0f quick boots: starting on CRUISE -> SPEED", quick);
+        g_storage.write_f32(hal::kNsLife, hal::kKeyUiPlace, 0.0f);   // ui::App::place() of mode 0, screen 0
+        quick = 0.0f;
+    }
+    g_storage.write_f32(hal::kNsLife, hal::kKeyQuickBoots, quick);
+
     // 3. What the shift lamps need, and nothing else: the LED driver, the
     //    tach counters and VIN sense. main starts `ctrl` the moment this
     //    returns, so the lamps are live before the panel has woken up. The

@@ -155,6 +155,9 @@ void keeper_task(void* arg) {
     // The screen as last saved, so an unchanged one is never rewritten.
     float saved_place = -1.0f;
     if (d.storage) d.storage->read_f32(hal::kNsLife, hal::kKeyUiPlace, saved_place);
+    // Wiring's count of quick boots, this one included; cleared once up 2 s.
+    float quick_boots = 0.0f;
+    if (d.storage) d.storage->read_f32(hal::kNsLife, hal::kKeyQuickBoots, quick_boots);
 
     SettingsSaver settings_saver;
     drivers::ChipTemp chip_temp;
@@ -215,6 +218,10 @@ void keeper_task(void* arg) {
             if (totals && (last_saved_hours < 0.0 || hours - last_saved_hours >= 0.01)) {
                 d.storage->write_f64(hal::kNsLife, hal::kKeyEngineHours, hours);
                 last_saved_hours = hours;
+            }
+            if (quick_boots != 0.0f && now >= hal::kQuickBootMs) {
+                d.storage->write_f32(hal::kNsLife, hal::kKeyQuickBoots, 0.0f);
+                quick_boots = 0.0f;
             }
             const float place = d.ui_place.load(std::memory_order_relaxed);
             if (place != 65535.0f && place != saved_place) {

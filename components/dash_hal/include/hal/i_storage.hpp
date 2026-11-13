@@ -28,6 +28,12 @@ inline constexpr uint16_t kKeyPanelModel   = 0x0003;
 // The mode and screen last shown, (mode << 8) | screen (ui::App::place),
 // so the dash starts where it was left. Written by keeper while still.
 inline constexpr uint16_t kKeyUiPlace      = 0x0004;
+// Boots in a row that ended before kQuickBootMs: wiring adds one at boot,
+// keeper clears it once the dash has been up that long. The third resets
+// kKeyUiPlace to CRUISE -> SPEED, the way home with the pod dead.
+inline constexpr uint16_t kKeyQuickBoots   = 0x0005;
+inline constexpr uint32_t kQuickBootMs     = 2000;
+inline constexpr float    kQuickBootsHome  = 3.0f;
 // The named waypoints: three keys each from here (lat, lon, when), in
 // core::waypoint's order.
 inline constexpr uint16_t kKeyWaypointBase = 0x0100;

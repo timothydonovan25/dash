@@ -501,6 +501,12 @@ CONFIG → Shift → **Test lamps** runs the start-up sweep on the lamps once
 
 **Start where you left off (2.12).** The mode and screen showing are saved
 (`hal::kKeyUiPlace`, by `keeper` while still) and the dash starts on them.
+**Three quick key-ons go home (after 2.20).** With the pod dead there is no
+other way off a screen: switch on and off three times, each time inside 2 s,
+and the third boot starts on CRUISE → SPEED. `wiring` counts boots in
+`hal::kKeyQuickBoots` before `ctrl` starts; `keeper` zeroes it once the dash
+has been up 2 s (while still, like every life write). A boot mid-ride that
+never got to be still also counts, which at worst lands on SPEED.
 
 While a gear calibration run is open, `ui/screen_gearcal.cpp` takes over
 CONFIG (§15).
