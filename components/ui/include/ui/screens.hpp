@@ -648,6 +648,8 @@ private:
 class ConfigScreen final : public Screen {
 public:
     const char* name() const override { return "CONFIG"; }
+    // Its own title, "CONFIG/Bike", as widgets: it changes without a repaint.
+    bool wants_title() const override { return false; }
     void enter(Canvas& c) override;
     void update(const core::state::Frame& f) override;
     void draw_background(Canvas& c) override;
@@ -687,8 +689,20 @@ private:
     bool                    resume_ = false;
     Table                   table_;
     Label                   hint_;
-    Widget*                 list_[2] = {};
+    Label                   crumb_;     // the section open, after "CONFIG/"
+    Label                   where_;     // "3/12", top right
+    Widget*                 list_[4] = {};
     const core::config::Settings* settings_ = nullptr;
+    // The list's top row, kept between frames so the view scrolls only when
+    // the cursor would leave it, and keeps a heading above its first item.
+    uint8_t                 first_ = 0;
+    // The last action run, for the row's answer: "..." until what it shows
+    // changes (or kRanMs), then that. ran_ms_ 0 is stamped on the next frame.
+    uint16_t                ran_key_ = 0;
+    uint32_t                ran_ms_ = 0;
+    TextBuf<20>             ran_before_;
+    TextBuf<20>             focus_state_;   // the focused action's state, last frame
+    void                    section_rows(const core::state::Frame& f);
     // The value last posted for `pending_key_`, until Settings shows it:
     // a second press before logic has applied the first steps on from
     // here, not from the old value, or it would be lost.

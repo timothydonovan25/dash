@@ -849,12 +849,14 @@ void UpdateScreen::update(const Frame& f) {
     } else if (o.install == ota::Install::Checking) {
         install = "checking";
     }
-    const char* boot = !stable ? "stable only" : has_dev ? "" : "no dev";
+    if (stable && !install[0]) install = "Ready";
+    const char* boot = !stable ? "stable only" : has_dev ? "Ready" : "no dev";
     // Promoting is done from the image being kept, so it is a dev-only row.
-    const char* promote = o.known && o.role == ota::Role::Dev ? "" : "dev only";
+    const char* promote = o.known && o.role == ota::Role::Dev ? "Ready" : "dev only";
+    // The armed row asks too, where the eye already is.
     actions_.set_row(0, "Install from SD", install);
-    actions_.set_row(1, "Boot dev once", boot);
-    actions_.set_row(2, "Promote to stable", promote);
+    actions_.set_row(1, "Boot dev once", armed_ == 2 ? "E again?" : boot);
+    actions_.set_row(2, "Promote to stable", armed_ == 3 ? "E again?" : promote);
 
     namespace wifi = core::wifi;
     const core::state::Wifi& w = f.wifi;

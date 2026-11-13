@@ -228,13 +228,17 @@ struct ConfigItem {
 const ConfigItem* items();
 size_t            item_count();
 
-// The submenus CONFIG opens on: one per distinct `group`, in the order the
-// group first appears in the table. Item `i` of group `g` is the i-th item
-// of that group in table order. Nullptr / 0 past the end.
-size_t            group_count();
-const char*       group_name(size_t g);
-size_t            group_size(size_t g);
-const ConfigItem* group_item(size_t g, size_t i);
+// What CONFIG opens on: a handful of sections, each a run of the table's
+// groups (kSections in config.cpp). Item `i` of section `s` walks those
+// groups in the section's order, each group's items in table order, so a
+// screen can put a heading wherever `group` changes. Nullptr / 0 past the
+// end. Every group is in exactly one section (validate_table).
+size_t            section_count();
+const char*       section_name(size_t s);
+size_t            section_size(size_t s);
+const ConfigItem* section_item(size_t s, size_t i);
+// How many groups section `s` holds: with one, a heading would repeat its name.
+size_t            section_groups(size_t s);
 
 // Nullptr if no item owns that key — which is what loading an NVS blob
 // written by a newer firmware looks like, and is not an error.

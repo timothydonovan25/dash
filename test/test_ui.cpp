@@ -322,6 +322,24 @@ void apply_posted(Fixture& fx) {
     }
 }
 
+// Where `key` is in CONFIG: its section and its place in that section.
+bool cfg_place(uint16_t key, size_t& sec, size_t& idx) {
+    for (sec = 0; sec < core::config::section_count(); ++sec)
+        for (idx = 0; idx < core::config::section_size(sec); ++idx)
+            if (core::config::section_item(sec, idx)->key == key) return true;
+    return false;
+}
+
+// From CONFIG's top level to `key`'s row with real presses: down to its
+// section, E, down to it.
+void cfg_walk_to(App& app, Canvas& c, uint16_t key) {
+    size_t sec = 0, idx = 0;
+    CHECK(cfg_place(key, sec, idx));
+    for (size_t i = 0; i < sec; ++i) app.on_input(InputEvent{Button::D, Press::Short}, c);
+    app.on_input(InputEvent{Button::E, Press::Short}, c);
+    for (size_t i = 0; i < idx; ++i) app.on_input(InputEvent{Button::D, Press::Short}, c);
+}
+
 // Walk to a given mode and screen with real button presses, the way a rider
 // would, rather than reaching into nav state.
 void go_to(App& app, Canvas& c, Mode m, uint8_t screen) {
@@ -1287,19 +1305,13 @@ int main() {
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
 
-        size_t g = 0;
-        while (g < core::config::group_count() &&
-               std::strcmp(core::config::group_name(g), "SD card") != 0) ++g;
-        CHECK(g < core::config::group_count());
-        for (size_t i = 0; i < g; ++i)
-            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open
+        cfg_walk_to(fx.app, s.canvas, 0x0C01);   // Card & Wi-Fi -> Eject card
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // eject
         CHECK(!fx.sink.posted.empty());
         CHECK(fx.sink.posted.back().id == core::state::CommandId::StorageEject);
     }
 
-    CASE("config submenus: E opens one, B goes back to it, C/D stay in it");
+    CASE("config sections: E opens one, B goes back to it, C/D stay in it");
     {
         Fixture fx;
         Screen320x480 s;
@@ -1307,14 +1319,15 @@ int main() {
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
         const uint8_t groups = fx.app.current().focus_count();
-        CHECK(groups == core::config::group_count());
+        CHECK(groups == core::config::section_count());
 
-        // Down to the second submenu (Startup), open it, and the cursor and
-        // the row count are that submenu's.
-        fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
-        CHECK(fx.app.current().focus_count() == core::config::group_size(1));
-        CHECK(fx.app.nav_state().focus == 0);
+        // Into Display, down to Startup's Gauge sweep: the row count is the
+        // section's, headings not counted.
+        size_t sec = 0, idx = 0;
+        CHECK(cfg_place(0x0B01, sec, idx));
+        cfg_walk_to(fx.app, s.canvas, 0x0B01);
+        CHECK(fx.app.current().focus_count() == core::config::section_size(sec));
+        CHECK(fx.app.nav_state().focus == idx);
 
         // One E flips a switch: the sweep goes off as a ConfigSet for its key,
         // and a second E, before logic has applied the first, puts it back.
@@ -1331,12 +1344,12 @@ int main() {
         fx.app.on_input(InputEvent{Button::E, Press::Long}, s.canvas);
         apply_posted(fx);
         CHECK(fx.settings.gauge_sweep);
-        CHECK(fx.app.current().focus_count() == core::config::group_size(1));
+        CHECK(fx.app.current().focus_count() == core::config::section_size(sec));
 
-        // B leaves the submenu with the cursor on it: a switch is never an edit.
+        // B leaves the section with the cursor on it: a switch is never an edit.
         fx.app.on_input(InputEvent{Button::B, Press::Short}, s.canvas);
         CHECK(fx.app.current().focus_count() == groups);
-        CHECK(fx.app.nav_state().focus == 1);
+        CHECK(fx.app.nav_state().focus == sec);
         CHECK(fx.app.nav_state().mode == Mode::Config);
     }
 
@@ -1348,16 +1361,16 @@ int main() {
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
         fx.app.render(s.canvas, true);
-        // CONFIG's table is at (14, 40), scale 2: rows 20 px apart.
+        // CONFIG's table is at (14, 32), scale 2: rows 20 px apart.
         auto at = [&](int x, int y) { return s.px[static_cast<size_t>(y) * kScreenW + x]; };
-        CHECK(at(200, 40) == color::kText);         // row 0's top edge (clipped to the table)
-        CHECK(at(14, 50) == color::kText);          // its left edge
-        CHECK(at(200, 58) != color::kText);         // row 1 not yet
+        CHECK(at(200, 32) == color::kText);         // row 0's top edge (clipped to the table)
+        CHECK(at(14, 42) == color::kText);          // its left edge
+        CHECK(at(200, 50) != color::kText);         // row 1 not yet
         fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
         fx.app.update(busy_frame());
         fx.app.render(s.canvas, true);
-        CHECK(at(200, 58) == color::kText);
-        CHECK(at(200, 40) != color::kText);
+        CHECK(at(200, 50) == color::kText);
+        CHECK(at(200, 32) != color::kText);
     }
 
     CASE("a confirmed action wants E twice; any other button cancels it");
@@ -1367,16 +1380,9 @@ int main() {
         fx.app.begin(s.canvas);
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
-        // Find Lap -> Clear laps by walking the table the way a rider does.
-        size_t g = 0, i = 0;
-        for (g = 0; g < core::config::group_count(); ++g)
-            if (std::strcmp(core::config::group_name(g), "Lap") == 0) break;
-        for (i = 0; i < core::config::group_size(g); ++i)
-            if (core::config::group_item(g, i)->key == 0x0405) break;
-        CHECK(core::config::group_item(g, i)->confirm);
-        for (size_t k = 0; k < g; ++k) fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
-        for (size_t k = 0; k < i; ++k) fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        // Ride -> Clear laps, walked the way a rider does.
+        CHECK(core::config::find(0x0405)->confirm);
+        cfg_walk_to(fx.app, s.canvas, 0x0405);
         const size_t before = fx.sink.posted.size();
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // armed
         CHECK(fx.sink.posted.size() == before);
@@ -1412,20 +1418,8 @@ int main() {
         go_to(fx.app, s.canvas, Mode::Config, 0);
         fx.app.update(busy_frame());
 
-        // CONFIG -> Gearing -> Calibrate gears posts the command...
-        size_t g = 0;
-        while (g < core::config::group_count() &&
-               std::strcmp(core::config::group_name(g), "Gearing") != 0) ++g;
-        CHECK(g < core::config::group_count());
-        for (size_t i = 0; i < g; ++i)
-            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
-        fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);   // open Gearing
-        size_t row = 0;
-        while (row < core::config::group_size(g) &&
-               core::config::group_item(g, row)->action != core::state::CommandId::GearCalStart) ++row;
-        CHECK(row < core::config::group_size(g));
-        for (size_t i = 0; i < row; ++i)
-            fx.app.on_input(InputEvent{Button::D, Press::Short}, s.canvas);
+        // CONFIG -> Bike -> Calibrate gears posts the command...
+        cfg_walk_to(fx.app, s.canvas, 0x0808);
         fx.app.on_input(InputEvent{Button::E, Press::Short}, s.canvas);
         CHECK(fx.sink.posted.back().id == core::state::CommandId::GearCalStart);
 
@@ -1500,12 +1494,15 @@ int main() {
         fx.app.render(s.canvas, true);
         CHECK(s.ink() > 500);
 
-        // Closed again: CONFIG is back, in the Gearing submenu it left.
+        // Closed again: CONFIG is back, in the Bike section it left.
         f.gear_cal = core::state::GearCal{};
         render_task_frame(fx.app, s, f);
         render_task_frame(fx.app, s, f);
         CHECK(std::strcmp(fx.app.current().name(), "CONFIG") == 0);
-        CHECK(fx.app.current().focus_count() == core::config::group_size(g));
+        size_t sec = 0, idx = 0;
+        CHECK(cfg_place(0x0808, sec, idx));
+        CHECK(fx.app.current().focus_count() == core::config::section_size(sec));
+        CHECK(fx.app.nav_state().focus == idx);
     }
 
     CASE("at key-on the speed screen sweeps, then shows the bike");

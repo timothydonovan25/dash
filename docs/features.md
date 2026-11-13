@@ -481,9 +481,30 @@ bike only while it is still, reading "parked only" otherwise.
 
 ## 10. CONFIG mode
 
-One screen built from the single `ConfigItem` table in `core/config/`. Its
-groups are submenus. Items are numbers (with min, max, step and unit),
-choices, booleans or actions. C and D edit and E accepts.
+One screen built from the single `ConfigItem` table in `core/config/`.
+Items are numbers (with min, max, step and unit), choices, booleans or
+actions.
+
+**Layout (2.22).** CONFIG opens on eight sections (`kSections` in
+`core/src/config.cpp`): Display, Shift lights, Ride, Phone, Bike, Sensors,
+Card & Wi-Fi, Developer. Each row carries a live summary ("80 %, Imperial",
+"1 paired", "Card ok, Wi-Fi off"). A section lists its items under a
+small heading per table group (DISPLAY, STARTUP; LAP, TRIP, NAV, LOG ...);
+headings are never focused, and the list scrolls only when the cursor
+would leave it. The title is a breadcrumb, `CONFIG/BIKE`, with the cursor's
+place (`3/12`) on the right. Group names did not change (the log's
+`# setting` lines and the Wi-Fi page still use them).
+
+**Every row answers (2.22).** A number or choice being edited shows
+`< 80 % >` in an accent frame. An action shows the state it acts on:
+Eject card `Card ok` → `Safe to pull` (or `On laptop`, `No card`), Wi-Fi
+`Off`/`On, 2 joined`, Pairing mode `Open 45s`, Forget phone `2 paired`,
+Set line here `No line`/`Line set`/`Needs GPS`, Clear laps `12 laps`,
+Reset trip A its miles, Mark done `Due in 12 h`, Calibrate level the
+offsets, Learn front/rear `No sensor`/`Bound`/`Heard`. After E the row says
+`...` until that state changes (4 s at most; a TPMS learn says
+`Listening...` for up to its minute); one with nothing to show says `Done`.
+DIAG → Update's armed row says `E again?` and an available one `Ready`.
 
 **Settings have one writer at run time, `logic`.** The CONFIG screen, the
 Wi-Fi page and IMU's Calibrate level all post `ConfigSet` commands. A task
@@ -1273,7 +1294,8 @@ ninth row, `doom::Program` (a `ui::IProgram`), over doomgeneric
 
 ## 34. Configuration reference
 
-Every item in `components/core/src/config.cpp`, by CONFIG submenu.
+Every item in `components/core/src/config.cpp`, by table group (the
+heading it sits under in its CONFIG section, §10).
 
 | Group | Item | Range / options | Unit |
 |---|---|---|---|

@@ -614,6 +614,7 @@ void Table::clear_rows() {
     if (!any) return;
     for (size_t i = 0; i < kRows; ++i) { left_[i].set(""); right_[i].set(""); }
     rows_ = 0;
+    header_mask_ = 0;
     touch();
 }
 
@@ -628,6 +629,20 @@ void Table::set_focus(int focus) {
     }
     if (focus_ >= 0) mark_row(static_cast<size_t>(focus_));
     focus_ = focus;
+    if (focus_ >= 0) mark_row(static_cast<size_t>(focus_));
+}
+
+void Table::set_header(size_t i, bool header) {
+    if (i >= kRows) return;
+    const uint16_t bit = static_cast<uint16_t>(1u << i);
+    if (((header_mask_ & bit) != 0) == header) return;
+    header_mask_ = static_cast<uint16_t>(header ? header_mask_ | bit : header_mask_ & ~bit);
+    mark_row(i);
+}
+
+void Table::set_editing(bool editing) {
+    if (editing == editing_) return;
+    editing_ = editing;
     if (focus_ >= 0) mark_row(static_cast<size_t>(focus_));
 }
 
@@ -683,6 +698,16 @@ void Table::render(Canvas& c) {
     for (size_t i = 0; i < visible_ && first + i < rows_; ++i) {
         const size_t r = first + i;
         const int16_t y = static_cast<int16_t>(bounds.y + i * line);
+        if (header_mask_ & (1u << r)) {
+            // Sits on the row's baseline, small, with a rule out to the edge.
+            const int16_t ty = static_cast<int16_t>(y + line - 7 - 6);
+            c.draw_text(static_cast<int16_t>(bounds.x + kPadPx), ty, left_[r].s,
+                        theme::secondary, 1, Align::Left);
+            const int16_t tx = static_cast<int16_t>(bounds.x + kPadPx + c.text_width(left_[r].s, 1) + 6);
+            c.fill_rect(Rect{tx, static_cast<int16_t>(ty + 3),
+                             static_cast<int16_t>(bounds.right() - kPadPx - tx), 1}, theme::rule);
+            continue;
+        }
         const bool focused = static_cast<int>(r) == focus_;
         if (focused) {
             // Inside the bounds: on the first row the band starts above
@@ -692,7 +717,10 @@ void Table::render(Canvas& c) {
             const Rect band = Rect{bounds.x, static_cast<int16_t>(y - 2), bounds.w,
                                    static_cast<int16_t>(line)}.clipped_to(bounds);
             c.fill_rect(band, color::kPanel);
-            c.draw_rect(band, theme::primary);
+            c.draw_rect(band, editing_ ? color::kAccent : theme::primary);
+            if (editing_) c.draw_rect(Rect{static_cast<int16_t>(band.x + 1), static_cast<int16_t>(band.y + 1),
+                                           static_cast<int16_t>(band.w - 2), static_cast<int16_t>(band.h - 2)},
+                                      color::kAccent);
         }
         // Inset off the outline, every row alike so the columns line up.
         c.draw_text(static_cast<int16_t>(bounds.x + kPadPx), y, left_[r].s,

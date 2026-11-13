@@ -215,37 +215,41 @@ int main() {
         CHECK(core::log::rate_interval_ms(s.log_rate) == 20);
     }
 
-    CASE("the submenus cover every item exactly once, in table order");
+    CASE("the sections cover every item exactly once, a group's items together");
     {
         size_t total = 0;
-        CHECK(group_count() >= 10);
-        CHECK(eq(group_name(0), "Display"));
-        CHECK(group_name(group_count()) == nullptr);
-        for (size_t g = 0; g < group_count(); ++g) {
-            CHECK(group_size(g) > 0);
-            for (size_t i = 0; i < group_size(g); ++i) {
-                const ConfigItem* it = group_item(g, i);
+        CHECK(section_count() >= 6 && section_count() <= 9);   // a short top level
+        CHECK(eq(section_name(0), "Display"));
+        CHECK(section_name(section_count()) == nullptr);
+        for (size_t s = 0; s < section_count(); ++s) {
+            CHECK(section_size(s) > 0);
+            CHECK(section_groups(s) >= 1);
+            size_t changes = 0;
+            for (size_t i = 0; i < section_size(s); ++i) {
+                const ConfigItem* it = section_item(s, i);
                 CHECK(it != nullptr);
-                CHECK(eq(it->group, group_name(g)));
+                if (i > 0 && !eq(it->group, section_item(s, i - 1)->group)) ++changes;
             }
-            CHECK(group_item(g, group_size(g)) == nullptr);
-            total += group_size(g);
+            // Each group is one run, so a heading appears once per group.
+            CHECK(changes + 1 == section_groups(s));
+            CHECK(section_item(s, section_size(s)) == nullptr);
+            total += section_size(s);
         }
         CHECK(total == item_count());
+        const char* why = nullptr;
+        CHECK(validate_table(&why));
     }
 
-    CASE("Startup holds the sweep (on, 1 s) and the splash (on)");
+    CASE("Display ends with Startup: the sweep (on, 1 s) and the splash (on)");
     {
         Settings s;
         CHECK(s.gauge_sweep);
         CHECK(s.splash);
         CHECK(s.sweep_ms == 1000);
-        size_t g = 0;
-        while (g < group_count() && !eq(group_name(g), "Startup")) ++g;
-        CHECK(g < group_count());
-        CHECK(group_size(g) == 3);
-        CHECK(group_item(g, 0)->key == 0x0B01);
-        CHECK(group_item(g, 2)->key == 0x0B03);
+        const size_t n = section_size(0);
+        CHECK(eq(section_item(0, n - 3)->group, "Startup"));
+        CHECK(section_item(0, n - 3)->key == 0x0B01);
+        CHECK(section_item(0, n - 1)->key == 0x0B03);
         char buf[32];
         format(s, *find(0x0B02), buf, sizeof buf);  CHECK(eq(buf, "1000 ms"));
     }

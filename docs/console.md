@@ -59,13 +59,14 @@ stops working, the sim shows the same screens.
 
 | What | Presses |
 |---|---|
-| Wi-Fi on/off | `long A`, A×4, D×13, E, E — then E again toggles |
-| Eject card | `long A`, A×4, D×12, E, E |
+| Wi-Fi on/off | `long A`, A×4, D×6, E, D×2, E — then E again toggles |
+| Eject card | `long A`, A×4, D×6, E, E |
 | DIAG → Update | `long A`, A×3, D×7, E |
 | Boot dev once | then D, E, E |
 
-These counts follow the CONFIG table's order and DIAG's menu; a new setting
-or page moves them.
+These counts follow CONFIG's sections (`kSections` in `core/src/config.cpp`;
+Card & Wi-Fi is the seventh) and DIAG's menu; a new section, a setting
+added ahead in that section, or a new page moves them.
 
 ## Before fuzzing the menus, back up NVS
 

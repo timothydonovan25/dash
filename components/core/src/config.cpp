@@ -216,14 +216,12 @@ const ConfigItem kItems[] = {
     // events, the machine's health. About 130 MB an hour.
     boolean(0x0902, "Detail log", "Log", FIELD(detail_log)),
 
-    // Diag: aids for bring-up and tuning, shown over every screen. Last, so
-    // the submenus above keep their places (docs/console.md's routes).
+    // Diag: aids for bring-up and tuning, shown over every screen.
     boolean(0x1001, "FPS counter", "Diag", FIELD(show_fps)),
     choice(0x1002, "Frame rate",   "Diag", FIELD(frame_rate), kFrameRateOptions, 6),
 
     // Service (core::trip::service_due): an alert every Interval engine
     // hours after Done at; 0 is off. Mark done sets Done at to now.
-    // The last group, so no older menu route moves.
     num(0x1201, "Interval", "Service", Kind::Float, 0, 200, 1, "h", FIELD(service_every_h)),
     num(0x1202, "Done at",  "Service", Kind::Float, 0, 100000, 1, "h", FIELD(service_at_h)),
     confirmed(0x1203, "Mark done", "Service", state::CommandId::ServiceDone),
@@ -274,45 +272,55 @@ size_t            item_count(){ return kCount; }
 namespace {
 bool same(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
 
-// True if item i is the first in the table with its group.
-bool opens_group(size_t i) {
-    for (size_t j = 0; j < i; ++j) {
-        if (same(kItems[j].group, kItems[i].group)) return false;
-    }
-    return true;
+// CONFIG's top level. Most used first; the developer's aids last.
+struct Section {
+    const char* name;
+    const char* groups[6];   // nullptr-terminated when short
+};
+constexpr Section kSections[] = {
+    {"Display",      {"Display", "Startup"}},
+    {"Shift lights", {"Shift"}},
+    {"Ride",         {"Lap", "Trip", "Nav", "Log"}},
+    {"Phone",        {"Phone", "Heart rate"}},
+    {"Bike",         {"Wheels", "Gearing", "Fuel", "Battery", "Service", "Gear base"}},
+    {"Sensors",      {"IMU", "TPMS", "ECU"}},
+    {"Card & Wi-Fi", {"SD card", "Wi-Fi"}},
+    {"Developer",    {"Diag"}},
+};
+constexpr size_t kSectionCount = sizeof(kSections) / sizeof(kSections[0]);
+constexpr size_t kMaxGroups = sizeof(Section::groups) / sizeof(Section::groups[0]);
+
+size_t in_group(const char* g) {
+    size_t n = 0;
+    for (size_t i = 0; i < kCount; ++i) n += same(kItems[i].group, g) ? 1 : 0;
+    return n;
 }
 }  // namespace
 
-size_t group_count() {
+size_t section_count() { return kSectionCount; }
+
+const char* section_name(size_t s) { return s < kSectionCount ? kSections[s].name : nullptr; }
+
+size_t section_groups(size_t s) {
+    if (s >= kSectionCount) return 0;
     size_t n = 0;
-    for (size_t i = 0; i < kCount; ++i) n += opens_group(i) ? 1 : 0;
+    while (n < kMaxGroups && kSections[s].groups[n]) ++n;
     return n;
 }
 
-const char* group_name(size_t g) {
-    for (size_t i = 0; i < kCount; ++i) {
-        if (!opens_group(i)) continue;
-        if (g == 0) return kItems[i].group;
-        --g;
-    }
-    return nullptr;
-}
-
-size_t group_size(size_t g) {
-    const char* name = group_name(g);
-    if (!name) return 0;
+size_t section_size(size_t s) {
     size_t n = 0;
-    for (size_t i = 0; i < kCount; ++i) n += same(kItems[i].group, name) ? 1 : 0;
+    for (size_t g = 0; g < section_groups(s); ++g) n += in_group(kSections[s].groups[g]);
     return n;
 }
 
-const ConfigItem* group_item(size_t g, size_t idx) {
-    const char* name = group_name(g);
-    if (!name) return nullptr;
-    for (size_t i = 0; i < kCount; ++i) {
-        if (!same(kItems[i].group, name)) continue;
-        if (idx == 0) return &kItems[i];
-        --idx;
+const ConfigItem* section_item(size_t s, size_t idx) {
+    for (size_t g = 0; g < section_groups(s); ++g) {
+        for (size_t i = 0; i < kCount; ++i) {
+            if (!same(kItems[i].group, kSections[s].groups[g])) continue;
+            if (idx == 0) return &kItems[i];
+            --idx;
+        }
     }
     return nullptr;
 }
@@ -457,6 +465,13 @@ bool validate_table(const char** why) {
     for (size_t i = 0; i < kCount; ++i) {
         const ConfigItem& a = kItems[i];
         if (a.key == 0)              { *why = "key 0 is reserved"; return false; }
+        if (a.group) {
+            size_t homes = 0;
+            for (size_t sec = 0; sec < kSectionCount; ++sec)
+                for (size_t g = 0; g < section_groups(sec); ++g)
+                    homes += same(kSections[sec].groups[g], a.group) ? 1 : 0;
+            if (homes != 1) { *why = "group not in exactly one section"; return false; }
+        }
         if (!a.label || !a.group)    { *why = "item without a label or group"; return false; }
         for (size_t j = i + 1; j < kCount; ++j) {
             if (kItems[j].key == a.key) { *why = "duplicate key"; return false; }

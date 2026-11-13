@@ -192,6 +192,10 @@ public:
     void set_row(size_t i, const char* left, const char* right);
     void set_row_count(size_t n);
     void set_focus(int focus);          // -1 for none
+    // A heading: small, dim, never focused (CONFIG's group names).
+    void set_header(size_t i, bool header);
+    // The focused row is being changed, not just pointed at: an accent frame.
+    void set_editing(bool editing);
     void clear_rows();
     size_t row_count() const { return rows_; }
     void render(Canvas& c) override;
@@ -206,9 +210,11 @@ private:
     void mark_row(size_t r);
 
     TextBuf<20> left_[kRows];
-    TextBuf<14> right_[kRows];
+    TextBuf<24> right_[kRows];
     size_t      rows_ = 0;
     int         focus_ = -1;
+    uint16_t    header_mask_ = 0;
+    bool        editing_ = false;
     uint8_t     visible_ = kRows;
     uint8_t     scale_ = 1;
     uint16_t    row_mask_ = 0;     // rows changed since the last send
