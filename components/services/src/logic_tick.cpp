@@ -915,7 +915,8 @@ void logic_restore(Deps& d, LogicState& s) {
 void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 uint32_t now, LogicPass pass) {
     const bool scheduled = pass == LogicPass::Scheduled;
-    const core::state::Gnss   g = d.slots->gnss.get();
+    s.gnss_now = d.slots->gnss.get();
+    const core::state::Gnss&  g = s.gnss_now;
     const core::state::Motion m = d.slots->motion.get();
     const core::state::Engine e = d.slots->engine.get();
 
@@ -971,6 +972,10 @@ void logic_tick(Deps& d, LogicState& s, ICommandSource& commands,
                 break;
             case core::state::CommandId::ShiftLampTest:
                 d.lamp_test_req.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case core::state::CommandId::LayoutStock:
+                // `storage` clears ui/active; render then shows stock.
+                if (d.layout) d.layout->stock_req.store(true, std::memory_order_relaxed);
                 break;
             case core::state::CommandId::CrashTest:
                 s.crash.test(now);

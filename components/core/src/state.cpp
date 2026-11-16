@@ -16,8 +16,7 @@ Lap to_published(const lap::State& s, int32_t delta_ms, bool delta_valid) {
     return out;
 }
 
-Frame snapshot(const Slots& s, uint32_t t_ms) {
-    Frame f;
+void snapshot(const Slots& s, uint32_t t_ms, Frame& f) {
     f.engine = s.engine.get();
     f.motion = s.motion.get();
     f.att    = s.attitude.get();
@@ -44,6 +43,11 @@ Frame snapshot(const Slots& s, uint32_t t_ms) {
     f.hr_recovery = s.hr_recovery.get();
     f.crash = s.crash.get();
     f.t_ms   = t_ms;
+}
+
+Frame snapshot(const Slots& s, uint32_t t_ms) {
+    Frame f;
+    snapshot(s, t_ms, f);
     return f;
 }
 
@@ -95,6 +99,7 @@ const char* command_name(CommandId id) {
         case CommandId::EngHoursSet:       return "hours.set";
         case CommandId::TpmsLearnFront:    return "tpms.learn_front";
         case CommandId::TpmsLearnRear:     return "tpms.learn_rear";
+        case CommandId::LayoutStock:       return "layout.stock";
         case CommandId::GearCalStart:      return "gearcal.start";
         case CommandId::GearCalNext:       return "gearcal.next";
         case CommandId::GearCalSkip:       return "gearcal.skip";

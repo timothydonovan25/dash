@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 enable_testing()
+find_package(Python3 COMPONENTS Interpreter)
 
 set(CORE ${CMAKE_CURRENT_SOURCE_DIR}/../components/core)
 
@@ -64,7 +65,10 @@ add_library(core STATIC
     ${CORE}/src/route_navigator.cpp
     ${CORE}/src/route_dest.cpp
     ${CORE}/src/route_search.cpp
-    ${CORE}/src/route_pace.cpp)
+    ${CORE}/src/route_pace.cpp
+    ${CORE}/src/layout.cpp
+    ${CORE}/src/layout_fields.cpp
+    ${CORE}/src/layout_fields.gen.cpp)
 target_include_directories(core PUBLIC ${CORE}/include)
 
 # The UI builds on the host too: a Canvas is an interface, and nothing in
@@ -86,6 +90,7 @@ add_library(ui STATIC
     ${UI}/src/screens_diag.cpp
     ${UI}/src/screen_config.cpp
     ${UI}/src/screen_gearcal.cpp
+    ${UI}/src/screen_custom.cpp
     ${UI}/src/app.cpp
     ${UI}/src/shadow.cpp)
 target_include_directories(ui PUBLIC ${UI}/include)
@@ -97,7 +102,7 @@ target_include_directories(hal PUBLIC ${HAL}/include)
 
 foreach(t nav shift geo published lap state units trip config health
           attitude jump nmea input tach log detail delta gear gearcal c6 power media apple pairing ota sweep wifi sun alert battery slip waypoint flash wire ui shadow fixtime sectors track session perf stunt hr crash ecu qr tpms
-          route_follow route_navigator route_dest route_pace)
+          route_follow route_navigator route_dest route_pace layout)
     add_executable(test_${t} test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE core)
     target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -110,6 +115,23 @@ add_executable(test_settings_store test_settings_store.cpp ${SVC}/src/settings_s
 target_include_directories(test_settings_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
 target_link_libraries(test_settings_store PRIVATE core hal)
 add_test(NAME settings_store COMMAND test_settings_store)
+
+# Custom layouts on the card: `storage`'s and `wifi`'s shared half.
+add_executable(test_layout_store test_layout_store.cpp ${SVC}/src/layout_store.cpp)
+target_include_directories(test_layout_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${SVC}/include)
+target_link_libraries(test_layout_store PRIVATE core hal)
+add_test(NAME layout_store COMMAND test_layout_store)
+
+# The screen editor's JSON (services/editor_info.hpp), on the laptop, and the
+# check that it is JSON: a stray quote would only show on the phone.
+add_executable(screens_json ${CMAKE_CURRENT_SOURCE_DIR}/../tools/screens/screens_json.cpp
+               ${SVC}/src/editor_info.cpp)
+target_include_directories(screens_json PRIVATE ${SVC}/include)
+target_link_libraries(screens_json PRIVATE ui core hal)
+if(Python3_FOUND)
+    add_test(NAME editor_json COMMAND sh -c
+             "$<TARGET_FILE:screens_json> fields | ${Python3_EXECUTABLE} -c 'import json,sys; d=json.load(sys.stdin); assert len(d[\"fields\"])>400 and d[\"font\"][\"glyphs\"]' && $<TARGET_FILE:screens_json> values 1,14,97 | ${Python3_EXECUTABLE} -c 'import json,sys; d=json.load(sys.stdin); assert d[0][\"t\"]==\"8230\" and d[2][\"t\"]==\"Flying Whales\"'")
+endif()
 
 # `logic`'s half of the gear calibration, through the real logic_tick.
 add_executable(test_logic_gearcal test_logic_gearcal.cpp ${SVC}/src/logic_tick.cpp ${SVC}/src/track_store.cpp)
@@ -141,9 +163,20 @@ target_include_directories(test_logic_track PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} 
 target_link_libraries(test_logic_track PRIVATE core ui hal)
 add_test(NAME logic_track COMMAND test_logic_track)
 
-foreach(t ui wire shadow)
+add_executable(test_custom test_custom.cpp)
+target_include_directories(test_custom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME custom COMMAND test_custom)
+foreach(t ui wire shadow custom)
     target_link_libraries(test_${t} PRIVATE ui hal)
 endforeach()
+
+# Every Frame field is a datapoint a custom screen can bind (docs/custom-
+# screens.md §3). The table is generated; this fails if a field was added to
+# the Frame and the table not regenerated, or the ids file renumbered.
+if(Python3_FOUND)
+    add_test(NAME frame_fields
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/frame_fields.py --check)
+endif()
 
 # Rule 3, enforced rather than remembered: core, ui and hal may never include
 # an ESP header. Breaking it is a one-line accident in a commit about

@@ -43,6 +43,9 @@ public:
 struct LogicState {
     static constexpr size_t kMaxLaps = 64;
 
+    // This tick's copy of the gnss slot. Here, not on logic_tick's stack,
+    // which is at the 1 kB frame limit.
+    core::state::Gnss     gnss_now;
     core::lap::Timer      lap;
     core::trip::Computer  trip;
     // The blackbox's SlipPct column; render's own meter draws the bar.

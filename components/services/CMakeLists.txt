@@ -7,6 +7,8 @@ idf_component_register(
          "src/logic_tick.cpp"
          "src/track_store.cpp"
          "src/route_store.cpp"
+         "src/layout_store.cpp"
+         "src/editor_info.cpp"
          "src/input_service.cpp"
          "src/render_service.cpp"
          "src/keeper_service.cpp"
@@ -23,6 +25,7 @@ idf_component_register(
          "src/stack_watch.cpp"
          "src/watchdog.cpp"
     INCLUDE_DIRS "include"
+    EMBED_TXTFILES "web/screens.html"
     REQUIRES core dash_hal ui bsp drivers esp_timer esp_driver_gpio
     PRIV_REQUIRES esp_system esp_driver_usb_serial_jtag espcoredump bt esp_hosted esp_partition bootloader_support app_update
                   esp_app_format esp_wifi esp_wifi_remote esp_netif esp_event

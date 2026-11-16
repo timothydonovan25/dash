@@ -133,6 +133,13 @@ struct Gnss {
     // the same one read again. Not the fix's time for the lap timer: that
     // is utc_ms put on this clock by core::fixtime, without the latency.
     uint32_t rx_ms = 0;
+    // From GSV, every constellation's last complete set: satellites in view
+    // (used or not), and signal strength in dB-Hz, the strongest and the
+    // mean of the four strongest -- a weak aerial or lead shows here first.
+    // 0 until a set has arrived (a receiver at 10 Hz sends no GSV).
+    uint8_t sats_view = 0;
+    uint8_t snr_best  = 0;
+    uint8_t snr_top4  = 0;
 };
 
 struct Trip {

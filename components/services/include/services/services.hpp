@@ -44,6 +44,7 @@
 #include "core/flash/flash.hpp"
 #include "services/track_store.hpp"
 #include "services/route_store.hpp"
+#include "services/layout_store.hpp"
 #include "ui/screen.hpp"
 
 namespace services {
@@ -117,6 +118,13 @@ struct Deps {
     // Saved tracks, between `logic` (core 0) and `storage`, which owns the
     // card (services/track_store.hpp). In PSRAM: two lap traces' worth.
     TrackMailbox* tracks = nullptr;
+
+    // Custom layouts (services/layout_store.hpp, docs/custom-screens.md):
+    // `storage` reads the card's, `wifi` hands over the editor's drafts,
+    // `render` copies the newest into `layout_live`, which it alone writes
+    // and its App draws from. Both in PSRAM. Null: stock only.
+    LayoutMailbox*      layout = nullptr;
+    core::layout::Deck* layout_live = nullptr;
 
     // Routing, the same way (services/route_store.hpp): the mailbox with
     // the two route buffers, and `storage`'s block cache and search. Both

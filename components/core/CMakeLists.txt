@@ -51,4 +51,7 @@ idf_component_register(
          "src/crash.cpp"
          "src/ecu.cpp"
          "src/tpms.cpp"
+         "src/layout.cpp"
+         "src/layout_fields.cpp"
+         "src/layout_fields.gen.cpp"
     INCLUDE_DIRS "include")

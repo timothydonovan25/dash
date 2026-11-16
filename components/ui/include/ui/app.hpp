@@ -24,7 +24,7 @@ using AllScreens = ScreenStorage<
     SpeedScreen, MediaScreen, MinimalScreen, TripScreen, NavScreen, TripMapScreen, PhoneScreen,
     RaceScreen, LapScreen, LapHistoryScreen, TrackMapScreen, SessionScreen, AllDataScreen, EngineScreen,
     AttitudeScreen, PerfScreen, StuntScreen, HeartScreen, DiagMenuScreen, SensorsScreen, GpsScreen, FusionScreen, SystemScreen, PowerScreen, BusScreen,
-    RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen>;
+    RadioScreen, UpdateScreen, ConfigScreen, GearCalScreen, CustomScreen>;
 
 // Which screen is alive. Order follows the modes, but nothing depends on it.
 enum class ScreenId : uint8_t {
@@ -34,6 +34,8 @@ enum class ScreenId : uint8_t {
     AllData, Engine, Attitude, Perf, Stunt, Heart,
     DiagMenu, Sensors, Gps, Fusion, System, Power, Bus, Radio, Update,
     Config, GearCal,
+    // A screen the rider drew: which one is App::custom_index_.
+    Custom,
 };
 
 class App {
@@ -114,11 +116,29 @@ public:
     // firmware's layout, blank NVS) is ignored.
     void resume_place(uint16_t p) {
         const unsigned m = p >> 8, sc = p & 0xFFu;
-        if (m >= core::nav::kModeCount || sc >= layout_.screens[m]) return;
+        if (m >= layout_.mode_count || sc >= layout_.screens[m]) return;
         nav_.mode = static_cast<core::nav::Mode>(m);
         nav_.screen = static_cast<uint8_t>(sc);
     }
-    const char* mode_name() const { return core::nav::mode_name(nav_.mode); }
+    const char* mode_name() const;
+
+    // The rider's modes and screens (core::layout, docs/custom-screens.md).
+    // Null: the stock layout, from the switch in screen_for(). The deck is
+    // not copied: it lives in PSRAM, owned by the wiring, and must outlive
+    // the App or the next set_deck(). Before begin() it only sets the
+    // layout; after, it repaints everything and goes to `place` ((mode << 8)
+    // | screen, as place()), or home if that is not in the new deck: a place
+    // in the old deck means nothing in this one, so the caller says which.
+    void set_deck(const core::layout::Deck* d, Canvas* c = nullptr, uint16_t place = 0);
+    // Where custom screen `index` is in the current deck, as place(); 0
+    // (home) if no mode holds it.
+    uint16_t place_of_custom(uint8_t index) const;
+    const core::layout::Deck* deck() const { return deck_; }
+    // A few seconds of warning along the bottom strip, from outside the
+    // Frame: render's "layout refused" when the card's file does not check out.
+    void notice(const char* big, const char* small, uint32_t now_ms) {
+        game_event_.set(big, small, color::kWarn, now_ms + 6000);
+    }
 
     AlertOverlay& alert() { return alert_; }
     // Which alert the overlay is showing, None if it is down or dismissed.
@@ -144,7 +164,8 @@ public:
     const core::nav::Layout& layout() const { return layout_; }
 
 private:
-    ScreenId screen_for(core::nav::Mode m, uint8_t index) const;
+    // `custom`, for ScreenId::Custom: the deck's screen index.
+    ScreenId screen_for(core::nav::Mode m, uint8_t index, uint8_t* custom = nullptr) const;
     void     enter_current(Canvas& c);
     // Straight to a screen of the current mode, with the cursor at `focus`:
     // DIAG's menu and back.
@@ -163,6 +184,8 @@ private:
     alignas(AllScreens::align) unsigned char slot_[AllScreens::size];
     Screen*          active_ = nullptr;
     ScreenId         active_id_ = ScreenId::None;
+    const core::layout::Deck* deck_ = nullptr;
+    uint8_t          custom_index_ = 0;    // the custom screen built, or to build
 
     // What the screens are handed when they are built.
     const IPointSource*     trip_src_ = nullptr;

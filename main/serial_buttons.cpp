@@ -11,10 +11,12 @@
 
 #include "bsp/pins.hpp"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "sdkconfig.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -117,6 +119,83 @@ ConsoleArg g_console_arg;
 
 void handle(const char* line, ui::ICommandSink& commands, const services::Deps& deps) {
     if (c6_line(line)) return;
+    // `gps tx toggle [s]`: GPIO3 (GPS TX, said to be U16-6) taken from UART1
+    // and switched high/low once a second for s seconds (default 30), so a
+    // meter on U16-6 and U4-10 shows whether the pin really comes out there
+    // (bringup §7). The console is busy meanwhile; UART1 gets it back after.
+    if (std::strncmp(line, "gps tx toggle", 13) == 0) {
+        int secs = std::atoi(line + 13);
+        if (secs <= 0 || secs > 600) secs = 30;
+        const gpio_num_t tx = static_cast<gpio_num_t>(bsp::kGpsTx);
+        gpio_reset_pin(tx);   // routes it back to plain GPIO, away from UART1
+        gpio_set_direction(tx, GPIO_MODE_OUTPUT);
+        for (int i = 0; i < secs; ++i) {
+            const int level = (i & 1) ? 0 : 1;
+            gpio_set_level(tx, level);
+            std::printf("gps tx: GPIO%d %s (%d/%d s)\n", bsp::kGpsTx, level ? "HIGH 3.3 V" : "LOW 0 V",
+                        i + 1, secs);
+            std::fflush(stdout);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        uart_set_pin(UART_NUM_1, bsp::kGpsTx, bsp::kGpsRx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        std::printf("gps tx: GPIO%d back on UART1\n", bsp::kGpsTx);
+        std::fflush(stdout);
+        return;
+    }
+    // `gps say`: UART1 sends $PMTK605 (firmware query) at the rate the GPS
+    // is on, counting edges on GPIO3's own pad as it goes out (proves the
+    // UART drives the pin), then listens 1.5 s for $PMTK705. The reply is
+    // read by UART3 put on GPIO2 beside UART1, so `gnss` keeps its port.
+    if (std::strcmp(line, "gps say") == 0) {
+        static char rx[1024];
+        constexpr uart_port_t kSpy = UART_NUM_3;
+        const gpio_num_t tx = static_cast<gpio_num_t>(bsp::kGpsTx);
+        uint32_t baud = 0;
+        uart_get_baudrate(UART_NUM_1, &baud);
+        uart_config_t c = {};
+        c.baud_rate = static_cast<int>(baud);
+        c.data_bits = UART_DATA_8_BITS;
+        c.parity = UART_PARITY_DISABLE;
+        c.stop_bits = UART_STOP_BITS_1;
+        c.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+        c.source_clk = UART_SCLK_DEFAULT;
+        if (uart_driver_install(kSpy, sizeof rx * 2, 0, 0, nullptr, 0) != ESP_OK ||
+            uart_param_config(kSpy, &c) != ESP_OK ||
+            uart_set_pin(kSpy, UART_PIN_NO_CHANGE, bsp::kGpsRx, UART_PIN_NO_CHANGE,
+                         UART_PIN_NO_CHANGE) != ESP_OK) {
+            std::printf("gps say: UART3 would not start\n");
+            uart_driver_delete(kSpy);
+            return;
+        }
+        gpio_input_enable(tx);   // read the pad back while UART1 drives it
+        uart_flush_input(kSpy);
+        static const char kQuery[] = "$PMTK605*31\r\n";
+        uart_write_bytes(UART_NUM_1, kQuery, sizeof kQuery - 1);
+        int edges = 0, prev = gpio_get_level(tx);
+        const int64_t t0 = esp_timer_get_time();
+        while (esp_timer_get_time() - t0 < 40000) {   // 13 bytes at 9600 is 14 ms
+            const int v = gpio_get_level(tx);
+            edges += v != prev;
+            prev = v;
+        }
+        int n = 0;
+        const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(1500);
+        while (n < static_cast<int>(sizeof rx) - 1 && xTaskGetTickCount() < until) {
+            const int got = uart_read_bytes(kSpy, rx + n, sizeof rx - 1 - n, pdMS_TO_TICKS(20));
+            if (got > 0) n += got;
+        }
+        rx[n] = '\0';
+        uart_driver_delete(kSpy);
+        std::printf("gps say: sent $PMTK605 at %u baud; GPIO%d edges while sending %d; heard %d bytes\n",
+                    static_cast<unsigned>(baud), bsp::kGpsTx, edges, n);
+        for (const char* p = std::strstr(rx, "$PMTK"); p; p = std::strstr(p + 1, "$PMTK")) {
+            const char* e = std::strpbrk(p, "\r\n");
+            std::printf("gps say: reply %.*s\n", e ? static_cast<int>(e - p) : 80, p);
+        }
+        if (!std::strstr(rx, "$PMTK")) std::printf("gps say: no PMTK reply\n");
+        std::fflush(stdout);
+        return;
+    }
     if (std::strcmp(line, "screen") == 0) {
         send_screen(deps);
         return;

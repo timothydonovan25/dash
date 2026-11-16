@@ -39,6 +39,9 @@
 #include "core/ota/ota.hpp"
 #include "core/wifi/wifi.hpp"
 #include "core/route/search.hpp"
+#include "core/layout/deck.hpp"
+#include "services/editor_info.hpp"
+#include "services/layout_store.hpp"
 
 #include "esp_app_desc.h"
 #include "esp_attr.h"
@@ -63,6 +66,8 @@
 namespace services {
 
 extern const char kPage[];   // wifi_page.cpp
+// The screen editor, web/screens.html, embedded by the component's CMake.
+extern const char kScreensPageStart[] asm("_binary_screens_html_start");
 
 namespace {
 
@@ -576,6 +581,218 @@ esp_err_t settings_set(httpd_req_t* r) {
     return send_json(r, body);
 }
 
+// --- custom layouts (docs/custom-screens.md §7, §8) -------------------------
+//
+// The editor at /screens. Its files are ui/*.dui on the card; a draft goes
+// straight to `render` through Deps::layout and is never written anywhere.
+// Every deck that arrives is decoded and validated here before it is kept
+// or shown: the same core::layout::decode the card's files go through.
+
+// A whole request body, up to a .dui's limit. PSRAM: one server task.
+EXT_RAM_BSS_ATTR uint8_t g_ui_bytes[core::layout::kMaxEncoded];
+// Decoded here to check an upload before it is written to the card.
+EXT_RAM_BSS_ATTR core::layout::Deck g_ui_check;
+// /api/values reads one Frame; too big for the server's stack frame.
+EXT_RAM_BSS_ATTR core::state::Frame g_ui_frame;
+
+void emit_chunk(const char* s, size_t n, void* ctx) {
+    httpd_resp_send_chunk(static_cast<httpd_req_t*>(ctx), s, static_cast<ssize_t>(n));
+}
+
+// The body into g_ui_bytes; the error for the browser, or null.
+const char* read_body(httpd_req_t* r, size_t& n) {
+    n = 0;
+    const size_t size = r->content_len;
+    if (size == 0 || size > sizeof g_ui_bytes) return "not a layout file";
+    int quiet = 0;
+    while (n < size) {
+        const int got = httpd_req_recv(r, reinterpret_cast<char*>(g_ui_bytes + n), size - n);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT && ++quiet < 3) continue;
+        if (got <= 0) return "connection lost";
+        quiet = 0;
+        n += static_cast<size_t>(got);
+        g_web.touch();
+    }
+    return nullptr;
+}
+
+esp_err_t send_layout_error(httpd_req_t* r, const char* what, int index = -1) {
+    char body[128];
+    std::snprintf(body, sizeof body, "{\"ok\":false,\"error\":\"%s\",\"index\":%d}", what, index);
+    return send_status(r, "400 Bad Request", body);
+}
+
+esp_err_t screens_page_get(httpd_req_t* r) {
+    g_web.touch();
+    httpd_resp_set_type(r, "text/html; charset=utf-8");
+    return httpd_resp_sendstr(r, kScreensPageStart);
+}
+
+esp_err_t fields_get(httpd_req_t* r) {
+    g_web.touch();
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    write_editor_info(emit_chunk, r);
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+// GET /api/values?ids=1,14,23: those fields now, as a readout would show them.
+esp_err_t values_get(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    // A screen has at most 16 readouts: 32 ids is room to spare, and keeps
+    // this frame well inside the 1 kB rule.
+    char q[224], ids_s[200];
+    uint16_t ids[32];
+    size_t n = 0;
+    if (httpd_req_get_url_query_str(r, q, sizeof q) == ESP_OK &&
+        httpd_query_key_value(q, "ids", ids_s, sizeof ids_s) == ESP_OK) {
+        n = parse_ids(ids_s, ids, 32);
+    }
+    core::state::snapshot(*d.slots, d.clock->now_ms(), g_ui_frame);
+    core::layout::ShowCtx c;
+    c.units = static_cast<core::units::System>(d.settings->unit_system);
+    c.tz_offset_h = d.settings->tz_offset_h;
+    c.clock_12h = d.settings->clock_12h;
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    write_values(g_ui_frame, c, ids, n, emit_chunk, r);
+    return httpd_resp_send_chunk(r, nullptr, 0);
+}
+
+// PUT /api/draft?screen=N: show this deck now, on custom screen N, unsaved.
+esp_err_t draft_put(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    if (!d.layout) return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no layouts on this build\"}");
+    size_t n = 0;
+    if (const char* err = read_body(r, n)) return send_layout_error(r, err);
+    DeckHandoff& h = d.layout->draft;
+    // Render takes a draft within a frame; a free slot is the normal case.
+    for (int i = 0; i < 20 && !h.free(); ++i) vTaskDelay(pdMS_TO_TICKS(10));
+    if (!h.free()) return send_status(r, "503 Service Unavailable", "{\"ok\":false,\"error\":\"busy\"}");
+    core::layout::Error why;
+    if (!core::layout::decode(g_ui_bytes, n, h.deck, &why)) return send_layout_error(r, why.what, why.index);
+    char q[32], v[8];
+    unsigned screen = 0xFF;
+    if (httpd_req_get_url_query_str(r, q, sizeof q) == ESP_OK &&
+        httpd_query_key_value(q, "screen", v, sizeof v) == ESP_OK) {
+        screen = static_cast<unsigned>(std::strtoul(v, nullptr, 10));
+    }
+    // Where that screen is in the draft's modes, so the dash shows it.
+    h.place = 0;
+    for (uint8_t m = 0; m < h.deck.mode_count && screen < 0xFF; ++m)
+        for (uint8_t i = 0; i < h.deck.modes[m].count; ++i)
+            if (h.deck.modes[m].screens[i] == core::layout::kCustomBase + screen && !h.place)
+                h.place = static_cast<uint16_t>((m << 8) | i);
+    h.post();
+    return send_json(r, "{\"ok\":true}");
+}
+
+// DELETE /api/draft: Live off. The dash goes back to the card's layout.
+esp_err_t draft_delete(httpd_req_t* r) {
+    g_web.touch();
+    if (g_web.d->layout) g_web.d->layout->draft_end.store(true);
+    return send_json(r, "{\"ok\":true}");
+}
+
+// GET /api/ui: the active file and why the last one was refused, if it was.
+esp_err_t ui_status_get(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    char body[160];
+    const bool card = d.card && d.card->present();
+    std::snprintf(body, sizeof body, "{\"card\":%s,\"active\":\"%s\",\"error\":\"%s\"}",
+                  card ? "true" : "false", d.layout ? d.layout->active : "",
+                  d.layout ? d.layout->error : "");
+    return send_json(r, body);
+}
+
+// POST /api/ui?active=enduro.dui (or empty for stock).
+esp_err_t ui_active_post(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    char q[64], name[kUiNameLen] = {};
+    if (httpd_req_get_url_query_str(r, q, sizeof q) == ESP_OK)
+        httpd_query_key_value(q, "active", name, sizeof name);
+    if (name[0] && !valid_ui_name(name)) return send_layout_error(r, "not a .dui name");
+    if (!d.card || !d.card->present() || !d.layout)
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    if (!hal::ok(set_active(*d.card, name)))
+        return send_status(r, "500 Internal Server Error", "{\"ok\":false,\"error\":\"the card refused it\"}");
+    d.layout->reload.store(true);
+    return send_json(r, "{\"ok\":true}");
+}
+
+// GET /api/ui/stock: the compiled-in layout, encoded, to start a file from.
+esp_err_t ui_stock_get(httpd_req_t* r) {
+    g_web.touch();
+    core::layout::default_deck(g_ui_check);
+    const size_t n = core::layout::encode(g_ui_check, g_ui_bytes, sizeof g_ui_bytes);
+    httpd_resp_set_type(r, "application/octet-stream");
+    return httpd_resp_send(r, reinterpret_cast<const char*>(g_ui_bytes), static_cast<ssize_t>(n));
+}
+
+bool ui_name_ok(const char* name) { return valid_ui_name(name); }
+
+// GET /ui/ lists the card's layouts; GET /ui/<name>.dui downloads one.
+esp_err_t ui_file_get(httpd_req_t* r) {
+    const char* name = r->uri + std::strlen("/ui/");
+    if (!*name) return list_dir(r, kUiDir, ui_name_ok);
+    g_web.touch();
+    Deps& d = *g_web.d;
+    if (!valid_ui_name(name)) return send_layout_error(r, "not a .dui name");
+    if (!d.card || !d.card->present())
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    char path[48];
+    std::snprintf(path, sizeof path, "%s/%s", kUiDir, name);
+    size_t size = 0, got = 0;
+    if (!hal::ok(d.card->size_of(path, size)) || size > sizeof g_ui_bytes ||
+        !hal::ok(d.card->read_at(path, 0, g_ui_bytes, size, got)) || got != size) {
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no such file\"}");
+    }
+    httpd_resp_set_type(r, "application/octet-stream");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    return httpd_resp_send(r, reinterpret_cast<const char*>(g_ui_bytes), static_cast<ssize_t>(size));
+}
+
+// PUT /ui/<name>.dui: checked whole, then written through a .tmp. If it is
+// the active one, `storage` reads it again and the dash shows it.
+esp_err_t ui_file_put(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    const char* name = r->uri + std::strlen("/ui/");
+    if (!valid_ui_name(name)) return send_layout_error(r, "name: a-z, 0-9 and -, then .dui");
+    if (!d.card || !d.card->present())
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    size_t n = 0;
+    if (const char* err = read_body(r, n)) return send_layout_error(r, err);
+    core::layout::Error why;
+    if (!core::layout::decode(g_ui_bytes, n, g_ui_check, &why)) return send_layout_error(r, why.what, why.index);
+    if (!hal::ok(write_ui_file(*d.card, name, g_ui_bytes, n)))
+        return send_status(r, "500 Internal Server Error", "{\"ok\":false,\"error\":\"the card refused it\"}");
+    if (d.layout && std::strcmp(d.layout->active, name) == 0) d.layout->reload.store(true);
+    ESP_LOGI(kTag, "ui/%s: %u bytes", name, static_cast<unsigned>(n));
+    return send_json(r, "{\"ok\":true}");
+}
+
+esp_err_t ui_file_delete(httpd_req_t* r) {
+    g_web.touch();
+    Deps& d = *g_web.d;
+    const char* name = r->uri + std::strlen("/ui/");
+    if (!valid_ui_name(name)) return send_layout_error(r, "not a .dui name");
+    if (!d.card || !d.card->present())
+        return send_status(r, "404 Not Found", "{\"ok\":false,\"error\":\"no card\"}");
+    char path[48];
+    std::snprintf(path, sizeof path, "%s/%s", kUiDir, name);
+    d.card->remove(path);
+    if (d.layout && std::strcmp(d.layout->active, name) == 0) {
+        set_active(*d.card, "");
+        d.layout->reload.store(true);
+    }
+    return send_json(r, "{\"ok\":true}");
+}
+
 // Firmware in. The body goes to `ota` through the stream; the answer is
 // whatever `ota` made of it.
 esp_err_t fw_post(httpd_req_t* r) {
@@ -666,7 +883,7 @@ httpd_handle_t start_server() {
     cfg.core_id = 1;
     cfg.task_priority = 3;
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 16;
+    cfg.max_uri_handlers = 28;   // 26 in use
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
@@ -690,7 +907,19 @@ httpd_handle_t start_server() {
         {"/games/*",       HTTP_DELETE, game_delete, nullptr},
         {"/route/map.rgf", HTTP_PUT,  map_put,       nullptr},
         {"/route/search.idx", HTTP_PUT, search_put,  nullptr},
+        {"/screens",       HTTP_GET,  screens_page_get, nullptr},
+        {"/api/fields",    HTTP_GET,  fields_get,    nullptr},
+        {"/api/values",    HTTP_GET,  values_get,    nullptr},
+        {"/api/draft",     HTTP_PUT,  draft_put,     nullptr},
+        {"/api/draft",     HTTP_DELETE, draft_delete, nullptr},
+        {"/api/ui",        HTTP_GET,  ui_status_get, nullptr},
+        {"/api/ui",        HTTP_POST, ui_active_post, nullptr},
+        {"/api/ui/stock",  HTTP_GET,  ui_stock_get,  nullptr},
+        {"/ui/*",          HTTP_GET,  ui_file_get,   nullptr},
+        {"/ui/*",          HTTP_PUT,  ui_file_put,   nullptr},
+        {"/ui/*",          HTTP_DELETE, ui_file_delete, nullptr},
     };
+    static_assert(sizeof uris / sizeof uris[0] <= 28, "raise max_uri_handlers");
     for (const httpd_uri_t& u : uris) httpd_register_uri_handler(h, &u);
     return h;
 }

@@ -43,6 +43,7 @@ current firmware version is in `firmware.txt`.
 | Speed fusion design, dead wheels, replay | `docs/fusion.md` |
 | IMU vibration plan (not built) | `docs/imu-vibration.md` |
 | Offline OSM routing, turn-by-turn, the map builder (built; not run on the board) | `docs/navigation.md` |
+| Custom screens and modes: the deck, the `.dui` format, the editor at `/screens`, why it is shaped so | `docs/custom-screens.md` (as built: `features.md` §36) |
 | The Guition demo board build and its bring-up lessons | `demo_p4/README.md` |
 | Release images and C6 images | `releases/README.md` |
 | K-line ECU adapter (separate board, not ordered as far as the repo knows) | `kline-adapter/review.md` |
@@ -231,6 +232,11 @@ build dies in `espcoredump`). Include prefix and namespace are still `hal`.
   `ConfigSet`. CONFIG keys are permanent NVS IDs, never renumbered
   (`test_config` holds the shipped list).
 - **A new screen** goes in `ScreenId`, `ui::AllScreens` and `App::build()`.
+  `ScreenId`'s numbers are stored in `.dui` files: append, never reorder
+  (`core::layout::Builtin` mirrors them, checked by `static_assert`).
+- **Changed the Frame?** Run `python3 tools/frame_fields.py`: custom screens
+  bind every Frame field by a permanent id, and ctest `frame_fields` fails
+  until the generated table matches the headers.
 - **Versions.** Bump `firmware.txt` (version + one-to-three-word feature)
   before a build you mean to keep; every build is copied to `releases/`.
 - **Secure boot and flash encryption are off by decision**, and the

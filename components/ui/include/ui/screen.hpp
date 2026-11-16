@@ -158,6 +158,11 @@ public:
     // a submenu -- says where it put it, so nav's copy follows. -1: never.
     virtual int focus_now() const { return -1; }
 
+    // A question for the rider while the screen waits on a second press
+    // ("E AGAIN: CLEAR LAPS"); the App shows it in the toast strip. Null for
+    // none.
+    virtual const char* prompt() const { return nullptr; }
+
     void bind(const Context& ctx) { ctx_ = &ctx; }
 
 protected:

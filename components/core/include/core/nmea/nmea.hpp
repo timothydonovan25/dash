@@ -38,6 +38,20 @@ private:
     Result end_of_sentence(state::Gnss& out);
     Result parse_rmc(state::Gnss& out);
     Result parse_gga(state::Gnss& out);
+    Result parse_gsv(const char* talker, state::Gnss& out);
+
+    // GSV, per talker (GP, GL, ...): the set being read and the last whole
+    // one. A set is several sentences of four satellites each.
+    static constexpr uint8_t kTalkers = 4;
+    static constexpr uint8_t kSkyMax = 24;
+    struct Sky {
+        char    talker[2] = {};
+        uint8_t view = 0;
+        uint8_t n = 0;
+        uint8_t snr[kSkyMax] = {};
+    };
+    Sky reading_[kTalkers];
+    Sky done_[kTalkers];
 
     // The longest sentence a consumer receiver emits is well under 100
     // characters. 128 leaves room and bounds the memory: nothing here

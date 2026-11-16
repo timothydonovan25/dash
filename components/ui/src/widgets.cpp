@@ -100,6 +100,7 @@ template struct TextBuf<16>;
 template struct TextBuf<20>;
 template struct TextBuf<24>;
 template struct TextBuf<28>;
+template struct TextBuf<32>;   // ui::ReadoutWidget
 template struct TextBuf<60>;
 
 // --- Label --------------------------------------------------------------

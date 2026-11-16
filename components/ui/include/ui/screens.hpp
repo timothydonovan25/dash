@@ -12,6 +12,8 @@
 #pragma once
 #include "ui/screen.hpp"
 #include "core/state/track_buffer.hpp"
+#include "core/layout/deck.hpp"
+#include "core/layout/fields.hpp"
 
 namespace ui {
 
@@ -746,6 +748,63 @@ private:
     Label   hint_;
     Widget* list_[7] = {};
     uint8_t phase_ = 0;
+};
+
+// One readout of a custom screen: a datapoint from the Frame in one of the
+// core::layout::Style looks. One widget class for every style, so a screen
+// is an array of them and needs nothing built on the heap.
+class ReadoutWidget : public Widget {
+public:
+    static constexpr int kTraceLen = 120;
+    // `trace` only for Style::Spark: kTraceLen samples the screen owns, each
+    // the fraction of lo..hi in 0..254, kNoSample for no reading.
+    static constexpr uint8_t kNoSample = 255;
+    void configure(const core::layout::Readout* r, uint8_t* trace);
+    void update(const core::state::Frame& f, const core::layout::ShowCtx& c);
+    void render(Canvas& c) override;
+
+private:
+    const core::layout::Readout*  r_ = nullptr;
+    const core::layout::FieldDef* f_ = nullptr;
+    TextBuf<32>  text_;
+    const char*  unit_ = "";
+    bool         valid_ = false;
+    bool         lit_ = false;
+    int16_t      fill_px_ = 0;   // bar and gauge, at display resolution
+    Color        ink_ = 0;
+    uint8_t*     trace_ = nullptr;
+    uint8_t      trace_n_ = 0;
+    uint8_t      trace_head_ = 0;
+    uint32_t     trace_next_ms_ = 0;
+};
+
+// A screen the rider drew on the hotspot page (docs/custom-screens.md §4):
+// chrome from the deck drawn as background, readouts as widgets. Short E runs
+// the screen's CONFIG action, asking twice for one that loses something.
+class CustomScreen final : public Screen {
+public:
+    void set_deck(const core::layout::Deck* d, uint8_t index);
+    const char* name() const override;
+    void enter(Canvas& c) override;
+    void update(const core::state::Frame& f) override;
+    void draw_background(Canvas& c) override;
+    bool wants_title() const override;
+    bool handle(const core::nav::InputEvent& e) override;
+    WidgetList widgets() override;
+    const char* widget_name(size_t i) const override;
+    const char* prompt() const override { return armed_ ? prompt_ : nullptr; }
+    uint8_t index() const { return index_; }
+
+private:
+    const core::layout::Deck*   deck_ = nullptr;
+    const core::layout::Screen* screen_ = nullptr;
+    uint8_t        index_ = 0;
+    ReadoutWidget  ro_[core::layout::kMaxReadoutsPerScreen];
+    Widget*        list_[core::layout::kMaxReadoutsPerScreen] = {};
+    uint8_t        n_ = 0;
+    uint8_t        traces_[core::layout::kMaxSparksPerScreen][ReadoutWidget::kTraceLen] = {};
+    bool           armed_ = false;
+    char           prompt_[28] = {};
 };
 
 }  // namespace ui

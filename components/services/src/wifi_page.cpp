@@ -56,6 +56,14 @@ input[type=checkbox]{width:20px;height:20px;margin:0;accent-color:var(--acc);fle
 </style></head><body>
 <header><h1>CRF250F <b>Dash</b></h1></header>
 
+<h2>Screens</h2>
+<div class="card">
+<div class="dim">Draw your own screens and arrange the modes: shapes, text and any
+reading the dash has. Kept on the card in ui/; no card, and the dash shows its
+built-in screens.</div>
+<a href="/screens"><button>Open the screen editor</button></a>
+</div>
+
 <h2>Ride logs</h2>
 <div class="card">
 <div class="bar"><label><input type="checkbox" id="lall">Select all</label><span id="lsel" class="dim"></span></div>

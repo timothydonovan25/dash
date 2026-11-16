@@ -43,8 +43,10 @@ bool Alerter::condition(Kind k, const state::Frame& f) const {
         case Kind::NoPulse:
             return hr::no_pulse(f.heart, f.t_ms);
         case Kind::BikeDown:
-            return f.health.ok(Dev::Imu) && std::fabs(f.att.lean_deg) > cfg_.down_lean_deg &&
-                   f.motion.best_mph < cfg_.down_mph;
+            // Retired (2.24.0): a crash is core::crash's countdown, shown only
+            // with Crash SOS on; a tip-over alone says nothing. The slot stays
+            // so the kinds after it keep their numbers.
+            return false;
         case Kind::BatteryHigh:
             return on_bike && f.elec.vbat > cfg_.batt_high_v;
         case Kind::BatteryLow:

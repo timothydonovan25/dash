@@ -16,7 +16,7 @@ State step(State s, InputEvent e, const Layout& layout, uint8_t focus_count) {
         if (e.press == Press::Long) {
             s.mode = Mode::Cruise;
         } else {
-            s.mode = static_cast<Mode>((mode_idx + 1) % kModeCount);
+            s.mode = static_cast<Mode>((mode_idx + 1) % (layout.mode_count ? layout.mode_count : 1));
         }
         s.screen = 0;
         s.focus = 0;

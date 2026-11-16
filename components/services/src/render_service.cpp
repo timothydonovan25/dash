@@ -232,10 +232,15 @@ void render_task(void* arg) {
     ui::FrameBufferCanvas canvas(band, ui::kScreenW, kBandLines);
     // The screen left at the last key-off (keeper saves it while still).
     float place = 0.0f;
+    uint16_t boot_place = 0;
     if (d.storage && hal::ok(d.storage->read_f32(hal::kNsLife, hal::kKeyUiPlace, place)) &&
         place >= 0.0f && place < 65536.0f) {
-        app.resume_place(static_cast<uint16_t>(place));
+        boot_place = static_cast<uint16_t>(place);
+        app.resume_place(boot_place);
     }
+    // The stock layout first: the card's (if any) arrives from `storage` a
+    // moment later and, inside LayoutFollower's boot window, keeps this place.
+    LayoutFollower layouts;
     app.begin(canvas);
 
     // The copy of the glass, 300 kB, in PSRAM: it is read once per strip
@@ -254,6 +259,7 @@ void render_task(void* arg) {
     // does every LED-driver write; `keeper` takes over from its next pass.
     d.backlight_pct.store(d.settings->brightness_pct, std::memory_order_relaxed);
 
+    bool layout_error_shown = false;
     uint32_t frames = 0;
     uint32_t sent_frames = 0;   // passes that put anything on the wire
     uint32_t last_hz_ms = d.clock->now_ms();
@@ -343,6 +349,23 @@ void render_task(void* arg) {
             d.panel->init();
             app.invalidate();
             shadow.invalidate();
+        }
+
+        // A custom layout from the card, or the editor's live draft
+        // (services/layout_store.hpp). Between frames: the App's screen is
+        // rebuilt on the new deck and goes out whole.
+        if (d.layout && d.layout_live) {
+            const LayoutFollower::Change ch = layouts.step(*d.layout, *d.layout_live, now, boot_place);
+            if (ch.apply) {
+                app.set_deck(ch.deck, &canvas, ch.place);
+                ESP_LOGI(kTag, "layout: %s", ch.deck ? (layouts.draft_on() ? "live draft" : d.layout->active)
+                                                     : "stock");
+            }
+            if (d.layout->error[0] && !layout_error_shown) {
+                ESP_LOGW(kTag, "layout refused: %s", d.layout->error);
+                app.notice("LAYOUT REFUSED", d.layout->error, now);
+            }
+            layout_error_shown = d.layout->error[0] != '\0';
         }
 
         // The history grows as laps are scored, so the view is handed over

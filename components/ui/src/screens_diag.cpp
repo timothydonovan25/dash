@@ -177,13 +177,28 @@ void GpsScreen::enter(Canvas&) {
 void GpsScreen::update(const Frame& f) {
     char v[24];
 
-    table_.set_row(0, "Fix", f.gnss.fix ? "yes" : "NO");
+    std::snprintf(v, sizeof v, "%s, quality %u", f.gnss.fix ? "yes" : "NO",
+                  static_cast<unsigned>(f.gnss.quality));
+    table_.set_row(0, "Fix", v);
 
-    u::fmt_value(v, sizeof v, static_cast<float>(f.gnss.sats), 0, true);
+    // Used in the fix, of those in view (GSV; 0 in view until a set comes).
+    if (f.gnss.sats_view) {
+        std::snprintf(v, sizeof v, "%u of %u", static_cast<unsigned>(f.gnss.sats),
+                      static_cast<unsigned>(f.gnss.sats_view));
+    } else {
+        u::fmt_value(v, sizeof v, static_cast<float>(f.gnss.sats), 0, true);
+    }
     table_.set_row(1, "Satellites", v);
 
-    u::fmt_value(v, sizeof v, static_cast<float>(f.gnss.quality), 0, true);
-    table_.set_row(2, "Quality", v);
+    // Strongest, and the mean of the four strongest. Open sky reads 40s;
+    // a weak aerial or chafed lead sits in the 20s with the same sky.
+    if (f.gnss.snr_best) {
+        std::snprintf(v, sizeof v, "%u best, %u top 4", static_cast<unsigned>(f.gnss.snr_best),
+                      static_cast<unsigned>(f.gnss.snr_top4));
+    } else {
+        std::snprintf(v, sizeof v, "--");
+    }
+    table_.set_row(2, "Signal dB-Hz", v);
 
     u::fmt_value(v, sizeof v, f.gnss.hdop, 1, f.gnss.fix);
     table_.set_row(3, "HDOP", v);

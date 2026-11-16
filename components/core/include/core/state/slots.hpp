@@ -86,5 +86,9 @@ struct Frame {
 // whole is not an instant, and does not need to be — the newest lean angle
 // and a 40 ms old lap time on the same screen is not a bug.
 Frame snapshot(const Slots& s, uint32_t t_ms);
+// The same, into `out`: for a task whose stack cannot hold a 2.6 kB Frame
+// temporary (the web server's /api/values fills a PSRAM one). Each slot's
+// copy is still a temporary, the largest Nav at ~1 kB.
+void snapshot(const Slots& s, uint32_t t_ms, Frame& out);
 
 }  // namespace core::state

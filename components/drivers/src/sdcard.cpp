@@ -62,7 +62,7 @@ hal::Status SdCard::init() {
     // The directories the firmware writes into. fopen() does not make a
     // missing one, so a fresh card would refuse every log and every track.
     // EEXIST on every mount after the first is the normal case.
-    for (const char* dir : {"logs", "detail", "tracks", "games"}) {
+    for (const char* dir : {"logs", "detail", "tracks", "games", "ui"}) {
         char full[32];
         std::snprintf(full, sizeof full, "%s/%s", kMount, dir);
         mkdir(full, 0777);

@@ -414,6 +414,17 @@ As built (`ui/app.cpp`, `ui::App::build()`); `features.md` §6–§10 says what
 each shows. Only one screen is alive at a time, built into a slot sized for
 the largest (`ui::AllScreens`).
 
+That is the **stock** layout. Since 2.23 the riding modes can come from a
+`core::layout::Deck` instead (`docs/custom-screens.md`, features §36): a
+`.dui` file on the card, or the editor's live draft. DIAG and CONFIG are
+then still the last two modes, found by `nav::is_diag()` / `is_config()`
+rather than by `Mode::Diag`'s value. The live deck has **one writer,
+`render`**, which copies what `storage` (the card) and `wifi` (a draft)
+hand over in single-slot `DeckHandoff`s; not `logic`, the usual writer of
+settings, because a 45 kB copy has no business on core 0. A custom screen is
+still a pure function of the Frame: its readouts read fields through the
+table `tools/frame_fields.py` generates from the Frame's headers.
+
 ### 7.2 Buttons
 
 | Button | Short press | Long press |

@@ -319,5 +319,35 @@ int main() {
         CHECK(ack_flag("GNRMC,1", 220) == -1);
     }
 
+    CASE("GSV: in view and signal strength, from each constellation's whole set");
+    {
+        // Captured from the bike board's PA1616D, 2026-11-15.
+        Parser p;
+        Gnss g;
+        CHECK(send(p, g, "GPGSV,2,1,07,12,59,215,23,13,56,238,18,05,47,192,38,19,21,107,27")
+              == Result::Ignored);                       // half a set changes nothing
+        CHECK(g.sats_view == 0);
+        CHECK(send(p, g, "GPGSV,2,2,07,41,,,,21,,,16,11,,,20") == Result::Updated);
+        CHECK(g.sats_view == 7);
+        CHECK(g.snr_best == 38);
+        CHECK(g.snr_top4 == 27);                         // 38, 27, 23, 20
+        CHECK(send(p, g, "GLGSV,2,1,06,85,52,005,32,75,46,247,33,76,29,316,,69,28,056,30")
+              == Result::Ignored);
+        CHECK(send(p, g, "GLGSV,2,2,06,84,27,056,37,86,23,284,") == Result::Updated);
+        CHECK(g.sats_view == 13);                        // 7 GPS + 6 GLONASS
+        CHECK(g.snr_best == 38);
+        CHECK(g.snr_top4 == 35);                         // 38, 37, 33, 32
+        // A new GPS set replaces the old one; GLONASS's stays.
+        CHECK(send(p, g, "GPGSV,1,1,01,05,47,192,") == Result::Updated);
+        CHECK(g.sats_view == 7);
+        CHECK(g.snr_best == 37);
+        // Joining mid-set (a second sentence with no first) is ignored.
+        Parser q;
+        Gnss h;
+        CHECK(send(q, h, "GPGSV,2,2,07,41,,,,21,,,16,11,,,20") == Result::Ignored);
+        CHECK(h.sats_view == 0);
+        CHECK(send(q, h, "GPGSV,2,3,07") == Result::Malformed);   // num past total
+    }
+
     return check::report("nmea");
 }

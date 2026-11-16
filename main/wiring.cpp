@@ -52,6 +52,10 @@ EXT_RAM_BSS_ATTR services::TrackMailbox                                  g_track
 // Routing: two route buffers (~1.4 MB) and `storage`'s block cache and
 // search (~4.5 MB). PSRAM only; nowhere near internal RAM.
 EXT_RAM_BSS_ATTR services::RouteMailbox                                  g_route;
+// Custom layouts (docs/custom-screens.md): the hand-over from `storage` and
+// `wifi`, and the one `render` draws. ~90 kB and ~45 kB.
+EXT_RAM_BSS_ATTR services::LayoutMailbox                                 g_layout;
+EXT_RAM_BSS_ATTR core::layout::Deck                                      g_layout_live;
 EXT_RAM_BSS_ATTR services::RouteEngine                                   g_route_engine;
 EXT_RAM_BSS_ATTR services::RouteTrace                                    g_route_trace;
 services::LapHistory                                    g_lap_history;
@@ -178,6 +182,8 @@ services::Deps& build() {
     g_deps.lap_history= &g_lap_history;
     g_deps.tracks     = &g_tracks;
     g_deps.route      = &g_route;
+    g_deps.layout      = &g_layout;
+    g_deps.layout_live = &g_layout_live;
     g_deps.route_engine = &g_route_engine;
     g_deps.route_trace = &g_route_trace;
     g_deps.commands   = &g_commands;

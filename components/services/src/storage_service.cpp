@@ -141,6 +141,7 @@ void storage_task(void* arg) {
         }
 
         const bool inserted = card->card_detect();
+        bool mounted_now = false;   // this pass mounted it: read its layout
 
         const uint32_t gen = d.slots->storage_request.generation();
         if (gen != request_gen && d.slots->storage_request.get().op ==
@@ -240,9 +241,11 @@ void storage_task(void* arg) {
                 if (hal::ok(s)) {
                     d.health->report_ok(core::state::Dev::Sd, now);
                     was_present = true;
+                    mounted_now = true;
                     // Uploads cut off by a reset leave their temporary files;
                     // none can be under way at mount, so they go.
-                    for (const char* tmp : {"route/map.tmp", "route/search.tmp", "games/upload.tmp"})
+                    for (const char* tmp : {"route/map.tmp", "route/search.tmp", "games/upload.tmp",
+                                            "ui/upload.tmp", "ui/active.tmp"})
                         card->remove(tmp);
                 } else {
                     d.health->report_error(core::state::Dev::Sd,
@@ -250,11 +253,19 @@ void storage_task(void* arg) {
                 }
             }
         } else {
+            if (!was_present) mounted_now = true;   // mounted by someone else first
             was_present = true;
             // Mounted says nothing about writes; only the logger's next
             // good write ends a streak of failed ones.
             if (!d.health->erring(core::state::Dev::Sd))
                 d.health->report_ok(core::state::Dev::Sd, now);
+        }
+
+        // The card's custom layout (services/layout_store.hpp): read at mount
+        // and when the page or CONFIG changed ui/. A card that went away
+        // posts nothing, so render keeps the layout it has until key-off.
+        if (d.layout && card->present() && !ejected) {
+            serve_layout(*d.layout, *card, mounted_now);
         }
 
         // Saved tracks (services/track_store.hpp): one job per pass, while

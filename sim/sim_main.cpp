@@ -39,6 +39,9 @@
 //                                boot was the crash
 //        media <title>\t<album>\t<artist>\t<lyric>    lyric is optional;
 //                                                     bare `media` clears it
+//        layout reload           `storage`'s pass: read sim_card/ui/active again
+//        layout draft <file.dui> the editor's live draft, from a file
+//        layout end              the draft over (the page's Save or Live off)
 //        quit
 //
 //   out  FRAME <lamps> <flash> <mode> <screen> <lapfrac> key=value...\n
@@ -215,6 +218,7 @@ public:
         ::mkdir(root, 0777);
         ::mkdir((std::string(root) + "/tracks").c_str(), 0777);
         ::mkdir((std::string(root) + "/route").c_str(), 0777);
+        ::mkdir((std::string(root) + "/ui").c_str(), 0777);
     }
     hal::Status init() override { return hal::Status::Ok; }
     bool present() const override { return true; }
@@ -621,6 +625,14 @@ int main() {
 
     ui::App app(ctx);
     app.bind_settings(&settings);
+    // Custom layouts, as on the bike: sim_card/ui/active names a .dui
+    // (docs/custom-screens.md). Heap, not stack: ~90 kB and ~45 kB.
+    static services::LayoutMailbox* layout_box = new services::LayoutMailbox;
+    static core::layout::Deck* layout_live = new core::layout::Deck;
+    deps.layout = layout_box;
+    deps.layout_live = layout_live;
+    services::LayoutFollower layouts;
+    bool layout_mounted = true;   // the first pass reads the card, as a mount does
 
     // The map widgets read the traces through the same view the render task
     // gives them on the device.
@@ -843,6 +855,31 @@ int main() {
                 else if (std::strcmp(a, "crank") == 0) bike.trigger_crank(now, controls.vbat);
                 else if (std::strcmp(a, "wheelie") == 0) bike.trigger_trick(sim::Bike::Trick::Wheelie, now);
                 else if (std::strcmp(a, "stoppie") == 0) bike.trigger_trick(sim::Bike::Trick::Stoppie, now);
+            } else if (line.rfind("layout", 0) == 0) {
+                char path[256] = {};
+                if (std::sscanf(line.c_str(), "layout draft %255s", path) == 1) {
+                    // What `wifi` does with PUT /api/draft.
+                    std::vector<uint8_t> bytes;
+                    if (std::FILE* fp = std::fopen(path, "rb")) {
+                        uint8_t chunk[4096];
+                        size_t got;
+                        while ((got = std::fread(chunk, 1, sizeof chunk, fp)) > 0)
+                            bytes.insert(bytes.end(), chunk, chunk + got);
+                        std::fclose(fp);
+                    }
+                    core::layout::Error why;
+                    if (layout_box->draft.free() &&
+                        core::layout::decode(bytes.data(), bytes.size(), layout_box->draft.deck, &why)) {
+                        layout_box->draft.place = 0;
+                        layout_box->draft.post();
+                    } else {
+                        std::fprintf(stderr, "layout draft %s: %s\n", path, why.what);
+                    }
+                } else if (line.rfind("layout end", 0) == 0) {
+                    layout_box->draft_end = true;
+                } else {
+                    layout_box->reload = true;
+                }
             } else if (line.rfind("quit", 0) == 0) {
                 if (log_file) std::fclose(log_file);
                 return 0;
@@ -1013,6 +1050,14 @@ int main() {
         if (!bus_busy) {
             app.set_lap_history(lap_history.ms, lap_history.count,
                                 lap_history.best_ms, lap_history.peak);
+            // `storage`'s and `render`'s halves of custom layouts.
+            services::serve_layout(*layout_box, card, layout_mounted);
+            layout_mounted = false;
+            const services::LayoutFollower::Change ch = layouts.step(*layout_box, *layout_live, now, app.place());
+            if (ch.apply) {
+                app.set_deck(ch.deck, &canvas, ch.place);
+                if (layout_box->error[0]) std::fprintf(stderr, "layout refused: %s\n", layout_box->error);
+            }
             app.update(core::state::snapshot(slots, now));
 
             // Take the damage before rendering it: `update` is what sets the

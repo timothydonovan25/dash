@@ -13,6 +13,7 @@ idf_component_register(
          "src/screens_diag.cpp"
          "src/screen_config.cpp"
          "src/screen_gearcal.cpp"
+         "src/screen_custom.cpp"
          "src/app.cpp"
          "src/shadow.cpp"
     INCLUDE_DIRS "include"

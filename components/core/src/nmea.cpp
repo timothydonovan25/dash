@@ -246,6 +246,7 @@ Result Parser::end_of_sentence(state::Gnss& out) {
 
     if (kind[0] == 'R' && kind[1] == 'M' && kind[2] == 'C') return parse_rmc(out);
     if (kind[0] == 'G' && kind[1] == 'G' && kind[2] == 'A') return parse_gga(out);
+    if (kind[0] == 'G' && kind[1] == 'S' && kind[2] == 'V') return parse_gsv(type, out);
     return Result::Ignored;
 }
 
@@ -322,6 +323,64 @@ Result Parser::parse_gga(state::Gnss& out) {
     // that the fix was lost.
     if (qok && q == 0) out.fix = false;
 
+    return Result::Updated;
+}
+
+Result Parser::parse_gsv(const char* talker, state::Gnss& out) {
+    // $xxGSV,total,num,in_view{,id,elev,az,snr}x1..4[,signal]*cs
+    if (fields_ < 4) return Result::Malformed;
+    bool ok_t = false, ok_n = false, ok_v = false;
+    const uint32_t total = read_uint(field_[1], &ok_t);
+    const uint32_t num = read_uint(field_[2], &ok_n);
+    const uint32_t view = read_uint(field_[3], &ok_v);
+    if (!ok_t || !ok_n || num == 0 || num > total) return Result::Malformed;
+
+    // This talker's slot; a fifth constellation takes the first's.
+    uint8_t slot = 0;
+    for (uint8_t i = 0; i < kTalkers; ++i) {
+        const Sky& k = done_[i];
+        const Sky& r = reading_[i];
+        const bool mine = (k.talker[0] == talker[0] && k.talker[1] == talker[1]) ||
+                          (r.talker[0] == talker[0] && r.talker[1] == talker[1]);
+        const bool empty = !k.talker[0] && !r.talker[0];
+        if (mine || empty) { slot = i; break; }
+    }
+    Sky& r = reading_[slot];
+    if (num == 1) {
+        r = Sky{};
+        r.talker[0] = talker[0];
+        r.talker[1] = talker[1];
+        r.view = ok_v ? static_cast<uint8_t>(view > 255 ? 255 : view) : 0;
+    } else if (r.talker[0] != talker[0] || r.talker[1] != talker[1]) {
+        return Result::Ignored;   // joined mid-set: wait for its first sentence
+    }
+    // Whole groups only: NMEA 4.1 adds a signal id after the last.
+    for (uint8_t i = 4; i + 3 < fields_ && r.n < kSkyMax; i += 4) {
+        bool ok = false;
+        const uint32_t snr = read_uint(field_[i + 3], &ok);   // empty: not tracked
+        r.snr[r.n++] = ok ? static_cast<uint8_t>(snr > 99 ? 99 : snr) : 0;
+    }
+    if (num != total) return Result::Ignored;
+
+    done_[slot] = r;
+    uint32_t in_view = 0;
+    uint8_t top[4] = {};
+    for (const Sky& k : done_) {
+        in_view += k.view;
+        for (uint8_t i = 0; i < k.n; ++i) {
+            uint8_t v = k.snr[i];
+            for (uint8_t& t : top) {   // keep the four largest, descending
+                if (v > t) { const uint8_t was = t; t = v; v = was; }
+            }
+        }
+    }
+    uint32_t sum = 0, count = 0;
+    for (const uint8_t t : top) {
+        if (t) { sum += t; ++count; }
+    }
+    out.sats_view = static_cast<uint8_t>(in_view > 255 ? 255 : in_view);
+    out.snr_best = top[0];
+    out.snr_top4 = count ? static_cast<uint8_t>((sum + count / 2) / count) : 0;
     return Result::Updated;
 }
 

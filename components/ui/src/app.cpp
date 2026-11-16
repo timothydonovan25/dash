@@ -47,6 +47,21 @@ constexpr Rect kSplashBar{static_cast<int16_t>(kScreenW / 2 - kSplashBarW / 2), 
 constexpr int kMaxPerWidget = 6;
 }  // namespace
 
+// The deck stores screens by these numbers (core::layout::Builtin): they must
+// not move.
+static_assert(static_cast<uint8_t>(ScreenId::Speed) == core::layout::kSpeed &&
+              static_cast<uint8_t>(ScreenId::Phone) == core::layout::kPhone &&
+              static_cast<uint8_t>(ScreenId::Race) == core::layout::kRace &&
+              static_cast<uint8_t>(ScreenId::Session) == core::layout::kSession &&
+              static_cast<uint8_t>(ScreenId::AllData) == core::layout::kAllData &&
+              static_cast<uint8_t>(ScreenId::Heart) == core::layout::kHeart &&
+              static_cast<uint8_t>(ScreenId::DiagMenu) == core::layout::kDiagMenu &&
+              static_cast<uint8_t>(ScreenId::Update) == core::layout::kUpdate &&
+              static_cast<uint8_t>(ScreenId::Config) == core::layout::kConfig &&
+              static_cast<uint8_t>(ScreenId::GearCal) == core::layout::kGearCal &&
+              static_cast<uint8_t>(ScreenId::Custom) == core::layout::kBuiltinEnd,
+              "ui::ScreenId and core::layout::Builtin disagree");
+
 App::App(const Context& ctx) : ctx_(ctx) {
     alert_.set_bounds(kAlertBox);
     slip_bar_.set_bounds(kSlipBar);
@@ -57,7 +72,23 @@ App::App(const Context& ctx) : ctx_(ctx) {
 
 App::~App() { destroy_active(); }
 
-ScreenId App::screen_for(Mode m, uint8_t index) const {
+ScreenId App::screen_for(Mode m, uint8_t index, uint8_t* custom) const {
+    if (deck_) {
+        // The riding modes come from the deck; DIAG and CONFIG are the last
+        // two whatever it holds.
+        const uint8_t mi = static_cast<uint8_t>(m);
+        if (core::nav::is_diag(layout_, m)) m = Mode::Diag;
+        else if (core::nav::is_config(layout_, m)) m = Mode::Config;
+        else if (mi < deck_->mode_count) {
+            const core::layout::ModeDef& md = deck_->modes[mi];
+            const uint8_t id = md.screens[index < md.count ? index : 0];
+            if (id >= core::layout::kCustomBase) {
+                if (custom) *custom = static_cast<uint8_t>(id - core::layout::kCustomBase);
+                return ScreenId::Custom;
+            }
+            return static_cast<ScreenId>(id);
+        }
+    }
     switch (m) {
         case Mode::Cruise:
             switch (index) {
@@ -184,6 +215,12 @@ void App::build(ScreenId id) {
         case ScreenId::Radio:      s = make<RadioScreen>(slot_); break;
         case ScreenId::Update:     s = make<UpdateScreen>(slot_); break;
         case ScreenId::GearCal:    s = make<GearCalScreen>(slot_); break;
+        case ScreenId::Custom: {
+            auto* t = make<CustomScreen>(slot_);
+            t->set_deck(deck_, custom_index_);
+            s = t;
+            break;
+        }
         case ScreenId::Config:
         case ScreenId::None:
         default: {
@@ -204,11 +241,50 @@ void App::build(ScreenId id) {
 }
 
 void App::enter_current(Canvas& c) {
-    const ScreenId id = screen_for(nav_.mode, nav_.screen);
-    if (active_ && active_id_ == id) return;
+    uint8_t custom = 0;
+    const ScreenId id = screen_for(nav_.mode, nav_.screen, &custom);
+    if (active_ && active_id_ == id &&
+        (id != ScreenId::Custom || custom == custom_index_)) return;
+    custom_index_ = custom;
     build(id);
     active_->enter(c);
     needs_full_ = true;
+}
+
+const char* App::mode_name() const {
+    if (!deck_) return core::nav::mode_name(nav_.mode);
+    if (core::nav::is_diag(layout_, nav_.mode)) return "DIAG";
+    if (core::nav::is_config(layout_, nav_.mode)) return "CONFIG";
+    const uint8_t m = static_cast<uint8_t>(nav_.mode);
+    return m < deck_->mode_count ? deck_->modes[m].name : "?";
+}
+
+void App::set_deck(const core::layout::Deck* d, Canvas* c, uint16_t place) {
+    deck_ = d;
+    layout_ = core::nav::Layout{};
+    if (d) {
+        layout_.mode_count = static_cast<uint8_t>(d->mode_count + 2);
+        for (uint8_t i = 0; i < d->mode_count; ++i) layout_.screens[i] = d->modes[i].count;
+        layout_.screens[d->mode_count] = core::nav::kDiagScreens;
+        layout_.screens[d->mode_count + 1] = 1;
+    }
+    nav_ = core::nav::State{};
+    resume_place(place);   // ignored, so home, when it is not in this deck
+    cal_active_ = false;
+    if (c && active_) {
+        destroy_active();   // the screen may be a custom one from the old deck
+        c->set_palette(palette_);
+        enter_current(*c);
+    }
+}
+
+uint16_t App::place_of_custom(uint8_t index) const {
+    if (!deck_) return 0;
+    for (uint8_t m = 0; m < deck_->mode_count; ++m)
+        for (uint8_t i = 0; i < deck_->modes[m].count; ++i)
+            if (deck_->modes[m].screens[i] == core::layout::kCustomBase + index)
+                return static_cast<uint16_t>((m << 8) | i);
+    return 0;
 }
 
 void App::set_trip_source(const IPointSource* s) {
@@ -295,7 +371,7 @@ void App::on_input(const core::nav::InputEvent& e, Canvas& c) {
     // cursor, B on a page comes back to the menu with the cursor on it, and
     // B on the menu has nothing to walk to. After the page's own handle(),
     // so a page that wants E (UPDATE's actions) still has it.
-    if (nav_.mode == core::nav::Mode::Diag) {
+    if (core::nav::is_diag(layout_, nav_.mode)) {
         using core::nav::Press;
         if (nav_.screen == 0 && e.button == Button::E && e.press == Press::Short) {
             // The row below the pages is the build's program, not a page.
@@ -597,6 +673,9 @@ void App::update_toast(const core::state::Frame& f) {
     if (allowed && notify_on && core::media::ringing(n, now)) {
         std::snprintf(big, sizeof big, "CALL %s", n.who);
         toast_.show(big, "incoming call", color::kGood);
+    } else if (allowed && active_ && current().prompt()) {
+        // A custom screen's action that asks twice (CustomScreen::handle).
+        toast_.show(current().prompt(), "any other button cancels", color::kWarn);
     } else if (allowed && phone_event_.live(now)) {
         // A message waits a minute, so whether its text shows is decided as
         // it shows, not when it came: stop, and it can be read.
@@ -669,7 +748,7 @@ void App::update(const core::state::Frame& f) {
     // has a run open, and takes itself back at the end. Entering needs a
     // canvas, so the swap itself waits for render(); until then the old
     // screen is still the one being shown.
-    const bool cal = f.gear_cal.phase != 0 && nav_.mode == Mode::Config;
+    const bool cal = f.gear_cal.phase != 0 && core::nav::is_config(layout_, nav_.mode);
     if (cal != cal_active_) {
         cal_swap_ = true;
         // A whole frame, which is the only time a render loop calls render()

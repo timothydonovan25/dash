@@ -7,8 +7,14 @@
 
 namespace core::nav {
 
+// The stock layout's modes. With a custom layout (core::layout::Deck) the
+// riding modes are whatever the rider made, still numbered from 0, and DIAG
+// and CONFIG are always the last two: use is_diag() / is_config(), never
+// compare with Mode::Diag or Mode::Config, outside the stock layout's tests.
 enum class Mode : uint8_t { Cruise = 0, Track, Stat, Diag, Config, Count };
 inline constexpr uint8_t kModeCount = static_cast<uint8_t>(Mode::Count);
+// Up to 8 riding modes, plus DIAG and CONFIG.
+inline constexpr uint8_t kMaxModes = 10;
 
 enum class Button : uint8_t { A = 0, B, C, D, E };
 enum class Press  : uint8_t { Short = 0, Long };
@@ -21,10 +27,19 @@ struct InputEvent {
 // How many screens each mode owns. Config always has exactly one: the
 // generated ConfigItem list.
 struct Layout {
+    uint8_t mode_count = kModeCount;
     // DIAG's are its menu and eight pages, reached from the menu rather than
     // walked with B (ui::App).
-    uint8_t screens[kModeCount] = {7, 5, 6, 9, 1};
+    uint8_t screens[kMaxModes] = {7, 5, 6, 9, 1};
 };
+inline constexpr uint8_t kDiagScreens = 9;
+
+inline bool is_diag(const Layout& l, Mode m) {
+    return static_cast<uint8_t>(m) + 2 == l.mode_count;
+}
+inline bool is_config(const Layout& l, Mode m) {
+    return static_cast<uint8_t>(m) + 1 == l.mode_count;
+}
 
 struct State {
     Mode    mode      = Mode::Cruise;

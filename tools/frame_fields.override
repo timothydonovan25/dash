@@ -1,0 +1,121 @@
+# Fixes for tools/frame_fields.py, where a field's name does not say enough.
+#
+#   field  <path>  key=value ...   one field; [] matches any index
+#   prefix <path>  dev=<Dev>       every field under <path> is valid only while
+#                                  that device is working (core::state::Dev)
+#   index  <path>  enum=<Enum>     name an array's elements by an enum
+#   skip   <path>                  leave a field out (say why)
+#
+# keys: caption, unit, dec, q (a core::layout::Quantity), dev, column (the
+# blackbox column name), enum (show this integer field by an enum's names).
+
+# --- validity: which device has to be working ---------------------------------
+prefix gnss            dev=Gnss
+prefix att             dev=Imu
+prefix tpms.front      dev=TpmsF
+prefix tpms.rear       dev=TpmsR
+prefix fused           dev=Imu
+field motion.gps_mph   dev=Gnss
+field motion.front_mph dev=FrontWheel
+field motion.rear_mph  dev=RearWheel
+field engine.tps_pct   dev=Ecu
+field engine.engine_c  dev=Ecu
+field engine.intake_c  dev=Ecu
+field engine.map_kpa   dev=Ecu
+field engine.inj_raw   dev=Ecu
+
+# --- array index names --------------------------------------------------------
+index health.dev       enum=Dev
+index perf.last        enum=Perf::Metric
+index perf.best        enum=Perf::Metric
+
+# --- integer fields that are really enums --------------------------------------
+field heart.link       enum=Heart::Link
+field perf.event       enum=Perf::Metric
+field nav.search       enum=Nav::Search
+field nav.dest[].kind  enum=NavDest::Kind
+
+# --- captions, units and the blackbox column -----------------------------------
+field engine.rpm        caption=RPM q=Rpm unit=rpm column=RPM
+field engine.rpm_peak   caption="PEAK RPM" q=Rpm unit=rpm
+field engine.gear       caption=GEAR column=Gear
+field engine.tps_pct    caption=THROTTLE column=ThrottlePct
+field engine.map_kpa    caption=MAP column=MapKpa
+field engine.engine_c   caption="ENGINE TEMP" column=EngineTempF
+field engine.intake_c   caption="INTAKE TEMP" column=IntakeTempF
+field engine.inj_raw    caption=INJECTOR column=InjRaw
+field engine.shift_mask caption="SHIFT LAMPS" column=ShiftLamps
+field motion.best_mph   caption=SPEED column=MPH
+field motion.front_mph  caption="FRONT WHEEL" column=FrontMPH
+field motion.rear_mph   caption="REAR WHEEL" column=RearMPH
+field motion.gps_mph    caption="GPS SPEED" column=GpsMPH
+field motion.accel_g    caption=ACCEL
+field fused.speed_mph   caption="FUSED SPEED" column=FusedMPH
+field fused.speed_sigma_mph caption="SPEED SIGMA" column=FusedSigma dec=1
+field att.lean_deg      caption=LEAN column=Lean
+field att.pitch_deg     caption=PITCH column=Pitch
+field att.g_vert        caption="G VERT" column=GVert unit=g dec=2
+field att.g_lat         caption="G LAT" unit=g dec=2
+field att.g_lon         caption="G LON" unit=g dec=2
+field att.heading_deg   caption=HEADING column=Heading
+field att.imu_temp_c    caption="IMU TEMP"
+field gnss.lat          caption=LAT column=Latitude dec=6
+field gnss.lon          caption=LON column=Longitude dec=6
+field gnss.alt_m        caption=ALTITUDE column=AltFt
+field gnss.hdop         caption=HDOP column=HDOP dec=1
+field gnss.sats         caption=SATS column=Sats
+field gnss.sats_view   caption="IN VIEW"
+field gnss.snr_best    caption="GPS SIGNAL" unit=dB-Hz
+field gnss.snr_top4    caption="GPS SIG 4" unit=dB-Hz
+field gnss.utc_ms       caption=CLOCK q=Clock column=GpsUtc
+field gnss.course_deg   caption=COURSE
+field gnss.speed_mph    caption="GPS DOPPLER"
+field gnss.year         caption=YEAR
+field trip.odo_mi       caption=ODOMETER dec=0
+field trip.trip_a_mi    caption="TRIP A"
+field trip.trip_b_mi    caption="TRIP B"
+field trip.eng_hours    caption="ENGINE HOURS" unit=h dec=1
+field trip.fuel_used_gal caption="FUEL USED"
+field trip.top_mph      caption="TOP SPEED"
+field lap.current_ms    caption=LAP column=LapTime
+field lap.last_ms       caption="LAST LAP"
+field lap.best_ms       caption="BEST LAP"
+field lap.ideal_ms      caption="IDEAL LAP"
+field lap.delta_ms      caption=DELTA q=Plain unit=s dec=2
+field lap.split_delta_ms caption="SPLIT DELTA" q=Plain unit=s dec=2
+field lap.count         caption=LAPS column=Lap
+field lap.dist_to_line_ft caption="TO LINE"
+field elec.vbat         caption=BATTERY unit=V dec=1 column=Volts
+field battery.rest_v    caption="BATT REST"
+field battery.crank_min_v caption="CRANK MIN"
+field battery.charge_v  caption="CHARGING"
+field heart.bpm         caption=HEART unit=bpm column=HR
+field heart.avg_bpm     caption="HR AVG"
+field heart.max_bpm     caption="HR MAX"
+field nav.to_cue_ft     caption="NEXT TURN" column=NavTurnFt
+field nav.remain_mi     caption="TO GO" column=NavDestMi
+field nav.limit_mph     caption="SPEED LIMIT" column=LimitMPH
+field nav.remain_s      caption="TIME TO GO"
+field nav.cue_road      caption="NEXT ROAD"
+field nav.target        caption=DESTINATION
+field tpms.front.psi    caption="FRONT PSI" column=FrontPsi
+field tpms.rear.psi     caption="REAR PSI" column=RearPsi
+field tpms.front.temp_c caption="FRONT TYRE"
+field tpms.rear.temp_c  caption="REAR TYRE"
+field session.dist_mi   caption="RIDE DIST"
+field session.avg_mph   caption="AVG SPEED"
+field session.top_mph   caption="RIDE TOP"
+field session.moving_s  caption="MOVING"
+field session.engine_s  caption="ENGINE ON"
+field media.title       caption=SONG
+field media.artist      caption=ARTIST
+field media.album       caption=ALBUM
+field media.lyric       caption=LYRIC
+field stunt.total       caption="STUNT SCORE"
+field wifi.pass         caption="WIFI PASSWORD"
+field ota.running_ver   caption=VERSION
+field t_ms              caption=UPTIME q=Duration
+
+# --- not datapoints ------------------------------------------------------------
+# A 64-bit bitmask of which letters can be typed next: a number means nothing.
+skip nav.next

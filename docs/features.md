@@ -41,6 +41,7 @@ how a rider reaches it. Paths are relative to the repo root.
 | `ui/` widgets, `Shadow`, fonts | 4 | `ui::Toast` | 11.2 |
 | `components/doom` | 31.1 | `sim/` | 29 |
 | `tools/`, `mount/` | 30 | `demo_p4/` | 31 |
+| `core/layout`, `ui::CustomScreen`, `services/layout_store` | 36 | `tools/frame_fields.py`, `tools/screens/` | 36 |
 
 ---
 
@@ -80,6 +81,8 @@ how a rider reaches it. Paths are relative to the repo root.
 32. [Release and version management](#32-release-and-version-management)
 33. [Deliberately not here](#33-deliberately-not-here)
 34. [Configuration reference](#34-configuration-reference)
+35. [The ECU link (K-line adapter)](#35-the-ecu-link-k-line-adapter)
+36. [Custom screens and modes](#36-custom-screens-and-modes)
 
 ---
 
@@ -469,7 +472,7 @@ bike only while it is still, reading "parked only" otherwise.
 | Page | Shows |
 |---|---|
 | **SENSORS** | A status dot and state for each device: IMU, GNSS, LED driver, pod, SD, ECU, display, BLE host, phone, TPMS front and rear, front wheel, rear wheel |
-| **GPS** | Fix, fix quality, satellites, HDOP, latitude, longitude, altitude (m), speed, UTC |
+| **GPS** | Fix and its quality, satellites used of those in view, signal strength (2.24.2: strongest and mean of the four strongest, dB-Hz, from GSV; open sky reads in the 40s, a weak aerial in the 20s; "--" with no GSV, as at 10 Hz), HDOP, latitude, longitude, altitude (m), speed, UTC, bad checksums, fused speed and its sources |
 | **FUSION** | Fused road speed and its sigma. For each source (IMU, front wheel, rear wheel, GPS): its reading, its residual, and whether it is used, gated or suspect. Accelerometer bias, the wheel verdicts, filter restarts |
 | **SYSTEM** | Heap free and low-water mark, PSRAM free, the tightest task's stack, uptime, P4 die temperature (1 Hz), IMU temperature, render rate, log rows and drops, the last crash dump (the task, labelled CRASHED if this boot was the crash), SD card state including "safe to pull" after an eject |
 | **POWER** | Supply (bike or USB), VIN, battery volts (with trim), the rest voltage at key-on, cranking low, charging voltage and a verdict (§21) |
@@ -543,7 +546,7 @@ priority:
 | Alert | Trigger |
 |---|---|
 | **No pulse** | The watch, worn this ride, has sent readings with no pulse for 10 s (§24.2) |
-| **Bike down** | Leaned past 70° and below 3 mph |
+| ~~Bike down~~ | Retired in 2.24.0: a crash shows the Crash SOS countdown instead (§35) |
 | **Battery high** | Regulator fault, battery cooking near 16 V |
 | **Battery low** | Engine running and not charging |
 | **Front wheel / Rear wheel** | The speed sensor has gone quiet |
@@ -1020,7 +1023,8 @@ real crash or a real ride.
   SOS: NO PHONE. **E then says "I'm OK"**: the phone texts a false alarm to
   the same contacts, only if the SOS went.
 - **Two switches, both on to text.** CONFIG → Phone → Crash SOS on the dash
-  (on by default; off, there is no countdown, and BIKE DOWN still shows), and
+  (on by default; off, there is no countdown and nothing shows: the BIKE DOWN
+  alert was retired in 2.24.0, a bike on its side alone says nothing), and
   the app's Settings → Crash SOS text (off by default) with SOS contacts
   (numbers, commas between). The app asks for SEND_SMS when it is turned on.
   Settings → Send SOS test text sends a test through the same path.
@@ -1082,6 +1086,7 @@ nothing has joined it or uploaded. `radio-and-updates.md` §11.7.1.
     demo's Doom.
   - **Settings.** Edit every CONFIG item. Each change is a `ConfigSet` that
     `logic` applies.
+  - **Screens** (2.23). A link to the screen editor at `/screens` (§36).
   - **Firmware backup.** Download the slots' images.
 - Wi-Fi is an end-user feature, not a debug channel. Debugging goes over
   USB.
@@ -1308,6 +1313,7 @@ heading it sits under in its CONFIG section, §10).
 | Display | Popups | On / Off | — |
 | Display | 12h clock | On / Off | — |
 | Display | Palette | Standard / Contrast (2.11): Contrast takes the background to true black and the panels darker, and brightens the captions and rules, for a washed-out panel. Mapped in `FrameBufferCanvas` by `ui::theme::palette_color`; screens never see it | — |
+| Display | Stock screens | Action, asks twice (2.23): clears `ui/active` on the card, so the dash shows its built-in screens (§36) | — |
 | Startup | Gauge sweep | On / Off | — |
 | Startup | Sweep time | 500–5000, step 100 | ms |
 | Startup | Splash | On / Off | — |
@@ -1417,3 +1423,80 @@ back to the adapter. The adapter's own firmware is not in this repo yet.
 Code: `core/ecu` (format, decode, link state; `test/test_ecu.cpp`),
 `services/ecu_link` (`EspNowEngine`), `services/wifi_service.cpp` (the
 listening station), `demo_p4/c6_cp/main/dash_espnow.c` (the C6's half).
+
+---
+
+## 36. Custom screens and modes
+
+*Since 2.23. Host-tested and run in the simulator; **not run on the board**.
+The plan and its reasons: `docs/custom-screens.md`.*
+
+The rider can rearrange the riding modes and draw new screens from the
+hotspot page, at `http://192.168.4.1/screens`.
+
+- **Modes.** Up to 8 riding modes, each with up to 12 screens, in any order
+  and under any name. Any built-in riding screen (CRUISE's, TRACK's,
+  STAT's) or custom screen can go in any mode, and in more than one.
+  **DIAG and CONFIG are always the last two modes** and cannot be changed:
+  CONFIG has the Wi-Fi switch, and a layout must never lock the rider out
+  of the page that fixes it. Mode 0 is home: long A and the three quick
+  key-ons go there.
+- **Custom screens.** Up to 16, each with a background, an optional title
+  bar, shapes and up to 16 readouts. Shapes (drawn once per full repaint):
+  line, frame, box, rounded frame, panel, circle, disc, arc, triangle, text
+  (the 5×7 font at any scale), the dash's icons, and 1-bit images from a
+  PNG (up to 64×64, 4 kB in all). Readouts (widgets, repainted when their
+  value changes): value (caption, value, unit), big, text, bar, arc gauge,
+  lamp, trace (the last 12 s). Each has an ink and a ground colour, a range,
+  and warn/alarm limits (above, or below for a battery or a tyre) that turn
+  it amber or red. Colours are the theme's, so CONFIG → Palette still
+  applies, or any RGB565.
+- **Every datapoint.** A readout can show any field of the Frame: 521 of
+  them, every number, flag, enum and string, by name (`engine.rpm`,
+  `tpms.front.psi`, `health.dev[Gnss].state`). The table is generated from
+  the Frame's headers by `tools/frame_fields.py`; ctest `frame_fields`
+  fails if a field was added and the table not regenerated. Units follow
+  CONFIG → Units; a missing reading shows `--`. Field ids are permanent
+  (`components/core/layout_fields.ids`).
+- **Short E** on a custom screen runs one CONFIG action chosen in the
+  editor (Reset trip A, Clear laps, Test lamps ...). One that loses
+  something asks for E twice, with `E AGAIN: ...` along the bottom; any
+  other button cancels.
+- **The editor** (`components/services/web/screens.html`, embedded in the
+  image) is laid out like Lopaka: tools on the left, the 480×320 glass in
+  the middle with zoom, snap and grid, screens, layers and properties on the
+  right, a Modes tab. Draw by dragging; move, resize with the corner handle,
+  arrow keys nudge (Shift ×10), Delete, Ctrl+D duplicates, Ctrl+Z / Ctrl+Y.
+  Text and icons preview pixel for pixel; the dash smooths its big digits,
+  the editor does not. The readouts show the bike's own values, polled from
+  `/api/values` twice a second.
+- **Live.** With Live on, each edit goes to the dash 300 ms after the last
+  one and shows on the glass at once, on the screen being edited, unsaved.
+  It ends on Save, on Live off, or after 30 s without an edit; the dash then
+  goes back to the card's layout.
+- **On the card.** Layouts are `ui/<name>.dui` files; `ui/active` names the
+  one in use. The page lists, opens, saves (through a `.tmp`, renamed),
+  downloads, uploads, deletes and activates them. **No card, no active file,
+  or a file that does not check out: the stock layout**, which is compiled
+  in. A refused file shows `LAYOUT REFUSED` and why along the bottom. A card
+  pulled while running changes nothing until key-off. CONFIG → Display →
+  Stock screens clears `ui/active` from the pod.
+- **Checked twice.** Every deck from the page or the card goes through
+  `core::layout::decode` (CRC, limits, names) and `validate`: no readout off
+  the glass or under the title, no two readouts overlapping, and **no shape
+  crossing a readout** unless it holds it whole (a panel behind a value) --
+  a readout repaints its whole box, so anything under it would be wiped on
+  the first change. The page runs the same checks as you draw and marks the
+  offender in red.
+
+Code: `core/layout` (deck, format, validation, the generated field table;
+`test/test_layout.cpp`), `ui::CustomScreen` and `ui::ReadoutWidget`
+(`components/ui/src/screen_custom.cpp`; `test/test_custom.cpp`),
+`services/layout_store` (the card, the hand-over to `render`;
+`test/test_layout_store.cpp`), `services/editor_info` (the editor's JSON),
+`wifi_service.cpp` (`/screens`, `/api/fields`, `/api/values`, `/api/draft`,
+`/api/ui`, `/ui/*`). On the laptop: the simulator reads `sim_card/ui/`
+(`layout reload`, `layout draft <file>`, `layout end` on its stdin), and
+`tools/screens/dev_server.py` serves the editor against it, checking each
+file with `build-host/screens_json`.
+

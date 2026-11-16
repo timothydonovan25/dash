@@ -86,28 +86,19 @@ int main() {
         auto both = [](Frame& f) {
             f.health[Dev::LedDriver].state = DevState::Fault;
             f.health[Dev::Sd].state = DevState::Fault;
-            f.att.lean_deg = -85.0f;
-            f.motion.best_mph = 0.0f;
+            f.elec.vbat = 17.0f;
         };
-        CHECK(run(a, 0, 4000, both) == Kind::BikeDown);
+        CHECK(run(a, 0, 4000, both) == Kind::BatteryHigh);
         a.acknowledge();
         CHECK(run(a, 4000, 200, both) == Kind::SdCard);                  // before ShiftLamps in the order
         a.acknowledge();
         CHECK(run(a, 4200, 200, both) == Kind::ShiftLamps);
     }
 
-    CASE("bike down needs the lean AND stillness AND a working IMU");
+    CASE("a bike on its side says nothing: a crash is core::crash's countdown");
     {
         Alerter a;
-        CHECK(run(a, 0, 5000, [](Frame& f) { f.att.lean_deg = 75; f.motion.best_mph = 40; }) == Kind::None);
-        Alerter b;
-        CHECK(run(b, 0, 5000, [](Frame& f) { f.att.lean_deg = 40; f.motion.best_mph = 0; }) == Kind::None);
-        Alerter c;
-        CHECK(run(c, 0, 5000, [](Frame& f) { f.att.lean_deg = 75; f.health[Dev::Imu].state = DevState::Fault; })
-              == Kind::Imu);   // the IMU fault shows; the dead IMU's lean is not believed
-        Alerter d;
-        CHECK(run(d, 0, 1000, [](Frame& f) { f.att.lean_deg = 75; }) == Kind::None);   // a wheelie recovery
-        CHECK(run(d, 1000, 2000, [](Frame& f) { f.att.lean_deg = 75; }) == Kind::BikeDown);
+        CHECK(run(a, 0, 10000, [](Frame& f) { f.att.lean_deg = 85; f.motion.best_mph = 0; }) == Kind::None);
     }
 
     CASE("a low battery means something only when the engine should be charging");

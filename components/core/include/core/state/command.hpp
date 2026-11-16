@@ -57,6 +57,7 @@ enum class CommandId : uint8_t {
     EngHoursSet,      // f: hours. Console `hours`
     TpmsLearnFront,   // CONFIG -> TPMS: the next new sensor is the front's (core/tpms)
     TpmsLearnRear,
+    LayoutStock,      // CONFIG -> Display -> Stock screens: no custom layout (docs/custom-screens.md)
 };
 
 struct Command {
