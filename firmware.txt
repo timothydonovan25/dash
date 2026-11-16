@@ -10,4 +10,4 @@
 # Every build is also copied to releases/ at the repo root, which keeps them
 # all; a rebuild of the same version on the same day replaces its file.
 version 2.22
-feature config sections
+feature led diag 100k

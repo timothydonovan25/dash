@@ -137,7 +137,7 @@ inline constexpr int kPodPollHz      = 200;
 // an eFuse nobody has burnt says so; the pull-up holds it high harmlessly.
 inline constexpr int kLedSda         = 34;   // U16-53
 inline constexpr int kLedScl         = 0;    // U16-76
-inline constexpr int kLedI2cHz       = 1'000'000;
+inline constexpr int kLedI2cHz       = 100'000;   // DIAGNOSTIC build: 1 MHz and 400 kHz both failed intermittently on board C2:03
 inline constexpr uint8_t kLedAddr    = 0x15;   // AD2,AD1,AD0 = GND,VDD,GND
 
 // REXT = 1.91 kΩ: full scale is 255 × 0.225 / 1.91 = 30.0 mA on every

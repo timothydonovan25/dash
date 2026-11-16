@@ -10,6 +10,10 @@
 #include "services/services.hpp"
 
 #include "bsp/pins.hpp"
+#include "drivers/pca9955b.hpp"
+#include "esp_timer.h"
+#include "soc/gpio_reg.h"
+#include "soc/soc.h"
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "sdkconfig.h"
@@ -117,6 +121,43 @@ ConsoleArg g_console_arg;
 
 void handle(const char* line, ui::ICommandSink& commands, const services::Deps& deps) {
     if (c6_line(line)) return;
+    // DIAGNOSTIC (branch led-diag): the LED driver's transfer counts, a bus
+    // probe and the chip's status registers.
+    // DIAGNOSTIC: the GPS RX pin (GPIO2, U16-5) for one second, from the GPIO
+    // input register: steady high = line idle (the receiver silent), steady
+    // low = held down, edges = something talking.
+    if (std::strcmp(line, "gps pins") == 0) {
+        auto rx = [] { return static_cast<int>((REG_READ(GPIO_IN_REG) >> bsp::kGpsRx) & 1u); };
+        int low = 0, edges = 0, prev = rx();
+        const int64_t t0 = esp_timer_get_time();
+        int n = 0;
+        while (esp_timer_get_time() - t0 < 1000000) {
+            const int v = rx();
+            low += !v;
+            edges += v != prev;
+            prev = v;
+            ++n;
+        }
+        std::printf("gps: RX (GPIO%d) over 1 s: %d samples, low %d, edges %d; TX (GPIO%d) reads %d\n",
+                    bsp::kGpsRx, n, low, edges, bsp::kGpsTx,
+                    static_cast<int>((REG_READ(GPIO_IN_REG) >> bsp::kGpsTx) & 1u));
+        std::fflush(stdout);
+        return;
+    }
+    if (std::strcmp(line, "led drive") == 0 && deps.lamps) {
+        static char buf[320];
+        static_cast<drivers::Pca9955b*>(deps.lamps)->diag_drive(buf, sizeof buf);
+        std::fputs(buf, stdout);
+        std::fflush(stdout);
+        return;
+    }
+    if (std::strcmp(line, "led") == 0 && deps.lamps) {
+        static char buf[640];
+        static_cast<drivers::Pca9955b*>(deps.lamps)->diag_report(buf, sizeof buf);
+        std::fputs(buf, stdout);
+        std::fflush(stdout);
+        return;
+    }
     if (std::strcmp(line, "screen") == 0) {
         send_screen(deps);
         return;

@@ -37,6 +37,15 @@ public:
     // Full configuration, every output at zero duty. Adds the device to the
     // bus the first time.
     hal::Status init() override;
+
+    // DIAGNOSTIC BUILD (branch led-diag): what every transfer came back
+    // with, and a probe of the bus and the chip's own status registers, for
+    // the console's `led`. Counting costs `ctrl` a few cycles; it never logs.
+    void diag_report(char* buf, size_t n);
+    // DIAGNOSTIC: drive BOOT (GPIO35) high for 10 us and read it and SDA
+    // back (a short to ground, or a bridge to SDA?), then a 9-clock bus
+    // reset and SDA sampled again (a part holding SDA low?).
+    void diag_drive(char* buf, size_t n);
     hal::Status set_mask(uint8_t mask) override;
     hal::Status set_master(uint8_t percent) override;
 
